@@ -1,7 +1,7 @@
 import mongoose, { Schema, Document } from 'mongoose';
 import { ISection } from '../types/hierarchy.types';
 
-export interface ISectionDocument extends ISection, Document {}
+export interface ISectionDocument extends Omit<ISection, '_id'>, Document {} 
 
 const SectionSchema: Schema = new Schema(
   {

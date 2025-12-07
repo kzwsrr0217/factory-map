@@ -1,7 +1,7 @@
 /**
  * Asset Types
  */
-
+import { Types } from 'mongoose';
 import { ICoordinates } from './hierarchy.types';
 
 export interface IAssetITSM {
@@ -99,7 +99,7 @@ export interface IAssetHierarchy {
 }
 
 export interface IAsset {
-  _id?: string;
+  _id?: Types.ObjectId | string;
   hierarchy: IAssetHierarchy;
   itsm: IAssetITSM;
   basic_info: IAssetBasicInfo;

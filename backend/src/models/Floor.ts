@@ -1,7 +1,7 @@
 import mongoose, { Schema, Document } from 'mongoose';
 import { IFloor } from '../types/hierarchy.types';
 
-export interface IFloorDocument extends IFloor, Document {}
+export interface IFloorDocument extends Omit<IFloor, '_id'>, Document {}  
 
 const FloorSchema: Schema = new Schema(
   {

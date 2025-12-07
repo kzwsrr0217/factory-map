@@ -1,3 +1,5 @@
+import { Types } from 'mongoose';
+
 /**
  * Hierarchy Types
  * Building → Floor → WorkArea → Section → Workstation
@@ -9,7 +11,7 @@ export interface ICoordinates {
 }
 
 export interface IBuilding {
-  _id?: string;
+  _id?: Types.ObjectId | string;
   name: string;
   address?: string;
   metadata?: {
@@ -22,7 +24,7 @@ export interface IBuilding {
 }
 
 export interface IFloor {
-  _id?: string;
+  _id?: Types.ObjectId | string;
   building_id: string;
   floor_number: number;
   name: string;
@@ -38,7 +40,7 @@ export interface IFloor {
 }
 
 export interface IWorkArea {
-  _id?: string;
+  _id?: Types.ObjectId | string;  
   floor_id: string;
   name: string;
   type: string; // e.g., "production", "office", "warehouse"
@@ -51,7 +53,7 @@ export interface IWorkArea {
 }
 
 export interface ISection {
-  _id?: string;
+  _id?: Types.ObjectId | string;
   workarea_id: string;
   name: string;
   coordinates: ICoordinates;
@@ -62,7 +64,7 @@ export interface ISection {
 }
 
 export interface IWorkstation {
-  _id?: string;
+  _id?: Types.ObjectId | string;
   section_id: string;
   name: string;
   coordinates: ICoordinates;

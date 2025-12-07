@@ -1,7 +1,7 @@
 import mongoose, { Schema, Document } from 'mongoose';
 import { IBuilding } from '../types/hierarchy.types';
 
-export interface IBuildingDocument extends IBuilding, Document {}
+export interface IBuildingDocument extends Omit<IBuilding, '_id'>, Document {}  
 
 const BuildingSchema: Schema = new Schema(
   {

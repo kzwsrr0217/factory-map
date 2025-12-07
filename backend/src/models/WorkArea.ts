@@ -1,7 +1,7 @@
 import mongoose, { Schema, Document } from 'mongoose';
 import { IWorkArea } from '../types/hierarchy.types';
 
-export interface IWorkAreaDocument extends IWorkArea, Document {}
+export interface IWorkAreaDocument extends Omit<IWorkArea, '_id'>, Document {}  
 
 const WorkAreaSchema: Schema = new Schema(
   {

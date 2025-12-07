@@ -1,7 +1,7 @@
 import mongoose, { Schema, Document } from 'mongoose';
 import { IWorkstation } from '../types/hierarchy.types';
 
-export interface IWorkstationDocument extends IWorkstation, Document {}
+export interface IWorkstationDocument extends Omit<IWorkstation, '_id'>, Document {}  
 
 const WorkstationSchema: Schema = new Schema(
   {

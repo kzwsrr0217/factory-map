@@ -1,7 +1,7 @@
 import mongoose, { Schema, Document } from 'mongoose';
 import { IAsset } from '../types/asset.types';
 
-export interface IAssetDocument extends IAsset, Document {}
+export interface IAssetDocument extends Omit<IAsset, '_id'>, Document {}  
 
 const AssetSchema: Schema = new Schema(
   {
