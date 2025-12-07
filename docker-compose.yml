@@ -1,0 +1,83 @@
+version: '3.8'
+
+services:
+  # MongoDB Database
+  mongo:
+    image: mongo:7
+    container_name: factorymap-mongo
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGODB_USER}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGODB_PASSWORD}
+      MONGO_INITDB_DATABASE: factorymap
+    volumes:
+      - mongo_data:/data/db
+    ports:
+      - "27017:27017"
+    networks:
+      - factorymap-network
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Backend API (Node.js + Express + TypeScript)
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: factorymap-backend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: ${NODE_ENV}
+      PORT: ${BACKEND_PORT}
+      MONGODB_URI: ${MONGODB_URI}
+      JWT_SECRET: ${JWT_SECRET}
+      ITSM_MODE: ${ITSM_MODE}
+      ITSM_MOCK_API_URL: ${ITSM_MOCK_API_URL}
+      ITSM_REAL_API_URL: ${ITSM_REAL_API_URL}
+      ITSM_API_KEY: ${ITSM_API_KEY}
+      ITSM_SYNC_INTERVAL: ${ITSM_SYNC_INTERVAL}
+    volumes:
+      - ./backend/src:/app/src
+      - /app/node_modules
+    ports:
+      - "${BACKEND_PORT}:${BACKEND_PORT}"
+    depends_on:
+      mongo:
+        condition: service_healthy
+    networks:
+      - factorymap-network
+    command: npm run dev
+
+  # Frontend (React + TypeScript)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: factorymap-frontend
+    restart: unless-stopped
+    environment:
+      REACT_APP_API_URL: ${REACT_APP_API_URL}
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/public:/app/public
+      - /app/node_modules
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    networks:
+      - factorymap-network
+    stdin_open: true
+    tty: true
+    command: npm start
+
+volumes:
+  mongo_data:
+    driver: local
+
+networks:
+  factorymap-network:
+    driver: bridge
