@@ -6,10 +6,10 @@ services:
     image: mongo:7
     container_name: factorymap-mongo
     restart: unless-stopped
-    environment:
-      MONGO_INITDB_ROOT_USERNAME: ${MONGODB_USER}
-      MONGO_INITDB_ROOT_PASSWORD: ${MONGODB_PASSWORD}
-      MONGO_INITDB_DATABASE: factorymap
+    ##environment:
+    ##  MONGO_INITDB_ROOT_USERNAME: ${MONGODB_USER}
+    ##  MONGO_INITDB_ROOT_PASSWORD: ${MONGODB_PASSWORD}
+    ##  MONGO_INITDB_DATABASE: factorymap
     volumes:
       - mongo_data:/data/db
     ports:
