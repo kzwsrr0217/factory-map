@@ -1,0 +1,25 @@
+{
+  "name": "factory-map",
+  "version": "1.0.0",
+  "description": "Factory Map - Full Stack Application",
+  "private": true,
+  "scripts": {
+    "dev": "docker-compose up",
+    "dev:build": "docker-compose up --build",
+    "down": "docker-compose down",
+    "logs": "docker-compose logs -f",
+    "logs:backend": "docker-compose logs -f backend",
+    "logs:frontend": "docker-compose logs -f frontend",
+    "seed": "docker-compose exec backend npm run seed",
+    "backend:shell": "docker-compose exec backend sh",
+    "mongo:shell": "docker-compose exec mongo mongosh factorymap"
+  },
+  "keywords": [
+    "factory-map",
+    "asset-management",
+    "docker",
+    "typescript"
+  ],
+  "author": "",
+  "license": "UNLICENSED"
+}

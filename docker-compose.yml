@@ -39,6 +39,7 @@ services:
       ITSM_REAL_API_URL: ${ITSM_REAL_API_URL}
       ITSM_API_KEY: ${ITSM_API_KEY}
       ITSM_SYNC_INTERVAL: ${ITSM_SYNC_INTERVAL}
+      DOCKER_ENV: "true"  # <-- ÚJ SOR!
     volumes:
       - ./backend/src:/app/src
       - /app/node_modules
@@ -50,7 +51,7 @@ services:
     networks:
       - factorymap-network
     command: npm run dev
-
+    
   # Frontend (React + TypeScript)
   frontend:
     build:

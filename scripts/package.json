@@ -1,0 +1,17 @@
+{
+  "name": "factory-map-scripts",
+  "version": "1.0.0",
+  "description": "Utility scripts for Factory Map",
+  "scripts": {
+    "seed": "ts-node seed-database.ts"
+  },
+  "dependencies": {
+    "mongoose": "^8.0.3",
+    "dotenv": "^16.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.6",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.3"
+  }
+}
