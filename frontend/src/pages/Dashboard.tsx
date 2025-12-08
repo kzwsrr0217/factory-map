@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import Card from '../components/common/Card';
 import Badge from '../components/common/Badge';
 import Table from '../components/common/Table';
+import AssetDetailsModal from '../components/asset/AssetDetailsModal';
 import { hierarchyService, Building } from '../services/hierarchy.service';
 import { assetService, Asset } from '../services/asset.service';
 import styles from '../styles/pages/Dashboard.module.css';
@@ -10,6 +11,8 @@ const Dashboard: React.FC = () => {
   const [buildings, setBuildings] = useState<Building[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);  // ← ÚJ
+  const [modalOpen, setModalOpen] = useState(false);  // ← ÚJ
 
   useEffect(() => {
     loadData();
@@ -29,6 +32,18 @@ const Dashboard: React.FC = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  // ← ÚJ: Handle row click
+  const handleRowClick = (asset: Asset) => {
+    setSelectedAsset(asset);
+    setModalOpen(true);
+  };
+
+  // ← ÚJ: Close modal
+  const handleCloseModal = () => {
+    setModalOpen(false);
+    setSelectedAsset(null);
   };
 
   const columns = [
@@ -126,9 +141,16 @@ const Dashboard: React.FC = () => {
           columns={columns}
           data={assets}
           loading={loading}
-          onRowClick={(asset) => console.log('Clicked:', asset)}
+          onRowClick={handleRowClick}
         />
       </Card>
+
+      {/* Asset Details Modal */}
+      <AssetDetailsModal
+        asset={selectedAsset}
+        isOpen={modalOpen}
+        onClose={handleCloseModal}
+      />
     </div>
   );
 };

@@ -1,0 +1,99 @@
+.container {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xl);
+}
+
+.itsmBanner {
+  background: var(--color-success-light);
+  border: 1px solid var(--color-success);
+}
+
+.bannerContent {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-lg);
+}
+
+.bannerText {
+  margin-top: var(--spacing-sm);
+  color: var(--color-gray-700);
+  font-size: var(--font-size-sm);
+}
+
+.syncTime {
+  margin-top: var(--spacing-xs);
+  color: var(--color-gray-600);
+  font-size: var(--font-size-xs);
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+.sectionTitle {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-gray-900);
+  margin: 0;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--spacing-lg);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.field label {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-gray-600);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.field p {
+  font-size: var(--font-size-base);
+  color: var(--color-gray-900);
+  margin: 0;
+}
+
+.personCard {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-lg);
+}
+
+.personAvatar {
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius-full);
+  background: var(--color-primary);
+  color: var(--color-white);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-bold);
+}
+
+.personName {
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-gray-900);
+  margin: 0;
+}
+
+.personId {
+  font-size: var(--font-size-sm);
+  color: var(--color-gray-600);
+  margin: var(--spacing-xs) 0 0 0;
+}
