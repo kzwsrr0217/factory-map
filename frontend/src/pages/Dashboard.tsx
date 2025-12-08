@@ -9,10 +9,12 @@ import AssetDetailsModal from '../components/asset/AssetDetailsModal';
 import { hierarchyService, Building } from '../services/hierarchy.service';
 import { assetService, Asset } from '../services/asset.service';
 import styles from '../styles/pages/Dashboard.module.css';
+import { useNavigate } from 'react-router-dom';
 
 type FilterType = 'all' | 'itsm' | 'manual';
 
 const Dashboard: React.FC = () => {
+  const navigate = useNavigate();
   const [buildings, setBuildings] = useState<Building[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
   const [loading, setLoading] = useState(true);
@@ -83,10 +85,12 @@ const Dashboard: React.FC = () => {
     };
   }, [assets]);
 
-  const handleRowClick = (asset: Asset) => {
-    setSelectedAsset(asset);
-    setModalOpen(true);
-  };
+
+
+// Cseréld le erre (vagy add hozzá mellé):
+const handleRowClick = (asset: Asset) => {
+  navigate(`/assets/${asset._id}`);  // ← Navigál az asset details oldalra
+};
 
   const handleCloseModal = () => {
     setModalOpen(false);

@@ -24,19 +24,49 @@ export interface Asset {
     status?: string;
     os_type?: string;
     os_version?: string;
+    mac_address?: string;  // ← HOZZÁADVA
+  };
+  technical_specs?: {  // ← HOZZÁADVA
+    cpu?: string;
+    ram?: string;
+    storage?: string;
+    gpu?: string;
+  };
+  network?: {  // ← HOZZÁADVA
+    ip_address?: string;
+    hostname?: string;
+    vlan?: string;
+    switch_port?: string;
   };
   assigned_person?: {
     person_id: string;
     full_name: string;
   };
+  software?: Array<{  // ← HOZZÁADVA
+    software_id: string | null;
+    display_name: string;
+    vendor?: string;
+    version?: string;
+    source: 'itsm' | 'manual';
+  }>;
   location: {
     coordinates: { x: number; y: number };
+    rotation?: number;  // ← HOZZÁADVA
+    icon_type?: string;  // ← HOZZÁADVA
     description?: string;
   };
+  custom_fields?: {  // ← HOZZÁADVA
+    physical_condition?: 'Good' | 'Fair' | 'Poor';
+    environment?: string;
+    notes?: string;
+    tags?: string[];
+  };
+  created_at?: string;
+  updated_at?: string;
 }
 
 export const assetService = {
-  // Get all assets (would need pagination in real app)
+  // Get all assets
   getAssets: async (): Promise<Asset[]> => {
     const response = await api.get('/assets');
     return response.data.data;

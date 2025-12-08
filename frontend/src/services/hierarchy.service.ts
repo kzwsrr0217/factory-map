@@ -4,7 +4,11 @@ export interface Building {
   _id: string;
   name: string;
   address?: string;
-  metadata?: any;
+  metadata?: {
+    total_area?: number;
+    construction_year?: number;
+    [key: string]: any;
+  };
   created_at?: string;
   updated_at?: string;
 }
@@ -26,5 +30,16 @@ export const hierarchyService = {
   createBuilding: async (data: Partial<Building>): Promise<Building> => {
     const response = await api.post('/buildings', data);
     return response.data.data;
+  },
+
+  // Update building
+  updateBuilding: async (id: string, data: Partial<Building>): Promise<Building> => {
+    const response = await api.patch(`/buildings/${id}`, data);
+    return response.data.data;
+  },
+
+  // Delete building
+  deleteBuilding: async (id: string): Promise<void> => {
+    await api.delete(`/buildings/${id}`);
   },
 };

@@ -1,12 +1,17 @@
 import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import Card from '../components/common/Card';
 import Button from '../components/common/Button';
+import BuildingFormModal from '../components/building/BuildingFormModal';
 import { hierarchyService, Building } from '../services/hierarchy.service';
 import styles from '../styles/pages/Buildings.module.css';
 
 const Buildings: React.FC = () => {
+  const navigate = useNavigate();
   const [buildings, setBuildings] = useState<Building[]>([]);
   const [loading, setLoading] = useState(true);
+  const [formOpen, setFormOpen] = useState(false);  // ← ÚJ
+  const [editingBuilding, setEditingBuilding] = useState<Building | null>(null);  // ← ÚJ
 
   useEffect(() => {
     loadBuildings();
@@ -22,6 +27,15 @@ const Buildings: React.FC = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleAddClick = () => {  // ← ÚJ
+    setEditingBuilding(null);
+    setFormOpen(true);
+  };
+
+  const handleFormSuccess = () => {  // ← ÚJ
+    loadBuildings();
   };
 
   if (loading) {
@@ -40,7 +54,7 @@ const Buildings: React.FC = () => {
           <h1>Buildings</h1>
           <p className={styles.subtitle}>Manage your factory buildings and locations</p>
         </div>
-        <Button variant="primary" onClick={() => alert('Add building - coming soon!')}>
+        <Button variant="primary" onClick={handleAddClick}>
           + Add Building
         </Button>
       </div>
@@ -51,7 +65,7 @@ const Buildings: React.FC = () => {
             key={building._id}
             padding="lg"
             hoverable
-            onClick={() => alert(`View building: ${building.name}`)}
+            onClick={() => navigate(`/buildings/${building._id}`)}
           >
             <div className={styles.buildingCard}>
               <div className={styles.buildingIcon}>🏢</div>
@@ -82,12 +96,20 @@ const Buildings: React.FC = () => {
             <div className={styles.emptyIcon}>🏢</div>
             <h3>No buildings found</h3>
             <p>Get started by adding your first building</p>
-            <Button variant="primary" onClick={() => alert('Add building - coming soon!')}>
+            <Button variant="primary" onClick={handleAddClick}>
               + Add Building
             </Button>
           </div>
         </Card>
       )}
+
+      {/* Building Form Modal */}
+      <BuildingFormModal
+        isOpen={formOpen}
+        onClose={() => setFormOpen(false)}
+        onSuccess={handleFormSuccess}
+        building={editingBuilding}
+      />
     </div>
   );
 };
