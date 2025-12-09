@@ -51,7 +51,7 @@ app.get('/health', (_req: Request, res: Response) => {
 // ==========================================
 
 app.get('/api', (_req: Request, res: Response) => {
-    res.json({
+  res.json({
     message: 'Factory Map API',
     version: '1.0.0',
     itsm_mode: config.itsm.mode,
@@ -59,6 +59,7 @@ app.get('/api', (_req: Request, res: Response) => {
       health: '/health',
       api: '/api',
       buildings: '/api/buildings',
+      assets: '/api/assets',  // ← ÚJ
       itsm: '/api/itsm',
     },
   });

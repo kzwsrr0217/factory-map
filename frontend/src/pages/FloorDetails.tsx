@@ -3,6 +3,8 @@ import { useParams, useNavigate } from 'react-router-dom';
 import Card from '../components/common/Card';
 import Button from '../components/common/Button';
 import Badge from '../components/common/Badge';
+import ConfirmDialog from '../components/common/ConfirmDialog';
+import WorkAreaFormModal from '../components/workarea/WorkAreaFormModal';
 import { floorService, Floor } from '../services/floor.service';
 import { workareaService, WorkArea } from '../services/workarea.service';
 import { assetService, Asset } from '../services/asset.service';
@@ -16,6 +18,13 @@ const FloorDetails: React.FC = () => {
   const [workareas, setWorkareas] = useState<WorkArea[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
   const [loading, setLoading] = useState(true);
+  
+  // WorkArea modal states
+  const [workareaFormOpen, setWorkareaFormOpen] = useState(false);
+  const [editingWorkarea, setEditingWorkarea] = useState<WorkArea | null>(null);
+  const [deletingWorkarea, setDeletingWorkarea] = useState<WorkArea | null>(null);
+  const [deleteWorkareaDialogOpen, setDeleteWorkareaDialogOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     if (id) {
@@ -44,6 +53,49 @@ const FloorDetails: React.FC = () => {
       console.error('Error loading floor details:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // WorkArea handlers
+  const handleAddWorkArea = () => {
+    setEditingWorkarea(null);
+    setWorkareaFormOpen(true);
+  };
+
+  const handleEditWorkArea = (workarea: WorkArea, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditingWorkarea(workarea);
+    setWorkareaFormOpen(true);
+  };
+
+  const handleDeleteWorkArea = (workarea: WorkArea, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setDeletingWorkarea(workarea);
+    setDeleteWorkareaDialogOpen(true);
+  };
+
+  const confirmDeleteWorkArea = async () => {
+    if (!deletingWorkarea) return;
+
+    setDeleting(true);
+    try {
+      await workareaService.deleteWorkArea(deletingWorkarea._id);
+      if (id) {
+        loadFloorDetails(id);
+      }
+    } catch (error) {
+      console.error('Error deleting work area:', error);
+      alert('Failed to delete work area. Please try again.');
+    } finally {
+      setDeleting(false);
+      setDeleteWorkareaDialogOpen(false);
+      setDeletingWorkarea(null);
+    }
+  };
+
+  const handleWorkareaFormSuccess = () => {
+    if (id) {
+      loadFloorDetails(id);
     }
   };
 
@@ -146,7 +198,7 @@ const FloorDetails: React.FC = () => {
       <Card padding="lg">
         <div className={styles.sectionHeader}>
           <h2>Work Areas</h2>
-          <Button variant="primary" onClick={() => alert('Add work area - Coming soon!')}>
+          <Button variant="primary" onClick={handleAddWorkArea}>
             + Add Work Area
           </Button>
         </div>
@@ -157,34 +209,40 @@ const FloorDetails: React.FC = () => {
               <div
                 key={workarea._id}
                 className={styles.workareaItem}
-                onClick={() => alert(`Work area: ${workarea.name}`)}
+                onClick={() => alert(`Work area details: ${workarea.name}`)}
               >
                 <div className={styles.workareaIcon}>🏭</div>
                 <div className={styles.workareaInfo}>
                   <h4 className={styles.workareaName}>{workarea.name}</h4>
-                  {workarea.type && (
-                    <p className={styles.workareaDetails}>Type: {workarea.type}</p>
-                  )}
-                  {workarea.metadata?.capacity && (
-                    <p className={styles.workareaDetails}>
-                      Capacity: {workarea.metadata.capacity} people
-                    </p>
-                  )}
+                  <p className={styles.workareaDetails}>
+                    {workarea.type && `Type: ${workarea.type}`}
+                    {workarea.metadata?.capacity && ` • Capacity: ${workarea.metadata.capacity}`}
+                    {workarea.metadata?.supervisor && ` • Supervisor: ${workarea.metadata.supervisor}`}
+                  </p>
                 </div>
-                <Badge variant="info">
-                  {/* Count sections/workstations later */}
-                  View Details
-                </Badge>
+                <div className={styles.workareaActions}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={(e) => handleEditWorkArea(workarea, e)}
+                  >
+                    Edit
+                  </Button>
+                  <Button
+                    variant="danger"
+                    size="sm"
+                    onClick={(e) => handleDeleteWorkArea(workarea, e)}
+                  >
+                    Delete
+                  </Button>
+                </div>
               </div>
             ))}
           </div>
         ) : (
           <div className={styles.emptyWorkareas}>
             <p>No work areas found on this floor</p>
-            <Button
-              variant="primary"
-              onClick={() => alert('Add work area - Coming soon!')}
-            >
+            <Button variant="primary" onClick={handleAddWorkArea}>
               + Add First Work Area
             </Button>
           </div>
@@ -224,6 +282,27 @@ const FloorDetails: React.FC = () => {
           </div>
         )}
       </Card>
+
+      {/* WorkArea Form Modal */}
+      <WorkAreaFormModal
+        isOpen={workareaFormOpen}
+        onClose={() => setWorkareaFormOpen(false)}
+        onSuccess={handleWorkareaFormSuccess}
+        floorId={id || ''}
+        workarea={editingWorkarea}
+      />
+
+      {/* Delete WorkArea Confirmation */}
+      <ConfirmDialog
+        isOpen={deleteWorkareaDialogOpen}
+        onClose={() => setDeleteWorkareaDialogOpen(false)}
+        onConfirm={confirmDeleteWorkArea}
+        title="Delete Work Area"
+        message={`Are you sure you want to delete "${deletingWorkarea?.name}"? This action cannot be undone.`}
+        confirmText="Delete"
+        loading={deleting}
+        variant="danger"
+      />
     </div>
   );
 };

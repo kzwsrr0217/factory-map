@@ -1,53 +1,48 @@
 import mongoose, { Schema, Document } from 'mongoose';
-import { IWorkArea } from '../types/hierarchy.types';
 
-export interface IWorkAreaDocument extends Omit<IWorkArea, '_id'>, Document {}  
+export interface IWorkArea extends Document {
+  floor_id: mongoose.Types.ObjectId;
+  name: string;
+  type?: string;
+  coordinates?: {
+    x: number;
+    y: number;
+  };
+  metadata?: {
+    supervisor?: string;
+    capacity?: number;
+    [key: string]: any;
+  };
+  created_at: Date;
+  updated_at: Date;
+}
 
 const WorkAreaSchema: Schema = new Schema(
   {
     floor_id: {
       type: Schema.Types.ObjectId,
       ref: 'Floor',
-      required: [true, 'Floor ID is required'],
+      required: true,
     },
     name: {
       type: String,
-      required: [true, 'Work area name is required'],
-      trim: true,
-      maxlength: [200, 'Work area name cannot exceed 200 characters'],
+      required: true,
     },
     type: {
       type: String,
-      required: [true, 'Work area type is required'],
-      trim: true,
     },
-    svg_zone_id: {
-      type: String,
-      trim: true,
+    coordinates: {
+      x: { type: Number, default: 0 },
+      y: { type: Number, default: 0 },
     },
-    polygon_coordinates: [
-      {
-        x: Number,
-        y: Number,
-      },
-    ],
-    color: {
-      type: String,
-      trim: true,
-    },
-    manager: {
-      type: String,
-      trim: true,
+    metadata: {
+      type: Schema.Types.Mixed,  // ← Ez kell!
+      default: {},
     },
   },
   {
     timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' },
-    collection: 'workareas',
   }
 );
 
-// Indexes
-WorkAreaSchema.index({ floor_id: 1 });
-WorkAreaSchema.index({ name: 1 });
-
-export default mongoose.model<IWorkAreaDocument>('WorkArea', WorkAreaSchema);
+export default mongoose.model<IWorkArea>('WorkArea', WorkAreaSchema);

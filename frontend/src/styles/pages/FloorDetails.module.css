@@ -263,3 +263,9 @@
   text-align: center;
   color: var(--color-gray-500);
 }
+
+.workareaActions {
+  display: flex;
+  gap: var(--spacing-sm);
+  flex-shrink: 0;
+}

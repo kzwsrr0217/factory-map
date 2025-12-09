@@ -1,13 +1,20 @@
-// src/routes/asset.routes.ts
 import { Router } from 'express';
-import { getAllAssets, getAssetById } from '../controllers/asset.controller';
+import {
+  getAllAssets,
+  getAssetById,
+  createAsset,
+  updateAsset,
+  deleteAsset,
+  syncAssetFromITSM,
+} from '../controllers/asset.controller';
 
 const router = Router();
 
-// GET /api/assets
 router.get('/', getAllAssets);
-
-// GET /api/assets/:id
 router.get('/:id', getAssetById);
+router.post('/', createAsset);
+router.patch('/:id', updateAsset);
+router.delete('/:id', deleteAsset);
+router.post('/:id/sync', syncAssetFromITSM);
 
 export default router;
