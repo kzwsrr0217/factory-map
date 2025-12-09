@@ -1,4 +1,4 @@
-.buildingDetails {
+.floorDetails {
   max-width: 1400px;
 }
 
@@ -32,49 +32,49 @@
   }
 }
 
-/* Building Info Card */
+/* Floor Info Card */
 .infoCard {
   margin-bottom: var(--spacing-xl);
 }
 
-.buildingHeader {
+.floorHeader {
   display: flex;
   align-items: flex-start;
   gap: var(--spacing-lg);
   margin-bottom: var(--spacing-lg);
 }
 
-.buildingIcon {
+.floorIcon {
   font-size: 4rem;
   flex-shrink: 0;
 }
 
-.buildingInfo {
+.floorInfo {
   flex: 1;
   min-width: 0;
 }
 
-.buildingName {
+.floorName {
   font-size: var(--font-size-3xl);
   font-weight: var(--font-weight-bold);
   color: var(--color-gray-900);
   margin: 0 0 var(--spacing-sm) 0;
 }
 
-.buildingAddress {
+.floorMeta {
   font-size: var(--font-size-base);
   color: var(--color-gray-600);
   margin: 0;
 }
 
-.buildingActions {
+.floorActions {
   display: flex;
   gap: var(--spacing-sm);
 }
 
 .metadata {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: var(--spacing-lg);
   padding-top: var(--spacing-lg);
   border-top: 1px solid var(--color-gray-200);
@@ -100,40 +100,6 @@
   color: var(--color-gray-900);
 }
 
-/* Stats Grid */
-.statsGrid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-  gap: var(--spacing-lg);
-  margin-bottom: var(--spacing-xl);
-}
-
-.stat {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-lg);
-}
-
-.statIcon {
-  font-size: 2.5rem;
-}
-
-.statContent {
-  flex: 1;
-}
-
-.statLabel {
-  font-size: var(--font-size-sm);
-  color: var(--color-gray-600);
-  margin-bottom: var(--spacing-xs);
-}
-
-.statValue {
-  font-size: var(--font-size-2xl);
-  font-weight: var(--font-weight-bold);
-  color: var(--color-gray-900);
-}
-
 /* Section Header */
 .sectionHeader {
   display: flex;
@@ -147,6 +113,100 @@
   font-weight: var(--font-weight-semibold);
   color: var(--color-gray-900);
   margin: 0;
+}
+
+/* Map Placeholder */
+.mapPlaceholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--spacing-2xl);
+  background: var(--color-gray-50);
+  border: 2px dashed var(--color-gray-300);
+  border-radius: var(--radius-lg);
+  text-align: center;
+  min-height: 300px;
+}
+
+.mapIcon {
+  font-size: 4rem;
+  margin-bottom: var(--spacing-lg);
+  opacity: 0.5;
+}
+
+.mapPlaceholder p {
+  font-size: var(--font-size-base);
+  color: var(--color-gray-600);
+  margin: var(--spacing-sm) 0;
+}
+
+.mapHint {
+  font-size: var(--font-size-sm);
+  color: var(--color-gray-500);
+}
+
+/* Work Areas List */
+.workareasList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+.workareaItem {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-lg);
+  padding: var(--spacing-lg);
+  border: 1px solid var(--color-gray-200);
+  border-radius: var(--radius-lg);
+  background: var(--color-gray-50);
+  cursor: pointer;
+  transition: all var(--transition-base);
+}
+
+.workareaItem:hover {
+  background: var(--color-white);
+  border-color: var(--color-primary);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+.workareaIcon {
+  font-size: 2rem;
+  flex-shrink: 0;
+}
+
+.workareaInfo {
+  flex: 1;
+  min-width: 0;
+}
+
+.workareaName {
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-gray-900);
+  margin: 0 0 var(--spacing-xs) 0;
+}
+
+.workareaDetails {
+  font-size: var(--font-size-sm);
+  color: var(--color-gray-600);
+  margin: 0;
+}
+
+.emptyWorkareas {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--spacing-2xl);
+  text-align: center;
+  color: var(--color-gray-500);
+}
+
+.emptyWorkareas p {
+  margin-bottom: var(--spacing-lg);
 }
 
 /* Assets List */
@@ -198,101 +258,8 @@
   margin: 0;
 }
 
-.assetPerson {
-  font-size: var(--font-size-sm);
-  color: var(--color-gray-600);
-  margin: var(--spacing-xs) 0 0 0;
-}
-
-.assetBadge {
-  flex-shrink: 0;
-}
-
 .emptyAssets {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: var(--spacing-2xl);
-  text-align: center;
-  color: var(--color-gray-500);
-}
-
-.emptyAssets p {
-  margin-bottom: var(--spacing-lg);
-}
-
-.comingSoon {
   padding: var(--spacing-xl);
   text-align: center;
   color: var(--color-gray-500);
-  font-size: var(--font-size-base);
-}
-/* Floors List */
-.floorsList {
-  display: flex;
-  flex-direction: column;
-  gap: var(--spacing-md);
-}
-
-.floorItem {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-lg);
-  padding: var(--spacing-lg);
-  border: 1px solid var(--color-gray-200);
-  border-radius: var(--radius-lg);
-  background: var(--color-gray-50);
-  cursor: pointer;
-  transition: all var(--transition-base);
-}
-
-.floorItem:hover {
-  background: var(--color-white);
-  border-color: var(--color-primary);
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-md);
-}
-
-.floorIcon {
-  font-size: 2rem;
-  flex-shrink: 0;
-}
-
-.floorInfo {
-  flex: 1;
-  min-width: 0;
-}
-
-.floorName {
-  font-size: var(--font-size-base);
-  font-weight: var(--font-weight-semibold);
-  color: var(--color-gray-900);
-  margin: 0 0 var(--spacing-xs) 0;
-}
-
-.floorDetails {
-  font-size: var(--font-size-sm);
-  color: var(--color-gray-600);
-  margin: 0;
-}
-
-.floorActions {
-  display: flex;
-  gap: var(--spacing-sm);
-  flex-shrink: 0;
-}
-
-.emptyFloors {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: var(--spacing-2xl);
-  text-align: center;
-  color: var(--color-gray-500);
-}
-
-.emptyFloors p {
-  margin-bottom: var(--spacing-lg);
 }

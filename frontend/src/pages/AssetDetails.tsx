@@ -5,6 +5,7 @@ import Button from '../components/common/Button';
 import Badge from '../components/common/Badge';
 import { assetService, Asset } from '../services/asset.service';
 import styles from '../styles/pages/AssetDetails.module.css';
+import AssetFormModal from '../components/asset/AssetFormModal';
 
 const AssetDetails: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -13,6 +14,8 @@ const AssetDetails: React.FC = () => {
   const [asset, setAsset] = useState<Asset | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  const [deleting, setDeleting] = useState(false);  // ← ÚJ
+  const [formOpen, setFormOpen] = useState(false);
 
   useEffect(() => {
     if (id) {
@@ -29,6 +32,38 @@ const AssetDetails: React.FC = () => {
       console.error('Error loading asset details:', error);
     } finally {
       setLoading(false);
+    }
+  };
+  // ← ÚJ: Handle edit
+  const handleEdit = () => {
+    setFormOpen(true);
+  };
+
+  const handleFormSuccess = () => {
+    if (id) {
+      loadAssetDetails(id);
+    }
+  };
+
+  // ← ÚJ: Handle delete
+  const handleDelete = async () => {
+    if (!asset) return;
+
+    const confirmed = window.confirm(
+      `Are you sure you want to delete "${asset.basic_info.display_name}"? This action cannot be undone.`
+    );
+
+    if (!confirmed) return;
+
+    setDeleting(true);
+    try {
+      await assetService.deleteAsset(asset._id);
+      navigate('/assets');
+    } catch (error) {
+      console.error('Error deleting asset:', error);
+      alert('Failed to delete asset. Please try again.');
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -86,10 +121,10 @@ const AssetDetails: React.FC = () => {
               🔄 Sync from ITSM
             </Button>
           )}
-          <Button variant="outline" onClick={() => alert('Edit - Coming soon!')}>
+          <Button variant="outline" onClick={handleEdit}>
             Edit
           </Button>
-          <Button variant="danger" onClick={() => alert('Delete - Coming soon!')}>
+          <Button variant="danger" onClick={handleDelete} loading={deleting}>
             Delete
           </Button>
         </div>
@@ -301,7 +336,13 @@ const AssetDetails: React.FC = () => {
               )}
             </div>
           </Card>
-
+{/* Asset Form Modal */}
+<AssetFormModal
+  isOpen={formOpen}
+  onClose={() => setFormOpen(false)}
+  onSuccess={handleFormSuccess}
+  asset={asset}
+/>
           {/* Software */}
           {asset.software && asset.software.length > 0 && (
             <Card padding="lg">
@@ -326,6 +367,7 @@ const AssetDetails: React.FC = () => {
         </div>
       </div>
     </div>
+    
   );
 };
 

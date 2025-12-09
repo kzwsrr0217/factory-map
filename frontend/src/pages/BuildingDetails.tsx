@@ -3,8 +3,13 @@ import { useParams, useNavigate } from 'react-router-dom';
 import Card from '../components/common/Card';
 import Button from '../components/common/Button';
 import Badge from '../components/common/Badge';
+import ConfirmDialog from '../components/common/ConfirmDialog';
+import BuildingFormModal from '../components/building/BuildingFormModal';
+import AssetFormModal from '../components/asset/AssetFormModal';
+import FloorFormModal from '../components/floor/FloorFormModal';
 import { hierarchyService, Building } from '../services/hierarchy.service';
 import { assetService, Asset } from '../services/asset.service';
+import { floorService, Floor } from '../services/floor.service';
 import styles from '../styles/pages/BuildingDetails.module.css';
 
 const BuildingDetails: React.FC = () => {
@@ -13,7 +18,16 @@ const BuildingDetails: React.FC = () => {
 
   const [building, setBuilding] = useState<Building | null>(null);
   const [assets, setAssets] = useState<Asset[]>([]);
+  const [floors, setFloors] = useState<Floor[]>([]);
   const [loading, setLoading] = useState(true);
+  const [formOpen, setFormOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [assetFormOpen, setAssetFormOpen] = useState(false);
+  const [floorFormOpen, setFloorFormOpen] = useState(false);
+  const [editingFloor, setEditingFloor] = useState<Floor | null>(null);
+  const [deletingFloor, setDeletingFloor] = useState<Floor | null>(null);
+  const [deleteFloorDialogOpen, setDeleteFloorDialogOpen] = useState(false);
 
   useEffect(() => {
     if (id) {
@@ -24,12 +38,14 @@ const BuildingDetails: React.FC = () => {
   const loadBuildingDetails = async (buildingId: string) => {
     try {
       setLoading(true);
-      const [buildingData, allAssets] = await Promise.all([
+      const [buildingData, allAssets, floorsData] = await Promise.all([
         hierarchyService.getBuilding(buildingId),
         assetService.getAssets(),
+        floorService.getFloors(buildingId),
       ]);
 
       setBuilding(buildingData);
+      setFloors(floorsData);
 
       // Filter assets for this building
       const buildingAssets = allAssets.filter(
@@ -40,6 +56,94 @@ const BuildingDetails: React.FC = () => {
       console.error('Error loading building details:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleEdit = () => {
+    setFormOpen(true);
+  };
+
+  const handleFormSuccess = () => {
+    if (id) {
+      loadBuildingDetails(id);
+    }
+  };
+
+  const handleDelete = () => {
+    if (assets.length > 0) {
+      alert(
+        `Cannot delete building with ${assets.length} asset(s). Please remove or reassign assets first.`
+      );
+      return;
+    }
+    setDeleteDialogOpen(true);
+  };
+
+  const confirmDelete = async () => {
+    if (!building) return;
+
+    setDeleting(true);
+    try {
+      await hierarchyService.deleteBuilding(building._id);
+      navigate('/buildings');
+    } catch (error) {
+      console.error('Error deleting building:', error);
+      alert('Failed to delete building. Please try again.');
+    } finally {
+      setDeleting(false);
+      setDeleteDialogOpen(false);
+    }
+  };
+
+  const handleAddAsset = () => {
+    setAssetFormOpen(true);
+  };
+
+  const handleAssetFormSuccess = () => {
+    if (id) {
+      loadBuildingDetails(id);
+    }
+  };
+
+  const handleAddFloor = () => {
+    setEditingFloor(null);
+    setFloorFormOpen(true);
+  };
+
+  const handleEditFloor = (floor: Floor, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditingFloor(floor);
+    setFloorFormOpen(true);
+  };
+
+  const handleDeleteFloor = (floor: Floor, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setDeletingFloor(floor);
+    setDeleteFloorDialogOpen(true);
+  };
+
+  const confirmDeleteFloor = async () => {
+    if (!deletingFloor) return;
+
+    setDeleting(true);
+    try {
+      await floorService.deleteFloor(deletingFloor._id);
+      if (id) {
+        loadBuildingDetails(id);
+      }
+    } catch (error) {
+      console.error('Error deleting floor:', error);
+      alert('Failed to delete floor. Please try again.');
+    } finally {
+      setDeleting(false);
+      setDeleteFloorDialogOpen(false);
+      setDeletingFloor(null);
+    }
+  };
+
+  const handleFloorFormSuccess = () => {
+    if (id) {
+      loadBuildingDetails(id);
     }
   };
 
@@ -88,10 +192,10 @@ const BuildingDetails: React.FC = () => {
             )}
           </div>
           <div className={styles.buildingActions}>
-            <Button variant="outline" onClick={() => alert('Edit - Coming soon!')}>
+            <Button variant="outline" onClick={handleEdit}>
               Edit
             </Button>
-            <Button variant="danger" onClick={() => alert('Delete - Coming soon!')}>
+            <Button variant="danger" onClick={handleDelete} loading={deleting}>
               Delete
             </Button>
           </div>
@@ -116,6 +220,10 @@ const BuildingDetails: React.FC = () => {
                 </span>
               </div>
             )}
+            <div className={styles.metadataItem}>
+              <span className={styles.metadataLabel}>Floors</span>
+              <span className={styles.metadataValue}>{floors.length}</span>
+            </div>
           </div>
         )}
       </Card>
@@ -163,11 +271,67 @@ const BuildingDetails: React.FC = () => {
         </Card>
       </div>
 
+      {/* Floors Section */}
+      <Card padding="lg">
+        <div className={styles.sectionHeader}>
+          <h2>Floors</h2>
+          <Button variant="outline" onClick={handleAddFloor}>
+            + Add Floor
+          </Button>
+        </div>
+
+        {floors.length > 0 ? (
+          <div className={styles.floorsList}>
+            {floors.map((floor) => (
+              <div
+                key={floor._id}
+                className={styles.floorItem}
+                onClick={() => navigate(`/floors/${floor._id}`)}
+              >
+                <div className={styles.floorIcon}>📐</div>
+                <div className={styles.floorInfo}>
+                  <h4 className={styles.floorName}>{floor.name}</h4>
+                  <p className={styles.floorDetails}>
+                    Level: {floor.floor_number}
+                    {floor.metadata?.area && ` • ${floor.metadata.area} m²`}
+                    {floor.metadata?.ceiling_height &&
+                      ` • Height: ${floor.metadata.ceiling_height}m`}
+                  </p>
+                </div>
+                <div className={styles.floorActions}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={(e) => handleEditFloor(floor, e)}
+                  >
+                    Edit
+                  </Button>
+                  <Button
+                    variant="danger"
+                    size="sm"
+                    onClick={(e) => handleDeleteFloor(floor, e)}
+                  >
+                    Delete
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className={styles.emptyFloors}>
+            <p>No floors found in this building</p>
+            <Button variant="outline" onClick={handleAddFloor}>
+              + Add First Floor
+            </Button>
+          </div>
+        )}
+      </Card>
+
       {/* Assets List */}
       <Card padding="lg">
         <div className={styles.sectionHeader}>
           <h2>Assets in this Building</h2>
-          <Button variant="primary" onClick={() => alert('Add asset - Coming soon!')}>
+          <Button variant="primary" onClick={handleAddAsset}>
             + Add Asset
           </Button>
         </div>
@@ -203,25 +367,61 @@ const BuildingDetails: React.FC = () => {
         ) : (
           <div className={styles.emptyAssets}>
             <p>No assets found in this building</p>
-            <Button variant="primary" onClick={() => alert('Add asset - Coming soon!')}>
+            <Button variant="primary" onClick={handleAddAsset}>
               + Add First Asset
             </Button>
           </div>
         )}
       </Card>
 
-      {/* Placeholder for Floors */}
-      <Card padding="lg">
-        <div className={styles.sectionHeader}>
-          <h2>Floors</h2>
-          <Button variant="outline" onClick={() => alert('Add floor - Coming soon!')}>
-            + Add Floor
-          </Button>
-        </div>
-        <div className={styles.comingSoon}>
-          <p>📐 Floor management coming soon...</p>
-        </div>
-      </Card>
+      {/* Building Form Modal */}
+      <BuildingFormModal
+        isOpen={formOpen}
+        onClose={() => setFormOpen(false)}
+        onSuccess={handleFormSuccess}
+        building={building}
+      />
+
+      {/* Delete Building Confirmation */}
+      <ConfirmDialog
+        isOpen={deleteDialogOpen}
+        onClose={() => setDeleteDialogOpen(false)}
+        onConfirm={confirmDelete}
+        title="Delete Building"
+        message={`Are you sure you want to delete "${building?.name}"? This action cannot be undone.`}
+        confirmText="Delete"
+        loading={deleting}
+        variant="danger"
+      />
+
+      {/* Asset Form Modal */}
+      <AssetFormModal
+        isOpen={assetFormOpen}
+        onClose={() => setAssetFormOpen(false)}
+        onSuccess={handleAssetFormSuccess}
+        defaultBuildingId={id}
+      />
+
+      {/* Floor Form Modal */}
+      <FloorFormModal
+        isOpen={floorFormOpen}
+        onClose={() => setFloorFormOpen(false)}
+        onSuccess={handleFloorFormSuccess}
+        buildingId={id || ''}
+        floor={editingFloor}
+      />
+
+      {/* Delete Floor Confirmation */}
+      <ConfirmDialog
+        isOpen={deleteFloorDialogOpen}
+        onClose={() => setDeleteFloorDialogOpen(false)}
+        onConfirm={confirmDeleteFloor}
+        title="Delete Floor"
+        message={`Are you sure you want to delete "${deletingFloor?.name}"? This action cannot be undone.`}
+        confirmText="Delete"
+        loading={deleting}
+        variant="danger"
+      />
     </div>
   );
 };

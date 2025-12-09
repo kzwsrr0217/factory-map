@@ -77,4 +77,21 @@ export const assetService = {
     const response = await api.get(`/assets/${id}`);
     return response.data.data;
   },
+
+  // Create asset  ← ÚJ
+  createAsset: async (data: Partial<Asset>): Promise<Asset> => {
+    const response = await api.post('/assets', data);
+    return response.data.data;
+  },
+
+  // Update asset  ← ÚJ
+  updateAsset: async (id: string, data: Partial<Asset>): Promise<Asset> => {
+    const response = await api.patch(`/assets/${id}`, data);
+    return response.data.data;
+  },
+
+  // Delete asset
+  deleteAsset: async (id: string): Promise<void> => {
+    await api.delete(`/assets/${id}`);
+  },
 };

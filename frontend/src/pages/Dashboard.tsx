@@ -2,6 +2,7 @@ import React, { useEffect, useState, useMemo } from 'react';
 import Card from '../components/common/Card';
 import Badge from '../components/common/Badge';
 import Table from '../components/common/Table';
+import Button from '../components/common/Button';
 import SearchBar from '../components/common/SearchBar';
 import FilterButton from '../components/common/FilterButton';
 import Select from '../components/common/Select';
@@ -10,6 +11,7 @@ import { hierarchyService, Building } from '../services/hierarchy.service';
 import { assetService, Asset } from '../services/asset.service';
 import styles from '../styles/pages/Dashboard.module.css';
 import { useNavigate } from 'react-router-dom';
+import AssetFormModal from '../components/asset/AssetFormModal';
 
 type FilterType = 'all' | 'itsm' | 'manual';
 
@@ -20,6 +22,7 @@ const Dashboard: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
+  const [assetFormOpen, setAssetFormOpen] = useState(false);
 
   // Filter states
   const [searchQuery, setSearchQuery] = useState('');
@@ -142,6 +145,9 @@ const handleRowClick = (asset: Asset) => {
           <h1>Dashboard</h1>
           <p className={styles.subtitle}>Overview of your factory assets</p>
         </div>
+        <Button variant="primary" onClick={() => setAssetFormOpen(true)}>
+          + Add Asset
+        </Button>
       </div>
 
       {/* Stats Cards */}
@@ -247,6 +253,12 @@ const handleRowClick = (asset: Asset) => {
         asset={selectedAsset}
         isOpen={modalOpen}
         onClose={handleCloseModal}
+      />
+      {/* Asset Form Modal */}
+      <AssetFormModal
+        isOpen={assetFormOpen}
+        onClose={() => setAssetFormOpen(false)}
+        onSuccess={loadData}
       />
     </div>
   );
