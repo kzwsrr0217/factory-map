@@ -6,6 +6,7 @@ import Badge from '../components/common/Badge';
 import ConfirmDialog from '../components/common/ConfirmDialog';
 import WorkAreaFormModal from '../components/workarea/WorkAreaFormModal';
 import WorkAreaDetailsModal from '../components/workarea/WorkAreaDetailsModal';
+import FloorFormModal from '../components/floor/FloorFormModal';
 import FloorPlanUploadModal from '../components/floor/FloorPlanUploadModal';
 import FloorMap from '../components/map/FloorMap';
 import { floorService, Floor } from '../services/floor.service';
@@ -24,6 +25,8 @@ const FloorDetails: React.FC = () => {
   const [editMode, setEditMode] = useState(false);
   
   // Modal states
+  const [floorFormOpen, setFloorFormOpen] = useState(false);
+  const [deleteFloorDialogOpen, setDeleteFloorDialogOpen] = useState(false);
   const [workareaFormOpen, setWorkareaFormOpen] = useState(false);
   const [workareaDetailsOpen, setWorkareaDetailsOpen] = useState(false);
   const [selectedWorkarea, setSelectedWorkarea] = useState<WorkArea | null>(null);
@@ -65,6 +68,49 @@ const FloorDetails: React.FC = () => {
       console.error('Error loading floor details:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Floor handlers
+  const handleEditFloor = () => {
+    setFloorFormOpen(true);
+  };
+
+  const handleDeleteFloor = () => {
+    if (workareas.length > 0) {
+      alert(
+        `Cannot delete floor with ${workareas.length} work area(s). Please remove work areas first.`
+      );
+      return;
+    }
+    if (assets.length > 0) {
+      alert(
+        `Cannot delete floor with ${assets.length} asset(s). Please remove or reassign assets first.`
+      );
+      return;
+    }
+    setDeleteFloorDialogOpen(true);
+  };
+
+  const confirmDeleteFloor = async () => {
+    if (!floor) return;
+
+    setDeleting(true);
+    try {
+      await floorService.deleteFloor(floor._id);
+      navigate(`/buildings/${floor.building_id}`);
+    } catch (error) {
+      console.error('Error deleting floor:', error);
+      alert('Failed to delete floor. Please try again.');
+    } finally {
+      setDeleting(false);
+      setDeleteFloorDialogOpen(false);
+    }
+  };
+
+  const handleFloorFormSuccess = () => {
+    if (id) {
+      loadFloorDetails(id);
     }
   };
 
@@ -119,14 +165,12 @@ const FloorDetails: React.FC = () => {
 
   // Map handlers with debounce
   const handleWorkareaMove = useCallback((workareaId: string, x: number, y: number) => {
-    // Update UI immediately
     setWorkareas((prev) =>
       prev.map((wa) =>
         wa._id === workareaId ? { ...wa, coordinates: { x, y } } : wa
       )
     );
 
-    // Debounce API call
     if (workareaUpdateTimer.current) {
       clearTimeout(workareaUpdateTimer.current);
     }
@@ -143,7 +187,6 @@ const FloorDetails: React.FC = () => {
   }, []);
 
   const handleWorkareaResize = useCallback((workareaId: string, width: number, height: number) => {
-    // Update UI immediately
     setWorkareas((prev) =>
       prev.map((wa) =>
         wa._id === workareaId
@@ -152,7 +195,6 @@ const FloorDetails: React.FC = () => {
       )
     );
 
-    // Debounce API call
     if (workareaResizeTimer.current) {
       clearTimeout(workareaResizeTimer.current);
     }
@@ -172,7 +214,6 @@ const FloorDetails: React.FC = () => {
     const asset = assets.find((a) => a._id === assetId);
     if (!asset) return;
 
-    // Update UI immediately
     setAssets((prev) =>
       prev.map((a) =>
         a._id === assetId
@@ -187,7 +228,6 @@ const FloorDetails: React.FC = () => {
       )
     );
 
-    // Debounce API call
     if (assetUpdateTimer.current) {
       clearTimeout(assetUpdateTimer.current);
     }
@@ -271,10 +311,10 @@ const FloorDetails: React.FC = () => {
             <p className={styles.floorMeta}>Level: {floor.floor_number}</p>
           </div>
           <div className={styles.floorActions}>
-            <Button variant="outline" onClick={() => alert('Edit - Coming soon!')}>
+            <Button variant="outline" onClick={handleEditFloor}>
               Edit
             </Button>
-            <Button variant="danger" onClick={() => alert('Delete - Coming soon!')}>
+            <Button variant="danger" onClick={handleDeleteFloor} loading={deleting}>
               Delete
             </Button>
           </div>
@@ -362,13 +402,13 @@ const FloorDetails: React.FC = () => {
                   <div className={styles.workareaInfo}>
                     <h4 className={styles.workareaName}>
                       {workarea.name}
-                        {assetsInArea.length > 0 && (
-                          <span style={{ marginLeft: '8px' }}>
-                            <Badge variant="info">
-                              {assetsInArea.length} asset{assetsInArea.length !== 1 ? 's' : ''}
-                            </Badge>
-                          </span>
-                        )}
+                      {assetsInArea.length > 0 && (
+                        <span style={{ marginLeft: '8px' }}>
+                          <Badge variant="info">
+                            {assetsInArea.length} asset{assetsInArea.length !== 1 ? 's' : ''}
+                          </Badge>
+                        </span>
+                      )}
                     </h4>
                     <p className={styles.workareaDetails}>
                       {workarea.type && `Type: ${workarea.type}`}
@@ -439,6 +479,27 @@ const FloorDetails: React.FC = () => {
           </div>
         )}
       </Card>
+
+      {/* Floor Form Modal */}
+      <FloorFormModal
+        isOpen={floorFormOpen}
+        onClose={() => setFloorFormOpen(false)}
+        onSuccess={handleFloorFormSuccess}
+        buildingId={floor.building_id}
+        floor={floor}
+      />
+
+      {/* Delete Floor Confirmation */}
+      <ConfirmDialog
+        isOpen={deleteFloorDialogOpen}
+        onClose={() => setDeleteFloorDialogOpen(false)}
+        onConfirm={confirmDeleteFloor}
+        title="Delete Floor"
+        message={`Are you sure you want to delete "${floor?.name}"? This action cannot be undone.`}
+        confirmText="Delete"
+        loading={deleting}
+        variant="danger"
+      />
 
       {/* WorkArea Form Modal */}
       <WorkAreaFormModal
