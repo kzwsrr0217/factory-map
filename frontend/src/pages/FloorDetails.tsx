@@ -1,10 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Card from '../components/common/Card';
 import Button from '../components/common/Button';
 import Badge from '../components/common/Badge';
 import ConfirmDialog from '../components/common/ConfirmDialog';
 import WorkAreaFormModal from '../components/workarea/WorkAreaFormModal';
+import FloorMap from '../components/map/FloorMap';
 import { floorService, Floor } from '../services/floor.service';
 import { workareaService, WorkArea } from '../services/workarea.service';
 import { assetService, Asset } from '../services/asset.service';
@@ -18,6 +19,7 @@ const FloorDetails: React.FC = () => {
   const [workareas, setWorkareas] = useState<WorkArea[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
   const [loading, setLoading] = useState(true);
+  const [editMode, setEditMode] = useState(false);
   
   // WorkArea modal states
   const [workareaFormOpen, setWorkareaFormOpen] = useState(false);
@@ -25,6 +27,10 @@ const FloorDetails: React.FC = () => {
   const [deletingWorkarea, setDeletingWorkarea] = useState<WorkArea | null>(null);
   const [deleteWorkareaDialogOpen, setDeleteWorkareaDialogOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+
+  // Debounce timers
+  const workareaUpdateTimer = useRef<NodeJS.Timeout | null>(null);
+  const assetUpdateTimer = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     if (id) {
@@ -98,6 +104,71 @@ const FloorDetails: React.FC = () => {
       loadFloorDetails(id);
     }
   };
+
+  // Map handlers with debounce
+  const handleWorkareaMove = useCallback((workareaId: string, x: number, y: number) => {
+    // Update UI immediately
+    setWorkareas((prev) =>
+      prev.map((wa) =>
+        wa._id === workareaId ? { ...wa, coordinates: { x, y } } : wa
+      )
+    );
+
+    // Debounce API call
+    if (workareaUpdateTimer.current) {
+      clearTimeout(workareaUpdateTimer.current);
+    }
+
+    workareaUpdateTimer.current = setTimeout(async () => {
+      try {
+        await workareaService.updateWorkArea(workareaId, {
+          coordinates: { x, y },
+        });
+      } catch (error) {
+        console.error('Error updating work area position:', error);
+      }
+    }, 500); // Wait 500ms after last drag event
+  }, []);
+
+const handleAssetMove = useCallback((assetId: string, x: number, y: number) => {
+  // Find the asset to preserve other location fields
+  const asset = assets.find((a) => a._id === assetId);
+  if (!asset) return;
+
+  // Update UI immediately
+  setAssets((prev) =>
+    prev.map((a) =>
+      a._id === assetId
+        ? {
+            ...a,
+            location: {
+              ...a.location,
+              coordinates: { x, y },
+            },
+          }
+        : a
+    )
+  );
+
+  // Debounce API call
+  if (assetUpdateTimer.current) {
+    clearTimeout(assetUpdateTimer.current);
+  }
+
+  assetUpdateTimer.current = setTimeout(async () => {
+    try {
+      await assetService.updateAsset(assetId, {
+        location: {
+          ...asset.location,
+          coordinates: { x, y },
+          icon_type: asset.location.icon_type || 'computer',  // ← HOZZÁADVA
+        },
+      });
+    } catch (error) {
+      console.error('Error updating asset position:', error);
+    }
+  }, 500);
+}, [assets]);
 
   if (loading) {
     return (
@@ -177,21 +248,35 @@ const FloorDetails: React.FC = () => {
         )}
       </Card>
 
-      {/* Floor Plan Placeholder */}
+      {/* Floor Plan Map */}
       <Card padding="lg">
         <div className={styles.sectionHeader}>
           <h2>Floor Plan</h2>
-          <Button variant="outline" onClick={() => alert('Upload map - Coming soon!')}>
-            📤 Upload Map
+          <Button
+            variant={editMode ? 'success' : 'outline'}
+            onClick={() => setEditMode(!editMode)}
+          >
+            {editMode ? '✓ Done Editing' : '✏️ Edit Mode'}
           </Button>
         </div>
-        <div className={styles.mapPlaceholder}>
-          <div className={styles.mapIcon}>🗺️</div>
-          <p>Floor plan visualization coming soon</p>
-          <p className={styles.mapHint}>
-            Interactive SVG map with asset positions will be displayed here
-          </p>
-        </div>
+
+        <FloorMap
+          workareas={workareas}
+          assets={assets}
+          onWorkareaClick={(workarea) => {
+            if (!editMode) {
+              console.log('Clicked workarea:', workarea);
+            }
+          }}
+          onAssetClick={(asset) => {
+            if (!editMode) {
+              navigate(`/assets/${asset._id}`);
+            }
+          }}
+          onWorkareaMove={handleWorkareaMove}
+          onAssetMove={handleAssetMove}
+          editable={editMode}
+        />
       </Card>
 
       {/* Work Areas Section */}
@@ -209,7 +294,7 @@ const FloorDetails: React.FC = () => {
               <div
                 key={workarea._id}
                 className={styles.workareaItem}
-                onClick={() => alert(`Work area details: ${workarea.name}`)}
+                onClick={() => console.log('Work area clicked:', workarea)}
               >
                 <div className={styles.workareaIcon}>🏭</div>
                 <div className={styles.workareaInfo}>

@@ -129,42 +129,42 @@ const AssetSchema: Schema = new Schema(
       },
     ],
 
-    location: {
-      coordinates: {
-        x: {
-          type: Number,
-          required: [true, 'X coordinate is required'],
-        },
-        y: {
-          type: Number,
-          required: [true, 'Y coordinate is required'],
-        },
-      },
-      rotation: {
-        type: Number,
-        default: 0,
-      },
-      icon_type: {
-        type: String,
-        required: [true, 'Icon type is required'],
-      },
-      description: String,
-      history: [
-        {
-          moved_at: Date,
-          from_coordinates: {
-            x: Number,
-            y: Number,
-          },
-          to_coordinates: {
-            x: Number,
-            y: Number,
-          },
-          moved_by: String,
-          reason: String,
-        },
-      ],
+location: {
+  coordinates: {
+    x: {
+      type: Number,
+      required: [true, 'X coordinate is required'],
     },
+    y: {
+      type: Number,
+      required: [true, 'Y coordinate is required'],
+    },
+  },
+  rotation: {
+    type: Number,
+    default: 0,
+  },
+  icon_type: {
+    type: String,
+    default: 'computer',  // ← ÚJ: default érték
+  },
+  description: String,
+  history: [
+    {
+      moved_at: Date,
+      from_coordinates: {
+        x: Number,
+        y: Number,
+      },
+      to_coordinates: {
+        x: Number,
+        y: Number,
+      },
+      moved_by: String,
+      reason: String,
+    },
+  ],
+},
 
     custom_fields: {
       physical_condition: {
