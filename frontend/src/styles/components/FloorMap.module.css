@@ -1,0 +1,189 @@
+.mapContainer {
+  position: relative;
+  width: 100%;
+  height: 600px;
+  background: #f9fafb;
+  border: 1px solid var(--color-gray-300);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.svg {
+  width: 100%;
+  height: 100%;
+  user-select: none;
+}
+
+/* Controls */
+.controls {
+  position: absolute;
+  top: var(--spacing-md);
+  right: var(--spacing-md);
+  display: flex;
+  gap: var(--spacing-sm);
+  z-index: 10;
+}
+
+.controlButton {
+  width: 40px;
+  height: 40px;
+  border: none;
+  background: var(--color-white);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  cursor: pointer;
+  font-size: var(--font-size-lg);
+  transition: all var(--transition-base);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.controlButton:hover {
+  background: var(--color-gray-100);
+  transform: scale(1.05);
+}
+
+.editMode {
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--color-primary);
+  color: var(--color-white);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  display: flex;
+  align-items: center;
+  box-shadow: var(--shadow-md);
+}
+
+/* Work Areas */
+.workarea {
+  transition: all var(--transition-base);
+  cursor: pointer;
+}
+
+.workarea:hover {
+  filter: brightness(1.1);
+  stroke-width: 3;
+}
+
+.workarea.dragging {
+  opacity: 0.7;
+  filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.1));
+}
+
+.workareaLabel {
+  fill: #4c1d95;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.workareaType {
+  fill: #6d28d9;
+  font-size: 11px;
+}
+
+/* Assets */
+.asset {
+  transition: all var(--transition-base);
+  cursor: pointer;
+}
+
+.asset:hover {
+  r: 14;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.2));
+}
+
+.asset.dragging {
+  opacity: 0.7;
+  filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.3));
+}
+
+.assetIcon {
+  fill: #fff;
+  font-size: 10px;
+  user-select: none;
+}
+
+.assetLabel {
+  fill: var(--color-gray-900);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* Legend */
+.legend {
+  position: absolute;
+  bottom: var(--spacing-md);
+  left: var(--spacing-md);
+  background: var(--color-white);
+  padding: var(--spacing-md);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  z-index: 10;
+}
+
+.legendItem {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  font-size: var(--font-size-sm);
+  color: var(--color-gray-700);
+}
+
+.legendIcon {
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--color-gray-300);
+}
+
+/* Instructions */
+.instructions {
+  position: absolute;
+  bottom: var(--spacing-md);
+  right: var(--spacing-md);
+  background: var(--color-info-light);
+  border: 1px solid var(--color-info);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  color: var(--color-gray-700);
+  max-width: 300px;
+  z-index: 10;
+}
+
+.instructions p {
+  margin: 0;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .mapContainer {
+    height: 400px;
+  }
+
+  .legend {
+    font-size: var(--font-size-xs);
+  }
+
+  .instructions {
+    display: none;
+  }
+}
+/* Resize Handle */
+.resizeHandle {
+  transition: all var(--transition-base);
+  cursor: nwse-resize;
+}
+
+.resizeHandle:hover {
+  r: 10;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.2));
+}
+
+.resizeHandle.resizing {
+  opacity: 0.7;
+}

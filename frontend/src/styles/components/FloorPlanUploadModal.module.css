@@ -1,0 +1,111 @@
+.uploadContainer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-lg);
+}
+
+.instructions {
+  padding: var(--spacing-md);
+  background: var(--color-info-light);
+  border: 1px solid var(--color-info);
+  border-radius: var(--radius-md);
+}
+
+.instructions h4 {
+  margin: 0 0 var(--spacing-sm) 0;
+  color: var(--color-gray-900);
+  font-size: var(--font-size-base);
+}
+
+.instructions ul {
+  margin: 0;
+  padding-left: var(--spacing-lg);
+}
+
+.instructions li {
+  font-size: var(--font-size-sm);
+  color: var(--color-gray-700);
+  margin-bottom: var(--spacing-xs);
+}
+
+.fileInputContainer {
+  position: relative;
+}
+
+.fileInput {
+  display: none;
+}
+
+.fileInputLabel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--spacing-2xl);
+  border: 2px dashed var(--color-gray-300);
+  border-radius: var(--radius-lg);
+  background: var(--color-gray-50);
+  cursor: pointer;
+  transition: all var(--transition-base);
+}
+
+.fileInputLabel:hover {
+  border-color: var(--color-primary);
+  background: var(--color-primary-light);
+}
+
+.uploadIcon {
+  font-size: 3rem;
+  margin-bottom: var(--spacing-md);
+}
+
+.uploadText {
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-gray-900);
+  margin: 0 0 var(--spacing-xs) 0;
+}
+
+.uploadHint {
+  font-size: var(--font-size-sm);
+  color: var(--color-gray-600);
+  margin: 0;
+}
+
+.error {
+  padding: var(--spacing-md);
+  background: var(--color-danger-light);
+  border: 1px solid var(--color-danger);
+  border-radius: var(--radius-md);
+  color: var(--color-danger-dark);
+  font-size: var(--font-size-sm);
+}
+
+.previewContainer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+.previewContainer h4 {
+  margin: 0;
+  font-size: var(--font-size-base);
+  color: var(--color-gray-900);
+}
+
+.preview {
+  border: 1px solid var(--color-gray-300);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--color-gray-50);
+  max-height: 400px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.preview img {
+  max-width: 100%;
+  max-height: 400px;
+  object-fit: contain;
+}

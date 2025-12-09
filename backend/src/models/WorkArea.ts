@@ -8,6 +8,10 @@ export interface IWorkArea extends Document {
     x: number;
     y: number;
   };
+  dimensions?: {
+    width: number;
+    height: number;
+  };
   metadata?: {
     supervisor?: string;
     capacity?: number;
@@ -35,8 +39,12 @@ const WorkAreaSchema: Schema = new Schema(
       x: { type: Number, default: 0 },
       y: { type: Number, default: 0 },
     },
+    dimensions: {
+      width: { type: Number, default: 150 },
+      height: { type: Number, default: 100 },
+    },
     metadata: {
-      type: Schema.Types.Mixed,  // ← Ez kell!
+      type: Schema.Types.Mixed,
       default: {},
     },
   },

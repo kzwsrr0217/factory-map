@@ -21,5 +21,8 @@
     "typescript"
   ],
   "author": "",
-  "license": "UNLICENSED"
+  "license": "UNLICENSED",
+  "dependencies": {
+    "react-router-dom": "^7.10.1"
+  }
 }

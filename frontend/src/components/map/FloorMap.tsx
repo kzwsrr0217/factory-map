@@ -1,0 +1,548 @@
+import React, { useState, useRef } from 'react';
+import { WorkArea } from '../../services/workarea.service';
+import { Asset } from '../../services/asset.service';
+import Tooltip from '../common/Tooltip';
+import styles from '../../styles/components/FloorMap.module.css';
+
+interface FloorMapProps {
+  workareas: WorkArea[];
+  assets: Asset[];
+  onWorkareaClick?: (workarea: WorkArea) => void;
+  onAssetClick?: (asset: Asset) => void;
+  onWorkareaMove?: (workareaId: string, x: number, y: number) => void;
+  onWorkareaResize?: (workareaId: string, width: number, height: number) => void;
+  onAssetMove?: (assetId: string, x: number, y: number) => void;
+  editable?: boolean;
+  backgroundImage?: string;
+}
+
+const FloorMap: React.FC<FloorMapProps> = ({
+  workareas,
+  assets,
+  onWorkareaClick,
+  onAssetClick,
+  onWorkareaMove,
+  onWorkareaResize,
+  onAssetMove,
+  editable = false,
+  backgroundImage,
+}) => {
+  const svgRef = useRef<SVGSVGElement>(null);
+  const [dragging, setDragging] = useState<{
+    type: 'workarea' | 'asset' | 'resize';
+    id: string;
+    offsetX: number;
+    offsetY: number;
+    startWidth?: number;
+    startHeight?: number;
+  } | null>(null);
+
+  const [viewBox] = useState({ x: 0, y: 0, width: 1000, height: 800 });
+  const [zoom, setZoom] = useState(1);
+  const [backgroundOpacity, setBackgroundOpacity] = useState(0.5);
+
+  // Tooltip state
+  const [tooltip, setTooltip] = useState<{
+    visible: boolean;
+    x: number;
+    y: number;
+    content: React.ReactNode;
+  }>({
+    visible: false,
+    x: 0,
+    y: 0,
+    content: null,
+  });
+
+  const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Handle mouse move for dragging
+  const handleMouseMove = (e: React.MouseEvent<SVGSVGElement>) => {
+    if (!dragging || !editable) return;
+
+    const svg = svgRef.current;
+    if (!svg) return;
+
+    const point = svg.createSVGPoint();
+    point.x = e.clientX;
+    point.y = e.clientY;
+
+    const svgPoint = point.matrixTransform(svg.getScreenCTM()?.inverse());
+
+    if (dragging.type === 'workarea' && onWorkareaMove) {
+      const newX = svgPoint.x - dragging.offsetX;
+      const newY = svgPoint.y - dragging.offsetY;
+      onWorkareaMove(dragging.id, Math.round(newX), Math.round(newY));
+    } else if (dragging.type === 'asset' && onAssetMove) {
+      const newX = svgPoint.x - dragging.offsetX;
+      const newY = svgPoint.y - dragging.offsetY;
+      onAssetMove(dragging.id, Math.round(newX), Math.round(newY));
+    } else if (dragging.type === 'resize' && onWorkareaResize) {
+      const workarea = workareas.find((w) => w._id === dragging.id);
+      if (!workarea) return;
+
+      const newWidth = Math.max(50, svgPoint.x - (workarea.coordinates?.x || 0));
+      const newHeight = Math.max(30, svgPoint.y - (workarea.coordinates?.y || 0));
+
+      onWorkareaResize(dragging.id, Math.round(newWidth), Math.round(newHeight));
+    }
+  };
+
+  // Handle mouse up to stop dragging
+  const handleMouseUp = () => {
+    setDragging(null);
+  };
+
+  // Handle zoom
+  const handleZoomIn = () => {
+    setZoom((prev) => Math.min(prev * 1.2, 3));
+  };
+
+  const handleZoomOut = () => {
+    setZoom((prev) => Math.max(prev / 1.2, 0.5));
+  };
+
+  const handleResetView = () => {
+    setZoom(1);
+  };
+
+  // Opacity control
+  const handleOpacityIncrease = () => {
+    setBackgroundOpacity((prev) => Math.min(prev + 0.1, 1));
+  };
+
+  const handleOpacityDecrease = () => {
+    setBackgroundOpacity((prev) => Math.max(prev - 0.1, 0.1));
+  };
+
+  // Tooltip handlers
+  const showTooltip = (e: React.MouseEvent, content: React.ReactNode) => {
+    if (editable || dragging) return;
+
+    if (hoverTimeoutRef.current) {
+      clearTimeout(hoverTimeoutRef.current);
+    }
+
+    hoverTimeoutRef.current = setTimeout(() => {
+      setTooltip({
+        visible: true,
+        x: e.clientX,
+        y: e.clientY,
+        content,
+      });
+    }, 500); // Show after 500ms hover
+  };
+
+  const hideTooltip = () => {
+    if (hoverTimeoutRef.current) {
+      clearTimeout(hoverTimeoutRef.current);
+    }
+    setTooltip({ visible: false, x: 0, y: 0, content: null });
+  };
+
+  // Start dragging workarea
+  const startDraggingWorkarea = (workarea: WorkArea, e: React.MouseEvent) => {
+    if (!editable) return;
+    e.stopPropagation();
+    hideTooltip();
+
+    const svg = svgRef.current;
+    if (!svg) return;
+
+    const point = svg.createSVGPoint();
+    point.x = e.clientX;
+    point.y = e.clientY;
+    const svgPoint = point.matrixTransform(svg.getScreenCTM()?.inverse());
+
+    setDragging({
+      type: 'workarea',
+      id: workarea._id,
+      offsetX: svgPoint.x - (workarea.coordinates?.x || 0),
+      offsetY: svgPoint.y - (workarea.coordinates?.y || 0),
+    });
+  };
+
+  // Start resizing workarea
+  const startResizingWorkarea = (workarea: WorkArea, e: React.MouseEvent) => {
+    if (!editable) return;
+    e.stopPropagation();
+    hideTooltip();
+
+    setDragging({
+      type: 'resize',
+      id: workarea._id,
+      offsetX: 0,
+      offsetY: 0,
+      startWidth: workarea.dimensions?.width || 150,
+      startHeight: workarea.dimensions?.height || 100,
+    });
+  };
+
+  // Start dragging asset
+  const startDraggingAsset = (asset: Asset, e: React.MouseEvent) => {
+    if (!editable) return;
+    e.stopPropagation();
+    hideTooltip();
+
+    const svg = svgRef.current;
+    if (!svg) return;
+
+    const point = svg.createSVGPoint();
+    point.x = e.clientX;
+    point.y = e.clientY;
+    const svgPoint = point.matrixTransform(svg.getScreenCTM()?.inverse());
+
+    setDragging({
+      type: 'asset',
+      id: asset._id,
+      offsetX: svgPoint.x - asset.location.coordinates.x,
+      offsetY: svgPoint.y - asset.location.coordinates.y,
+    });
+  };
+
+  // Handle workarea click
+  const handleWorkareaClickInternal = (workarea: WorkArea) => {
+    if (editable) return;
+    hideTooltip();
+    onWorkareaClick?.(workarea);
+  };
+
+  // Handle asset click
+  const handleAssetClickInternal = (asset: Asset) => {
+    if (editable) return;
+    hideTooltip();
+    onAssetClick?.(asset);
+  };
+
+  // Get assets in workarea
+  const getAssetsInWorkarea = (workarea: WorkArea): Asset[] => {
+    const waX = workarea.coordinates?.x || 0;
+    const waY = workarea.coordinates?.y || 0;
+    const waWidth = workarea.dimensions?.width || 150;
+    const waHeight = workarea.dimensions?.height || 100;
+
+    return assets.filter((asset) => {
+      const x = asset.location.coordinates.x;
+      const y = asset.location.coordinates.y;
+      return x >= waX && x <= waX + waWidth && y >= waY && y <= waY + waHeight;
+    });
+  };
+
+  return (
+    <div className={styles.mapContainer}>
+      {/* Controls */}
+      <div className={styles.controls}>
+        <button onClick={handleZoomIn} className={styles.controlButton} title="Zoom In">
+          ➕
+        </button>
+        <button onClick={handleZoomOut} className={styles.controlButton} title="Zoom Out">
+          ➖
+        </button>
+        <button onClick={handleResetView} className={styles.controlButton} title="Reset View">
+          🔄
+        </button>
+        {backgroundImage && (
+          <>
+            <button
+              onClick={handleOpacityDecrease}
+              className={styles.controlButton}
+              title="Decrease Background Opacity"
+            >
+              🌑
+            </button>
+            <button
+              onClick={handleOpacityIncrease}
+              className={styles.controlButton}
+              title="Increase Background Opacity"
+            >
+              🌕
+            </button>
+          </>
+        )}
+        {editable && (
+          <div className={styles.editMode}>
+            <span>✏️ Edit Mode</span>
+          </div>
+        )}
+      </div>
+
+      {/* SVG Canvas */}
+      <svg
+        ref={svgRef}
+        className={styles.svg}
+        viewBox={`${viewBox.x} ${viewBox.y} ${viewBox.width / zoom} ${viewBox.height / zoom}`}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={() => {
+          handleMouseUp();
+          hideTooltip();
+        }}
+      >
+        {/* Background Image/SVG */}
+        {backgroundImage && (
+          <image
+            href={backgroundImage}
+            x="0"
+            y="0"
+            width="1000"
+            height="800"
+            opacity={backgroundOpacity}
+            preserveAspectRatio="xMidYMid slice"
+            pointerEvents="none"
+          />
+        )}
+
+        {/* Grid Background */}
+        <defs>
+          <pattern id="grid" width="50" height="50" patternUnits="userSpaceOnUse">
+            <path d="M 50 0 L 0 0 0 50" fill="none" stroke="#e5e7eb" strokeWidth="1" opacity="0.5" />
+          </pattern>
+        </defs>
+        {!backgroundImage && <rect width="100%" height="100%" fill="url(#grid)" />}
+
+        {/* Work Areas */}
+        {workareas.map((workarea) => {
+          const x = workarea.coordinates?.x || 100;
+          const y = workarea.coordinates?.y || 100;
+          const width = workarea.dimensions?.width || 150;
+          const height = workarea.dimensions?.height || 100;
+          const isDragging = dragging?.type === 'workarea' && dragging.id === workarea._id;
+          const isResizing = dragging?.type === 'resize' && dragging.id === workarea._id;
+          const assetsInArea = getAssetsInWorkarea(workarea);
+
+          return (
+            <g key={workarea._id}>
+              {/* Work Area Rectangle */}
+              <rect
+                x={x}
+                y={y}
+                width={width}
+                height={height}
+                fill="#ddd6fe"
+                fillOpacity="0.7"
+                stroke="#7c3aed"
+                strokeWidth="3"
+                rx="8"
+                className={`${styles.workarea} ${isDragging ? styles.dragging : ''}`}
+                onMouseDown={(e) => startDraggingWorkarea(workarea, e)}
+                onClick={() => handleWorkareaClickInternal(workarea)}
+                onMouseEnter={(e) =>
+                  showTooltip(
+                    e as any,
+                    <div>
+                      <h4>🏭 {workarea.name}</h4>
+                      {workarea.type && <p><span className={styles.label}>Type:</span> {workarea.type}</p>}
+                      {workarea.metadata?.supervisor && (
+                        <p><span className={styles.label}>Supervisor:</span> {workarea.metadata.supervisor}</p>
+                      )}
+                      {workarea.metadata?.capacity && (
+                        <p><span className={styles.label}>Capacity:</span> {workarea.metadata.capacity} people</p>
+                      )}
+                      <p><span className={styles.label}>Assets:</span> {assetsInArea.length}</p>
+                      <p style={{ fontSize: '10px', marginTop: '4px', fontStyle: 'italic' }}>
+                        Click to see details
+                      </p>
+                    </div>
+                  )
+                }
+                onMouseLeave={hideTooltip}
+                style={{ cursor: editable ? 'move' : 'pointer' }}
+              />
+
+              {/* Work Area Label */}
+              <text
+                x={x + width / 2}
+                y={y + height / 2 - 5}
+                textAnchor="middle"
+                className={styles.workareaLabel}
+                pointerEvents="none"
+                style={{ fontWeight: 'bold', fontSize: '14px' }}
+              >
+                {workarea.name}
+              </text>
+
+              {/* Type Badge */}
+              {workarea.type && (
+                <text
+                  x={x + width / 2}
+                  y={y + height / 2 + 15}
+                  textAnchor="middle"
+                  className={styles.workareaType}
+                  pointerEvents="none"
+                  style={{ fontSize: '12px' }}
+                >
+                  {workarea.type}
+                </text>
+              )}
+
+              {/* Asset count badge */}
+              {assetsInArea.length > 0 && (
+                <g>
+                  <circle
+                    cx={x + width - 15}
+                    cy={y + 15}
+                    r="12"
+                    fill="#7c3aed"
+                    stroke="#fff"
+                    strokeWidth="2"
+                  />
+                  <text
+                    x={x + width - 15}
+                    y={y + 20}
+                    textAnchor="middle"
+                    fill="#fff"
+                    fontSize="11"
+                    fontWeight="bold"
+                    pointerEvents="none"
+                  >
+                    {assetsInArea.length}
+                  </text>
+                </g>
+              )}
+
+              {/* Resize Handle (bottom-right corner) */}
+              {editable && (
+                <circle
+                  cx={x + width}
+                  cy={y + height}
+                  r="10"
+                  fill="#7c3aed"
+                  stroke="#fff"
+                  strokeWidth="3"
+                  className={`${styles.resizeHandle} ${isResizing ? styles.resizing : ''}`}
+                  onMouseDown={(e) => startResizingWorkarea(workarea, e)}
+                  style={{ cursor: 'nwse-resize' }}
+                />
+              )}
+            </g>
+          );
+        })}
+
+        {/* Assets */}
+        {assets.map((asset) => {
+          const x = asset.location.coordinates.x;
+          const y = asset.location.coordinates.y;
+          const isDragging = dragging?.type === 'asset' && dragging.id === asset._id;
+
+          return (
+            <g key={asset._id}>
+              {/* Asset Circle */}
+              <circle
+                cx={x}
+                cy={y}
+                r="15"
+                fill={asset.itsm.is_managed ? '#10b981' : '#6b7280'}
+                stroke="#fff"
+                strokeWidth="3"
+                className={`${styles.asset} ${isDragging ? styles.dragging : ''}`}
+                onMouseDown={(e) => startDraggingAsset(asset, e)}
+                onClick={() => handleAssetClickInternal(asset)}
+                onMouseEnter={(e) =>
+                  showTooltip(
+                    e as any,
+                    <div>
+                      <h4>💻 {asset.basic_info.display_name}</h4>
+                      {asset.basic_info.manufacturer && asset.basic_info.model && (
+                        <p>
+                          <span className={styles.label}>Model:</span>{' '}
+                          {asset.basic_info.manufacturer} {asset.basic_info.model}
+                        </p>
+                      )}
+                      {asset.basic_info.serial_number && (
+                        <p><span className={styles.label}>S/N:</span> {asset.basic_info.serial_number}</p>
+                      )}
+                      {asset.assigned_person && (
+                        <p><span className={styles.label}>Assigned:</span> {asset.assigned_person.full_name}</p>
+                      )}
+                      <p>
+                        <span className={styles.label}>Status:</span>{' '}
+                        {asset.itsm.is_managed ? '✅ ITSM Managed' : '📝 Manual'}
+                      </p>
+                      <p style={{ fontSize: '10px', marginTop: '4px', fontStyle: 'italic' }}>
+                        Click for full details
+                      </p>
+                    </div>
+                  )
+                }
+                onMouseLeave={hideTooltip}
+                style={{ cursor: editable ? 'move' : 'pointer' }}
+              />
+
+              {/* Asset Icon */}
+              <text
+                x={x}
+                y={y + 5}
+                textAnchor="middle"
+                className={styles.assetIcon}
+                pointerEvents="none"
+                style={{ fontSize: '14px' }}
+              >
+                💻
+              </text>
+
+              {/* Asset Label */}
+              <text
+                x={x}
+                y={y + 35}
+                textAnchor="middle"
+                className={styles.assetLabel}
+                pointerEvents="none"
+                style={{
+                  fontSize: '12px',
+                  fontWeight: 'bold',
+                  fill: '#1f2937',
+                  textShadow: '0 0 3px white',
+                }}
+              >
+                {asset.basic_info.display_name}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+
+      {/* Tooltip */}
+      <Tooltip x={tooltip.x} y={tooltip.y} visible={tooltip.visible}>
+        {tooltip.content}
+      </Tooltip>
+
+      {/* Legend */}
+      <div className={styles.legend}>
+        <div className={styles.legendItem}>
+          <div className={styles.legendIcon} style={{ background: '#ddd6fe' }}></div>
+          <span>Work Area</span>
+        </div>
+        <div className={styles.legendItem}>
+          <div
+            className={styles.legendIcon}
+            style={{ background: '#10b981', borderRadius: '50%' }}
+          ></div>
+          <span>ITSM Asset</span>
+        </div>
+        <div className={styles.legendItem}>
+          <div
+            className={styles.legendIcon}
+            style={{ background: '#6b7280', borderRadius: '50%' }}
+          ></div>
+          <span>Manual Asset</span>
+        </div>
+        {backgroundImage && (
+          <div className={styles.legendItem}>
+            <span style={{ fontSize: '12px', color: '#6b7280' }}>
+              Background: {Math.round(backgroundOpacity * 100)}%
+            </span>
+          </div>
+        )}
+      </div>
+
+      {/* Instructions */}
+      {editable && (
+        <div className={styles.instructions}>
+          <p>💡 Drag items to move • Drag corners to resize work areas</p>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default FloorMap;

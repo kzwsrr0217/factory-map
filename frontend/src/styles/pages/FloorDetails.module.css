@@ -269,3 +269,7 @@
   gap: var(--spacing-sm);
   flex-shrink: 0;
 }
+.headerActions {
+  display: flex;
+  gap: var(--spacing-sm);
+}

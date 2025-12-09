@@ -6,6 +6,7 @@ export interface Floor {
   floor_number: number;
   name: string;
   map_file?: string;
+  svg_background?: string;
   metadata?: {
     area?: number;
     ceiling_height?: number;

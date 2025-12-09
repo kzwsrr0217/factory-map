@@ -1,0 +1,22 @@
+<svg width="1000" height="800" xmlns="http://www.w3.org/2000/svg">
+  <!-- White background -->
+  <rect width="1000" height="800" fill="#ffffff"/>
+  
+  <!-- Building outline -->
+  <rect x="50" y="50" width="900" height="700" fill="#f0f0f0" stroke="#000000" stroke-width="4"/>
+  
+  <!-- Office (top left) - Blue -->
+  <rect x="100" y="100" width="300" height="200" fill="#e3f2fd" stroke="#1976d2" stroke-width="3"/>
+  <text x="250" y="210" text-anchor="middle" font-size="24" font-weight="bold" fill="#1565c0">OFFICE</text>
+  
+  <!-- Production (left) - Orange -->
+  <rect x="100" y="350" width="300" height="350" fill="#fff3e0" stroke="#f57c00" stroke-width="3"/>
+  <text x="250" y="530" text-anchor="middle" font-size="24" font-weight="bold" fill="#e65100">PRODUCTION</text>
+  
+  <!-- Storage (right) - Green -->
+  <rect x="450" y="100" width="450" height="600" fill="#e8f5e9" stroke="#388e3c" stroke-width="3"/>
+  <text x="675" y="410" text-anchor="middle" font-size="24" font-weight="bold" fill="#2e7d32">STORAGE</text>
+  
+  <!-- Title -->
+  <text x="500" y="770" text-anchor="middle" font-size="20" font-weight="bold" fill="#000000">Factory Floor - Ground Level</text>
+</svg>

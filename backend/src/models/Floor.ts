@@ -5,6 +5,7 @@ export interface IFloor extends Document {
   floor_number: number;
   name: string;
   map_file?: string;
+  svg_background?: string; // ← ÚJ: Base64 vagy URL
   metadata?: {
     area?: number;
     ceiling_height?: number;
@@ -32,6 +33,9 @@ const FloorSchema: Schema = new Schema(
     map_file: {
       type: String,
     },
+    svg_background: {
+      type: String, // Base64 encoded SVG or image URL
+    },
     metadata: {
       type: Schema.Types.Mixed,
       default: {},
@@ -42,8 +46,6 @@ const FloorSchema: Schema = new Schema(
   }
 );
 
-// ← ÚJ: Compound unique index
-// Egy building-ben csak egy floor lehet adott floor_number-rel
 FloorSchema.index({ building_id: 1, floor_number: 1 }, { unique: true });
 
 export default mongoose.model<IFloor>('Floor', FloorSchema);

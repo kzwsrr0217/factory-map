@@ -9,6 +9,10 @@ export interface WorkArea {
     x: number;
     y: number;
   };
+  dimensions?: {
+    width: number;
+    height: number;
+  };
   metadata?: {
     supervisor?: string;
     capacity?: number;

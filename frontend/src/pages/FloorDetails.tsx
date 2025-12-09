@@ -5,6 +5,8 @@ import Button from '../components/common/Button';
 import Badge from '../components/common/Badge';
 import ConfirmDialog from '../components/common/ConfirmDialog';
 import WorkAreaFormModal from '../components/workarea/WorkAreaFormModal';
+import WorkAreaDetailsModal from '../components/workarea/WorkAreaDetailsModal';
+import FloorPlanUploadModal from '../components/floor/FloorPlanUploadModal';
 import FloorMap from '../components/map/FloorMap';
 import { floorService, Floor } from '../services/floor.service';
 import { workareaService, WorkArea } from '../services/workarea.service';
@@ -21,8 +23,11 @@ const FloorDetails: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [editMode, setEditMode] = useState(false);
   
-  // WorkArea modal states
+  // Modal states
   const [workareaFormOpen, setWorkareaFormOpen] = useState(false);
+  const [workareaDetailsOpen, setWorkareaDetailsOpen] = useState(false);
+  const [selectedWorkarea, setSelectedWorkarea] = useState<WorkArea | null>(null);
+  const [uploadModalOpen, setUploadModalOpen] = useState(false);
   const [editingWorkarea, setEditingWorkarea] = useState<WorkArea | null>(null);
   const [deletingWorkarea, setDeletingWorkarea] = useState<WorkArea | null>(null);
   const [deleteWorkareaDialogOpen, setDeleteWorkareaDialogOpen] = useState(false);
@@ -30,6 +35,7 @@ const FloorDetails: React.FC = () => {
 
   // Debounce timers
   const workareaUpdateTimer = useRef<NodeJS.Timeout | null>(null);
+  const workareaResizeTimer = useRef<NodeJS.Timeout | null>(null);
   const assetUpdateTimer = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
@@ -105,6 +111,12 @@ const FloorDetails: React.FC = () => {
     }
   };
 
+  const handleUploadSuccess = () => {
+    if (id) {
+      loadFloorDetails(id);
+    }
+  };
+
   // Map handlers with debounce
   const handleWorkareaMove = useCallback((workareaId: string, x: number, y: number) => {
     // Update UI immediately
@@ -127,48 +139,97 @@ const FloorDetails: React.FC = () => {
       } catch (error) {
         console.error('Error updating work area position:', error);
       }
-    }, 500); // Wait 500ms after last drag event
+    }, 500);
   }, []);
 
-const handleAssetMove = useCallback((assetId: string, x: number, y: number) => {
-  // Find the asset to preserve other location fields
-  const asset = assets.find((a) => a._id === assetId);
-  if (!asset) return;
+  const handleWorkareaResize = useCallback((workareaId: string, width: number, height: number) => {
+    // Update UI immediately
+    setWorkareas((prev) =>
+      prev.map((wa) =>
+        wa._id === workareaId
+          ? { ...wa, dimensions: { width, height } }
+          : wa
+      )
+    );
 
-  // Update UI immediately
-  setAssets((prev) =>
-    prev.map((a) =>
-      a._id === assetId
-        ? {
-            ...a,
-            location: {
-              ...a.location,
-              coordinates: { x, y },
-            },
-          }
-        : a
-    )
-  );
-
-  // Debounce API call
-  if (assetUpdateTimer.current) {
-    clearTimeout(assetUpdateTimer.current);
-  }
-
-  assetUpdateTimer.current = setTimeout(async () => {
-    try {
-      await assetService.updateAsset(assetId, {
-        location: {
-          ...asset.location,
-          coordinates: { x, y },
-          icon_type: asset.location.icon_type || 'computer',  // ← HOZZÁADVA
-        },
-      });
-    } catch (error) {
-      console.error('Error updating asset position:', error);
+    // Debounce API call
+    if (workareaResizeTimer.current) {
+      clearTimeout(workareaResizeTimer.current);
     }
-  }, 500);
-}, [assets]);
+
+    workareaResizeTimer.current = setTimeout(async () => {
+      try {
+        await workareaService.updateWorkArea(workareaId, {
+          dimensions: { width, height },
+        });
+      } catch (error) {
+        console.error('Error updating work area dimensions:', error);
+      }
+    }, 500);
+  }, []);
+
+  const handleAssetMove = useCallback((assetId: string, x: number, y: number) => {
+    const asset = assets.find((a) => a._id === assetId);
+    if (!asset) return;
+
+    // Update UI immediately
+    setAssets((prev) =>
+      prev.map((a) =>
+        a._id === assetId
+          ? {
+              ...a,
+              location: {
+                ...a.location,
+                coordinates: { x, y },
+              },
+            }
+          : a
+      )
+    );
+
+    // Debounce API call
+    if (assetUpdateTimer.current) {
+      clearTimeout(assetUpdateTimer.current);
+    }
+
+    assetUpdateTimer.current = setTimeout(async () => {
+      try {
+        await assetService.updateAsset(assetId, {
+          location: {
+            ...asset.location,
+            coordinates: { x, y },
+            icon_type: asset.location.icon_type || 'computer',
+          },
+        });
+      } catch (error) {
+        console.error('Error updating asset position:', error);
+      }
+    }, 500);
+  }, [assets]);
+
+  // Map click handlers
+  const handleWorkareaClick = (workarea: WorkArea) => {
+    setSelectedWorkarea(workarea);
+    setWorkareaDetailsOpen(true);
+  };
+
+  const handleAssetClick = (asset: Asset) => {
+    navigate(`/assets/${asset._id}`);
+  };
+
+  // Get assets in selected workarea
+  const getAssetsInWorkarea = (workarea: WorkArea): Asset[] => {
+    const waX = workarea.coordinates?.x || 0;
+    const waY = workarea.coordinates?.y || 0;
+    const waWidth = workarea.dimensions?.width || 150;
+    const waHeight = workarea.dimensions?.height || 100;
+
+    return assets.filter((asset) => {
+      const x = asset.location.coordinates.x;
+      const y = asset.location.coordinates.y;
+      return x >= waX && x <= waX + waWidth && y >= waY && y <= waY + waHeight;
+    });
+  };
 
   if (loading) {
     return (
@@ -252,30 +313,29 @@ const handleAssetMove = useCallback((assetId: string, x: number, y: number) => {
       <Card padding="lg">
         <div className={styles.sectionHeader}>
           <h2>Floor Plan</h2>
-          <Button
-            variant={editMode ? 'success' : 'outline'}
-            onClick={() => setEditMode(!editMode)}
-          >
-            {editMode ? '✓ Done Editing' : '✏️ Edit Mode'}
-          </Button>
+          <div className={styles.headerActions}>
+            <Button variant="outline" onClick={() => setUploadModalOpen(true)}>
+              📤 {floor.svg_background ? 'Change' : 'Upload'} Background
+            </Button>
+            <Button
+              variant={editMode ? 'success' : 'outline'}
+              onClick={() => setEditMode(!editMode)}
+            >
+              {editMode ? '✓ Done Editing' : '✏️ Edit Mode'}
+            </Button>
+          </div>
         </div>
 
         <FloorMap
           workareas={workareas}
           assets={assets}
-          onWorkareaClick={(workarea) => {
-            if (!editMode) {
-              console.log('Clicked workarea:', workarea);
-            }
-          }}
-          onAssetClick={(asset) => {
-            if (!editMode) {
-              navigate(`/assets/${asset._id}`);
-            }
-          }}
+          onWorkareaClick={handleWorkareaClick}
+          onAssetClick={handleAssetClick}
           onWorkareaMove={handleWorkareaMove}
+          onWorkareaResize={handleWorkareaResize}
           onAssetMove={handleAssetMove}
           editable={editMode}
+          backgroundImage={floor.svg_background}
         />
       </Card>
 
@@ -290,39 +350,51 @@ const handleAssetMove = useCallback((assetId: string, x: number, y: number) => {
 
         {workareas.length > 0 ? (
           <div className={styles.workareasList}>
-            {workareas.map((workarea) => (
-              <div
-                key={workarea._id}
-                className={styles.workareaItem}
-                onClick={() => console.log('Work area clicked:', workarea)}
-              >
-                <div className={styles.workareaIcon}>🏭</div>
-                <div className={styles.workareaInfo}>
-                  <h4 className={styles.workareaName}>{workarea.name}</h4>
-                  <p className={styles.workareaDetails}>
-                    {workarea.type && `Type: ${workarea.type}`}
-                    {workarea.metadata?.capacity && ` • Capacity: ${workarea.metadata.capacity}`}
-                    {workarea.metadata?.supervisor && ` • Supervisor: ${workarea.metadata.supervisor}`}
-                  </p>
+            {workareas.map((workarea) => {
+              const assetsInArea = getAssetsInWorkarea(workarea);
+              return (
+                <div
+                  key={workarea._id}
+                  className={styles.workareaItem}
+                  onClick={() => handleWorkareaClick(workarea)}
+                >
+                  <div className={styles.workareaIcon}>🏭</div>
+                  <div className={styles.workareaInfo}>
+                    <h4 className={styles.workareaName}>
+                      {workarea.name}
+                        {assetsInArea.length > 0 && (
+                          <span style={{ marginLeft: '8px' }}>
+                            <Badge variant="info">
+                              {assetsInArea.length} asset{assetsInArea.length !== 1 ? 's' : ''}
+                            </Badge>
+                          </span>
+                        )}
+                    </h4>
+                    <p className={styles.workareaDetails}>
+                      {workarea.type && `Type: ${workarea.type}`}
+                      {workarea.metadata?.capacity && ` • Capacity: ${workarea.metadata.capacity}`}
+                      {workarea.metadata?.supervisor && ` • Supervisor: ${workarea.metadata.supervisor}`}
+                    </p>
+                  </div>
+                  <div className={styles.workareaActions}>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={(e) => handleEditWorkArea(workarea, e)}
+                    >
+                      Edit
+                    </Button>
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      onClick={(e) => handleDeleteWorkArea(workarea, e)}
+                    >
+                      Delete
+                    </Button>
+                  </div>
                 </div>
-                <div className={styles.workareaActions}>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={(e) => handleEditWorkArea(workarea, e)}
-                  >
-                    Edit
-                  </Button>
-                  <Button
-                    variant="danger"
-                    size="sm"
-                    onClick={(e) => handleDeleteWorkArea(workarea, e)}
-                  >
-                    Delete
-                  </Button>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         ) : (
           <div className={styles.emptyWorkareas}>
@@ -375,6 +447,23 @@ const handleAssetMove = useCallback((assetId: string, x: number, y: number) => {
         onSuccess={handleWorkareaFormSuccess}
         floorId={id || ''}
         workarea={editingWorkarea}
+      />
+
+      {/* WorkArea Details Modal */}
+      <WorkAreaDetailsModal
+        isOpen={workareaDetailsOpen}
+        onClose={() => setWorkareaDetailsOpen(false)}
+        workarea={selectedWorkarea}
+        assets={selectedWorkarea ? getAssetsInWorkarea(selectedWorkarea) : []}
+        onAssetClick={handleAssetClick}
+      />
+
+      {/* Floor Plan Upload Modal */}
+      <FloorPlanUploadModal
+        isOpen={uploadModalOpen}
+        onClose={() => setUploadModalOpen(false)}
+        onSuccess={handleUploadSuccess}
+        floorId={id || ''}
       />
 
       {/* Delete WorkArea Confirmation */}

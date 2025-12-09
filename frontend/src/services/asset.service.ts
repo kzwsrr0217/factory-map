@@ -85,10 +85,10 @@ export const assetService = {
   },
 
   // Update asset  ← ÚJ
-  updateAsset: async (id: string, data: Partial<Asset>): Promise<Asset> => {
-    const response = await api.patch(`/assets/${id}`, data);
-    return response.data.data;
-  },
+updateAsset: async (id: string, data: Partial<Asset>): Promise<Asset> => {
+  const response = await api.patch(`/assets/${id}`, data);
+  return response.data.data;
+},
 
   // Delete asset
   deleteAsset: async (id: string): Promise<void> => {
