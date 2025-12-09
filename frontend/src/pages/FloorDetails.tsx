@@ -12,6 +12,8 @@ import FloorMap from '../components/map/FloorMap';
 import { floorService, Floor } from '../services/floor.service';
 import { workareaService, WorkArea } from '../services/workarea.service';
 import { assetService, Asset } from '../services/asset.service';
+import { sectionService, Section } from '../services/section.service';
+import { workstationService, Workstation } from '../services/workstation.service';
 import styles from '../styles/pages/FloorDetails.module.css';
 
 const FloorDetails: React.FC = () => {
@@ -20,6 +22,8 @@ const FloorDetails: React.FC = () => {
 
   const [floor, setFloor] = useState<Floor | null>(null);
   const [workareas, setWorkareas] = useState<WorkArea[]>([]);
+  const [sections, setSections] = useState<Section[]>([]);
+  const [workstations, setWorkstations] = useState<Workstation[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
   const [loading, setLoading] = useState(true);
   const [editMode, setEditMode] = useState(false);
@@ -50,14 +54,26 @@ const FloorDetails: React.FC = () => {
   const loadFloorDetails = async (floorId: string) => {
     try {
       setLoading(true);
-      const [floorData, workareasData, allAssets] = await Promise.all([
+      const [floorData, workareasData, sectionsData, workstationsData, allAssets] = await Promise.all([
         floorService.getFloor(floorId),
         workareaService.getWorkAreas(floorId),
+        sectionService.getSections(),
+        workstationService.getWorkstations(),
         assetService.getAssets(),
       ]);
 
       setFloor(floorData);
       setWorkareas(workareasData);
+      
+      // Filter sections for this floor's workareas
+      const workareaIds = workareasData.map(wa => wa._id);
+      const floorSections = sectionsData.filter(s => workareaIds.includes(s.workarea_id));
+      setSections(floorSections);
+
+      // Filter workstations for this floor's sections
+      const sectionIds = floorSections.map(s => s._id);
+      const floorWorkstations = workstationsData.filter(ws => sectionIds.includes(ws.section_id));
+      setWorkstations(floorWorkstations);
 
       // Filter assets for this floor
       const floorAssets = allAssets.filter(
@@ -271,6 +287,18 @@ const FloorDetails: React.FC = () => {
     });
   };
 
+  // Get sections in workarea
+  const getSectionsInWorkarea = (workarea: WorkArea): Section[] => {
+    return sections.filter(s => s.workarea_id === workarea._id);
+  };
+
+  // Get workstations in workarea
+  const getWorkstationsInWorkarea = (workarea: WorkArea): Workstation[] => {
+    const workareaeSections = getSectionsInWorkarea(workarea);
+    const sectionIds = workareaeSections.map(s => s._id);
+    return workstations.filter(ws => sectionIds.includes(ws.section_id));
+  };
+
   if (loading) {
     return (
       <div className={styles.loading}>
@@ -342,6 +370,14 @@ const FloorDetails: React.FC = () => {
               <span className={styles.metadataValue}>{workareas.length}</span>
             </div>
             <div className={styles.metadataItem}>
+              <span className={styles.metadataLabel}>Sections</span>
+              <span className={styles.metadataValue}>{sections.length}</span>
+            </div>
+            <div className={styles.metadataItem}>
+              <span className={styles.metadataLabel}>Workstations</span>
+              <span className={styles.metadataValue}>{workstations.length}</span>
+            </div>
+            <div className={styles.metadataItem}>
               <span className={styles.metadataLabel}>Assets</span>
               <span className={styles.metadataValue}>{assets.length}</span>
             </div>
@@ -392,6 +428,9 @@ const FloorDetails: React.FC = () => {
           <div className={styles.workareasList}>
             {workareas.map((workarea) => {
               const assetsInArea = getAssetsInWorkarea(workarea);
+              const sectionsInArea = getSectionsInWorkarea(workarea);
+              const workstationsInArea = getWorkstationsInWorkarea(workarea);
+              
               return (
                 <div
                   key={workarea._id}
@@ -412,8 +451,8 @@ const FloorDetails: React.FC = () => {
                     </h4>
                     <p className={styles.workareaDetails}>
                       {workarea.type && `Type: ${workarea.type}`}
-                      {workarea.metadata?.capacity && ` • Capacity: ${workarea.metadata.capacity}`}
-                      {workarea.metadata?.supervisor && ` • Supervisor: ${workarea.metadata.supervisor}`}
+                      {sectionsInArea.length > 0 && ` • ${sectionsInArea.length} sections`}
+                      {workstationsInArea.length > 0 && ` • ${workstationsInArea.length} workstations`}
                     </p>
                   </div>
                   <div className={styles.workareaActions}>
@@ -516,7 +555,12 @@ const FloorDetails: React.FC = () => {
         onClose={() => setWorkareaDetailsOpen(false)}
         workarea={selectedWorkarea}
         assets={selectedWorkarea ? getAssetsInWorkarea(selectedWorkarea) : []}
+        sections={selectedWorkarea ? getSectionsInWorkarea(selectedWorkarea) : []}
+        workstations={selectedWorkarea ? getWorkstationsInWorkarea(selectedWorkarea) : []}
         onAssetClick={handleAssetClick}
+        onRefresh={() => {
+          if (id) loadFloorDetails(id);
+        }}
       />
 
       {/* Floor Plan Upload Modal */}
