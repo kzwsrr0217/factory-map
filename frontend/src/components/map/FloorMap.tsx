@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import { WorkArea } from '../../services/workarea.service';
 import { Asset } from '../../services/asset.service';
 import Tooltip from '../common/Tooltip';
@@ -16,6 +16,8 @@ interface FloorMapProps {
   backgroundImage?: string;
 }
 
+const GRID_SIZE = 50; // Grid snap size
+
 const FloorMap: React.FC<FloorMapProps> = ({
   workareas,
   assets,
@@ -28,8 +30,10 @@ const FloorMap: React.FC<FloorMapProps> = ({
   backgroundImage,
 }) => {
   const svgRef = useRef<SVGSVGElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  
   const [dragging, setDragging] = useState<{
-    type: 'workarea' | 'asset' | 'resize';
+    type: 'workarea' | 'asset' | 'resize' | 'pan';
     id: string;
     offsetX: number;
     offsetY: number;
@@ -37,9 +41,12 @@ const FloorMap: React.FC<FloorMapProps> = ({
     startHeight?: number;
   } | null>(null);
 
-  const [viewBox] = useState({ x: 0, y: 0, width: 1000, height: 800 });
+  const [viewBox, setViewBox] = useState({ x: 0, y: 0, width: 1000, height: 800 });
   const [zoom, setZoom] = useState(1);
   const [backgroundOpacity, setBackgroundOpacity] = useState(0.5);
+  const [snapToGrid, setSnapToGrid] = useState(true);
+  const [showGrid, setShowGrid] = useState(true);
+  const [showMinimap, setShowMinimap] = useState(true);
 
   // Tooltip state
   const [tooltip, setTooltip] = useState<{
@@ -56,9 +63,15 @@ const FloorMap: React.FC<FloorMapProps> = ({
 
   const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Snap to grid helper
+  const snapToGridHelper = (value: number): number => {
+    if (!snapToGrid) return value;
+    return Math.round(value / GRID_SIZE) * GRID_SIZE;
+  };
+
   // Handle mouse move for dragging
   const handleMouseMove = (e: React.MouseEvent<SVGSVGElement>) => {
-    if (!dragging || !editable) return;
+    if (!dragging) return;
 
     const svg = svgRef.current;
     if (!svg) return;
@@ -69,22 +82,37 @@ const FloorMap: React.FC<FloorMapProps> = ({
 
     const svgPoint = point.matrixTransform(svg.getScreenCTM()?.inverse());
 
-    if (dragging.type === 'workarea' && onWorkareaMove) {
-      const newX = svgPoint.x - dragging.offsetX;
-      const newY = svgPoint.y - dragging.offsetY;
+    if (dragging.type === 'pan') {
+      // Pan the view
+      const dx = svgPoint.x - dragging.offsetX;
+      const dy = svgPoint.y - dragging.offsetY;
+      
+      setViewBox(prev => ({
+        ...prev,
+        x: prev.x - dx,
+        y: prev.y - dy,
+      }));
+      
+      setDragging({ ...dragging, offsetX: svgPoint.x, offsetY: svgPoint.y });
+    } else if (dragging.type === 'workarea' && onWorkareaMove && editable) {
+      const newX = snapToGridHelper(svgPoint.x - dragging.offsetX);
+      const newY = snapToGridHelper(svgPoint.y - dragging.offsetY);
       onWorkareaMove(dragging.id, Math.round(newX), Math.round(newY));
-    } else if (dragging.type === 'asset' && onAssetMove) {
-      const newX = svgPoint.x - dragging.offsetX;
-      const newY = svgPoint.y - dragging.offsetY;
+    } else if (dragging.type === 'asset' && onAssetMove && editable) {
+      const newX = snapToGridHelper(svgPoint.x - dragging.offsetX);
+      const newY = snapToGridHelper(svgPoint.y - dragging.offsetY);
       onAssetMove(dragging.id, Math.round(newX), Math.round(newY));
-    } else if (dragging.type === 'resize' && onWorkareaResize) {
+    } else if (dragging.type === 'resize' && onWorkareaResize && editable) {
       const workarea = workareas.find((w) => w._id === dragging.id);
       if (!workarea) return;
 
       const newWidth = Math.max(50, svgPoint.x - (workarea.coordinates?.x || 0));
       const newHeight = Math.max(30, svgPoint.y - (workarea.coordinates?.y || 0));
 
-      onWorkareaResize(dragging.id, Math.round(newWidth), Math.round(newHeight));
+      const snappedWidth = snapToGridHelper(newWidth);
+      const snappedHeight = snapToGridHelper(newHeight);
+
+      onWorkareaResize(dragging.id, Math.round(snappedWidth), Math.round(snappedHeight));
     }
   };
 
@@ -104,6 +132,7 @@ const FloorMap: React.FC<FloorMapProps> = ({
 
   const handleResetView = () => {
     setZoom(1);
+    setViewBox({ x: 0, y: 0, width: 1000, height: 800 });
   };
 
   // Opacity control
@@ -113,6 +142,62 @@ const FloorMap: React.FC<FloorMapProps> = ({
 
   const handleOpacityDecrease = () => {
     setBackgroundOpacity((prev) => Math.max(prev - 0.1, 0.1));
+  };
+
+  // Pan mode (spacebar or middle mouse)
+  const startPanning = (e: React.MouseEvent) => {
+    if (e.button === 1 || e.button === 0) { // Middle click or left click in pan mode
+      e.preventDefault();
+      const svg = svgRef.current;
+      if (!svg) return;
+
+      const point = svg.createSVGPoint();
+      point.x = e.clientX;
+      point.y = e.clientY;
+      const svgPoint = point.matrixTransform(svg.getScreenCTM()?.inverse());
+
+      setDragging({
+        type: 'pan',
+        id: '',
+        offsetX: svgPoint.x,
+        offsetY: svgPoint.y,
+      });
+    }
+  };
+
+  // Export as PNG
+  const handleExportImage = useCallback(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+
+    const svgData = new XMLSerializer().serializeToString(svg);
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    const img = new Image();
+
+    canvas.width = 1000;
+    canvas.height = 800;
+
+    img.onload = () => {
+      ctx?.drawImage(img, 0, 0);
+      canvas.toBlob((blob) => {
+        if (blob) {
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = 'floor-plan.png';
+          a.click();
+          URL.revokeObjectURL(url);
+        }
+      });
+    };
+
+    img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)));
+  }, []);
+
+  // Print
+  const handlePrint = () => {
+    window.print();
   };
 
   // Tooltip handlers
@@ -130,7 +215,7 @@ const FloorMap: React.FC<FloorMapProps> = ({
         y: e.clientY,
         content,
       });
-    }, 500); // Show after 500ms hover
+    }, 500);
   };
 
   const hideTooltip = () => {
@@ -229,7 +314,7 @@ const FloorMap: React.FC<FloorMapProps> = ({
   };
 
   return (
-    <div className={styles.mapContainer}>
+    <div ref={containerRef} className={styles.mapContainer}>
       {/* Controls */}
       <div className={styles.controls}>
         <button onClick={handleZoomIn} className={styles.controlButton} title="Zoom In">
@@ -240,6 +325,27 @@ const FloorMap: React.FC<FloorMapProps> = ({
         </button>
         <button onClick={handleResetView} className={styles.controlButton} title="Reset View">
           🔄
+        </button>
+        <button
+          onClick={() => setSnapToGrid(!snapToGrid)}
+          className={`${styles.controlButton} ${snapToGrid ? styles.active : ''}`}
+          title="Snap to Grid"
+        >
+          🧲
+        </button>
+        <button
+          onClick={() => setShowGrid(!showGrid)}
+          className={`${styles.controlButton} ${showGrid ? styles.active : ''}`}
+          title="Toggle Grid"
+        >
+          #️⃣
+        </button>
+        <button
+          onClick={() => setShowMinimap(!showMinimap)}
+          className={`${styles.controlButton} ${showMinimap ? styles.active : ''}`}
+          title="Toggle Minimap"
+        >
+          🗺️
         </button>
         {backgroundImage && (
           <>
@@ -259,6 +365,12 @@ const FloorMap: React.FC<FloorMapProps> = ({
             </button>
           </>
         )}
+        <button onClick={handleExportImage} className={styles.controlButton} title="Export as PNG">
+          💾
+        </button>
+        <button onClick={handlePrint} className={styles.controlButton} title="Print">
+          🖨️
+        </button>
         {editable && (
           <div className={styles.editMode}>
             <span>✏️ Edit Mode</span>
@@ -273,6 +385,11 @@ const FloorMap: React.FC<FloorMapProps> = ({
         viewBox={`${viewBox.x} ${viewBox.y} ${viewBox.width / zoom} ${viewBox.height / zoom}`}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
+        onMouseDown={(e) => {
+          if (e.button === 1 || (e.button === 0 && e.shiftKey)) {
+            startPanning(e);
+          }
+        }}
         onMouseLeave={() => {
           handleMouseUp();
           hideTooltip();
@@ -294,8 +411,14 @@ const FloorMap: React.FC<FloorMapProps> = ({
 
         {/* Grid Background */}
         <defs>
-          <pattern id="grid" width="50" height="50" patternUnits="userSpaceOnUse">
-            <path d="M 50 0 L 0 0 0 50" fill="none" stroke="#e5e7eb" strokeWidth="1" opacity="0.5" />
+          <pattern id="grid" width={GRID_SIZE} height={GRID_SIZE} patternUnits="userSpaceOnUse">
+            <path
+              d={`M ${GRID_SIZE} 0 L 0 0 0 ${GRID_SIZE}`}
+              fill="none"
+              stroke="#e5e7eb"
+              strokeWidth="1"
+              opacity={showGrid ? "0.5" : "0"}
+            />
           </pattern>
         </defs>
         {!backgroundImage && <rect width="100%" height="100%" fill="url(#grid)" />}
@@ -312,7 +435,6 @@ const FloorMap: React.FC<FloorMapProps> = ({
 
           return (
             <g key={workarea._id}>
-              {/* Work Area Rectangle */}
               <rect
                 x={x}
                 y={y}
@@ -349,7 +471,6 @@ const FloorMap: React.FC<FloorMapProps> = ({
                 style={{ cursor: editable ? 'move' : 'pointer' }}
               />
 
-              {/* Work Area Label */}
               <text
                 x={x + width / 2}
                 y={y + height / 2 - 5}
@@ -361,7 +482,6 @@ const FloorMap: React.FC<FloorMapProps> = ({
                 {workarea.name}
               </text>
 
-              {/* Type Badge */}
               {workarea.type && (
                 <text
                   x={x + width / 2}
@@ -375,7 +495,6 @@ const FloorMap: React.FC<FloorMapProps> = ({
                 </text>
               )}
 
-              {/* Asset count badge */}
               {assetsInArea.length > 0 && (
                 <g>
                   <circle
@@ -400,7 +519,6 @@ const FloorMap: React.FC<FloorMapProps> = ({
                 </g>
               )}
 
-              {/* Resize Handle (bottom-right corner) */}
               {editable && (
                 <circle
                   cx={x + width}
@@ -426,7 +544,6 @@ const FloorMap: React.FC<FloorMapProps> = ({
 
           return (
             <g key={asset._id}>
-              {/* Asset Circle */}
               <circle
                 cx={x}
                 cy={y}
@@ -468,7 +585,6 @@ const FloorMap: React.FC<FloorMapProps> = ({
                 style={{ cursor: editable ? 'move' : 'pointer' }}
               />
 
-              {/* Asset Icon */}
               <text
                 x={x}
                 y={y + 5}
@@ -480,7 +596,6 @@ const FloorMap: React.FC<FloorMapProps> = ({
                 💻
               </text>
 
-              {/* Asset Label */}
               <text
                 x={x}
                 y={y + 35}
@@ -500,6 +615,44 @@ const FloorMap: React.FC<FloorMapProps> = ({
           );
         })}
       </svg>
+
+      {/* Minimap */}
+      {showMinimap && (
+        <div className={styles.minimap}>
+          <svg viewBox="0 0 1000 800" className={styles.minimapSvg}>
+            <rect width="1000" height="800" fill="#f3f4f6" />
+            {workareas.map((wa) => (
+              <rect
+                key={wa._id}
+                x={wa.coordinates?.x || 0}
+                y={wa.coordinates?.y || 0}
+                width={wa.dimensions?.width || 150}
+                height={wa.dimensions?.height || 100}
+                fill="#7c3aed"
+                opacity="0.5"
+              />
+            ))}
+            {assets.map((asset) => (
+              <circle
+                key={asset._id}
+                cx={asset.location.coordinates.x}
+                cy={asset.location.coordinates.y}
+                r="5"
+                fill={asset.itsm.is_managed ? '#10b981' : '#6b7280'}
+              />
+            ))}
+            <rect
+              x={viewBox.x}
+              y={viewBox.y}
+              width={viewBox.width / zoom}
+              height={viewBox.height / zoom}
+              fill="none"
+              stroke="#3b82f6"
+              strokeWidth="3"
+            />
+          </svg>
+        </div>
+      )}
 
       {/* Tooltip */}
       <Tooltip x={tooltip.x} y={tooltip.y} visible={tooltip.visible}>
@@ -529,7 +682,14 @@ const FloorMap: React.FC<FloorMapProps> = ({
         {backgroundImage && (
           <div className={styles.legendItem}>
             <span style={{ fontSize: '12px', color: '#6b7280' }}>
-              Background: {Math.round(backgroundOpacity * 100)}%
+              BG: {Math.round(backgroundOpacity * 100)}%
+            </span>
+          </div>
+        )}
+        {snapToGrid && (
+          <div className={styles.legendItem}>
+            <span style={{ fontSize: '12px', color: '#6b7280' }}>
+              🧲 Grid: {GRID_SIZE}px
             </span>
           </div>
         )}
@@ -538,7 +698,7 @@ const FloorMap: React.FC<FloorMapProps> = ({
       {/* Instructions */}
       {editable && (
         <div className={styles.instructions}>
-          <p>💡 Drag items to move • Drag corners to resize work areas</p>
+          <p>💡 Drag items • Resize corners • Shift+Drag to pan</p>
         </div>
       )}
     </div>

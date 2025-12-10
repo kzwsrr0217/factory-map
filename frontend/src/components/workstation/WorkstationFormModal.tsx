@@ -125,16 +125,29 @@ const WorkstationFormModal: React.FC<WorkstationFormModalProps> = ({
           helperText="Type or category of workstation"
         />
 
-        <Select
-          label="Status"
-          value={formData.status}
-          onChange={(e) => setFormData({ ...formData, status: e.target.value })}
-          options={[
-            { value: 'active', label: 'Active' },
-            { value: 'inactive', label: 'Inactive' },
-            { value: 'maintenance', label: 'Maintenance' },
-          ]}
-        />
+        <div>
+          <label
+            style={{
+              display: 'block',
+              marginBottom: '8px',
+              fontSize: 'var(--font-size-sm)',
+              fontWeight: 'var(--font-weight-semibold)',
+              color: 'var(--color-gray-700)',
+            }}
+          >
+            Status
+          </label>
+          <Select
+            value={formData.status}
+            onChange={(value) => setFormData({ ...formData, status: value })}
+            options={[
+              { value: 'active', label: 'Active' },
+              { value: 'inactive', label: 'Inactive' },
+              { value: 'maintenance', label: 'Maintenance' },
+            ]}
+            placeholder="Select status"
+          />
+        </div>
 
         <div className={styles.note}>
           <p>💡 Position this workstation on the floor plan in the Map View</p>

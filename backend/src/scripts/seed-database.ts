@@ -1,20 +1,4 @@
-/**
- * Database Seed Script
- * Populates the database with test data
- */
-
 import mongoose from 'mongoose';
-import dotenv from 'dotenv';
-import path from 'path';
-
-// Load environment variables
-// In Docker: env vars are provided by docker-compose
-// Locally: load from .env file
-if (!process.env.MONGODB_URI) {
-  dotenv.config({ path: path.join(__dirname, '../../../.env') });
-}
-
-// Import models
 import Building from '../models/Building';
 import Floor from '../models/Floor';
 import WorkArea from '../models/WorkArea';
@@ -22,442 +6,815 @@ import Section from '../models/Section';
 import Workstation from '../models/Workstation';
 import Asset from '../models/Asset';
 
-// Determine MongoDB URI
-// Priority: 1. Environment variable, 2. Docker default, 3. Local default
-const getMongoURI = (): string => {
-  if (process.env.MONGODB_URI) {
-    return process.env.MONGODB_URI;
-  }
-  
-  // Check if running in Docker (common indicators)
-  const isDocker = process.env.DOCKER_ENV === 'true' || 
-                   process.env.HOSTNAME?.includes('factorymap') ||
-                   process.env.HOME === '/root';
-  
-  return isDocker 
-    ? 'mongodb://mongo:27017/factorymap'      // Docker
-    : 'mongodb://localhost:27017/factorymap';  // Local
-};
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://mongodb:27017/factory-map';
 
-const MONGODB_URI = getMongoURI();
-
-console.log(`🔗 Connecting to: ${MONGODB_URI.replace(/\/\/.*@/, '//*****@')}`); // Hide credentials if any
-
-
-async function connectDB() {
+async function seed() {
   try {
     await mongoose.connect(MONGODB_URI);
     console.log('✅ Connected to MongoDB');
-  } catch (error) {
-    console.error('❌ MongoDB connection error:', error);
-    process.exit(1);
-  }
-}
 
-/**
- * Clear all collections
- */
-async function clearDatabase() {
-  console.log('\n🗑️  Clearing existing data...');
-  
-  await Asset.deleteMany({});
-  await Workstation.deleteMany({});
-  await Section.deleteMany({});
-  await WorkArea.deleteMany({});
-  await Floor.deleteMany({});
-  await Building.deleteMany({});
-  
-  console.log('✅ Database cleared');
-}
+    // Clear existing data
+    console.log('🗑️  Clearing existing data...');
+    await Promise.all([
+      Building.deleteMany({}),
+      Floor.deleteMany({}),
+      WorkArea.deleteMany({}),
+      Section.deleteMany({}),
+      Workstation.deleteMany({}),
+      Asset.deleteMany({}),
+    ]);
+    console.log('✅ Existing data cleared');
 
-/**
- * Seed the database
- */
-async function seed() {
-  console.log('\n🌱 Seeding database...\n');
-
-  // ==========================================
-  // BUILDING 1: Gyártócsarnok A
-  // ==========================================
-  
-  const building1 = await Building.create({
-    name: '1-es Gyártócsarnok',
-    address: 'Gyár utca 1., Budapest',
-    metadata: {
-      total_area: 5000,
-      construction_year: 2010,
-    },
-  });
-  console.log(`✅ Building: ${building1.name}`);
-
-  // Floor 1: Földszint
-  const floor1_1 = await Floor.create({
-    building_id: building1._id,
-    floor_number: 0,
-    name: 'Földszint',
-    map_file: 'building_1_floor_0.svg',
-    map_metadata: {
-      viewBox: '0 0 1000 800',
-      scale: '1:100',
-      bounds: [[0, 0], [1000, 800]],
-    },
-  });
-  console.log(`  ✅ Floor: ${floor1_1.name}`);
-
-  // Work Area 1: Tekercselés
-  const workarea1_1 = await WorkArea.create({
-    floor_id: floor1_1._id,
-    name: 'Tekercselés',
-    type: 'production',
-    svg_zone_id: 'zone_tekercselesz',
-    color: '#4CAF50',
-    manager: 'Nagy István',
-  });
-  console.log(`    ✅ Work Area: ${workarea1_1.name}`);
-
-  // Section 1: A sor
-  const section1_1_1 = await Section.create({
-    workarea_id: workarea1_1._id,
-    name: 'Tekercselő sor A',
-    coordinates: { x: 150, y: 150 },
-    capacity: 10,
-    shift_schedule: '3-shift',
-  });
-  console.log(`      ✅ Section: ${section1_1_1.name}`);
-
-  // Workstations in Section A (5 db)
-  const workstations_a = [];
-  for (let i = 1; i <= 5; i++) {
-    const ws = await Workstation.create({
-      section_id: section1_1_1._id,
-      name: `TA-0${i}`,
-      coordinates: { x: 160 + i * 50, y: 160 },
-      rotation: 0,
-      type: 'desk',
-      status: 'active',
-    });
-    workstations_a.push(ws);
-    console.log(`        ✅ Workstation: ${ws.name}`);
-  }
-
-  // Assets for Section A (3 PCs with ITSM, 2 without)
-  const asset1 = await Asset.create({
-    hierarchy: {
-      building_id: building1._id,
-      floor_id: floor1_1._id,
-      workarea_id: workarea1_1._id,
-      section_id: section1_1_1._id,
-      workstation_id: workstations_a[0]._id,
-    },
-    itsm: {
-      hardware_id: 'HW-PC-0001',
-      is_managed: true,
-      last_synced: new Date(),
-      sync_status: 'success',
-      sync_errors: [],
-    },
-    basic_info: {
-      display_name: 'Művezetői PC #1',
-      asset_tag: 'ASSET-2023-0001',
-      serial_number: 'DELL-SN-ABC123',
-      model: 'Dell OptiPlex 7090',
-      manufacturer: 'Dell',
-      status: 'Deployed',
-      os_type: 'Windows',
-      os_version: '11 Pro',
-      mac_address: '00:1A:2B:3C:4D:5E',
-    },
-    technical_specs: {
-      cpu: 'Intel i7-11700',
-      ram: '16GB DDR4',
-      storage: '512GB NVMe SSD',
-    },
-    network: {
-      ip_address: '192.168.1.101',
-      hostname: 'PC-TEKERCS-01',
-      vlan: 'VLAN-100',
-    },
-    assigned_person: {
-      person_id: 'PERSON-0001',
-      full_name: 'Kovács János',
-    },
-    software: [
-      {
-        software_id: 'SW-OFFICE-365',
-        display_name: 'Microsoft 365',
-        source: 'itsm',
+    // ==================== BUILDING 1: Main Production Facility ====================
+    console.log('🏢 Creating Building 1: Main Production Facility...');
+    const building1 = await Building.create({
+      name: 'Main Production Facility',
+      address: '1234 Industrial Parkway, Manufacturing District',
+      metadata: {
+        total_area: 15000,
+        year_built: 2018,
+        num_floors: 3,
       },
-    ],
-    location: {
-      coordinates: { x: 165, y: 165 },
-      rotation: 0,
-      icon_type: 'desktop',
-      description: '1-es épület, Földszint, Tekercselés, A sor, TA-01',
-    },
-    custom_fields: {
-      physical_condition: 'Good',
-      environment: 'Production',
-      notes: 'Művezetői munkaállomás',
-      tags: ['critical', 'supervisor'],
-    },
-    created_by: 'seed-script',
-  });
-  console.log(`          ✅ Asset: ${asset1.basic_info.display_name} (ITSM managed)`);
+    });
 
-  const asset2 = await Asset.create({
-    hierarchy: {
+    // Floor 0 - Ground Floor (Production)
+    const floor0 = await Floor.create({
       building_id: building1._id,
-      floor_id: floor1_1._id,
-      workarea_id: workarea1_1._id,
-      section_id: section1_1_1._id,
-      workstation_id: workstations_a[1]._id,
-    },
-    itsm: {
-      hardware_id: 'HW-PC-0002',
-      is_managed: true,
-      last_synced: new Date(),
-      sync_status: 'success',
-      sync_errors: [],
-    },
-    basic_info: {
-      display_name: 'Tekercselő PC #1',
-      asset_tag: 'ASSET-2023-0002',
-      serial_number: 'HP-SN-XYZ456',
-      model: 'HP EliteDesk 800 G8',
-      manufacturer: 'HP',
-      status: 'Deployed',
-      os_type: 'Windows',
-      os_version: '10 Pro',
-      mac_address: '00:1A:2B:3C:4D:5F',
-    },
-    technical_specs: {
-      cpu: 'Intel i5-11500',
-      ram: '8GB DDR4',
-      storage: '256GB SSD',
-    },
-    network: {
-      ip_address: '192.168.1.102',
-      hostname: 'PC-TEKERCS-02',
-    },
-    assigned_person: {
-      person_id: 'PERSON-0002',
-      full_name: 'Nagy István',
-    },
-    location: {
-      coordinates: { x: 215, y: 165 },
-      rotation: 0,
-      icon_type: 'desktop',
-    },
-    created_by: 'seed-script',
-  });
-  console.log(`          ✅ Asset: ${asset2.basic_info.display_name} (ITSM managed)`);
+      floor_number: 0,
+      name: 'Ground Floor - Main Production',
+      metadata: {
+        area: 5000,
+        ceiling_height: 6.5,
+      },
+    });
 
-  // Manual asset (no ITSM)
-  const asset3 = await Asset.create({
-    hierarchy: {
+    // Work Area 1: Assembly Line A
+    const workarea1 = await WorkArea.create({
+      floor_id: floor0._id,
+      name: 'Assembly Line A',
+      type: 'Production',
+      coordinates: { x: 100, y: 150 },
+      dimensions: { width: 350, height: 200 },
+      metadata: {
+        supervisor: 'John Martinez',
+        capacity: 25,
+      },
+    });
+
+    // Sections in Assembly Line A
+    const section1 = await Section.create({
+      workarea_id: workarea1._id,
+      name: 'Pre-Assembly',
+      shift_schedule: '3-shift',
+      capacity: 8,
+      coordinates: { x: 120, y: 180 },
+    });
+
+    const section2 = await Section.create({
+      workarea_id: workarea1._id,
+      name: 'Main Assembly',
+      shift_schedule: '3-shift',
+      capacity: 12,
+      coordinates: { x: 250, y: 180 },
+    });
+
+    const section3 = await Section.create({
+      workarea_id: workarea1._id,
+      name: 'Final Assembly',
+      shift_schedule: '3-shift',
+      capacity: 5,
+      coordinates: { x: 380, y: 180 },
+    });
+
+    // Workstations in sections
+    const workstations1 = await Workstation.insertMany([
+      { section_id: section1._id, name: 'WS-A1', type: 'Workbench', status: 'active', coordinates: { x: 130, y: 200 } },
+      { section_id: section1._id, name: 'WS-A2', type: 'Workbench', status: 'active', coordinates: { x: 180, y: 200 } },
+      { section_id: section2._id, name: 'WS-B1', type: 'Assembly Station', status: 'active', coordinates: { x: 260, y: 200 } },
+      { section_id: section2._id, name: 'WS-B2', type: 'Assembly Station', status: 'active', coordinates: { x: 310, y: 200 } },
+      { section_id: section3._id, name: 'WS-C1', type: 'Inspection', status: 'active', coordinates: { x: 390, y: 200 } },
+    ]);
+
+    // Work Area 2: Quality Control
+    const workarea2 = await WorkArea.create({
+      floor_id: floor0._id,
+      name: 'Quality Control',
+      type: 'Testing',
+      coordinates: { x: 550, y: 150 },
+      dimensions: { width: 280, height: 200 },
+      metadata: {
+        supervisor: 'Sarah Chen',
+        capacity: 12,
+      },
+    });
+
+    const section4 = await Section.create({
+      workarea_id: workarea2._id,
+      name: 'Incoming Inspection',
+      shift_schedule: 'Day shift',
+      capacity: 5,
+      coordinates: { x: 570, y: 180 },
+    });
+
+    const section5 = await Section.create({
+      workarea_id: workarea2._id,
+      name: 'Final Testing',
+      shift_schedule: 'Day shift',
+      capacity: 7,
+      coordinates: { x: 690, y: 180 },
+    });
+
+    const workstations2 = await Workstation.insertMany([
+      { section_id: section4._id, name: 'QC-01', type: 'Test Station', status: 'active', coordinates: { x: 580, y: 200 } },
+      { section_id: section4._id, name: 'QC-02', type: 'Test Station', status: 'active', coordinates: { x: 630, y: 200 } },
+      { section_id: section5._id, name: 'QC-03', type: 'Test Station', status: 'active', coordinates: { x: 700, y: 200 } },
+      { section_id: section5._id, name: 'QC-04', type: 'Test Station', status: 'maintenance', coordinates: { x: 750, y: 200 } },
+    ]);
+
+    // Work Area 3: Packaging
+    const workarea3 = await WorkArea.create({
+      floor_id: floor0._id,
+      name: 'Packaging & Shipping',
+      type: 'Logistics',
+      coordinates: { x: 100, y: 400 },
+      dimensions: { width: 730, height: 180 },
+      metadata: {
+        supervisor: 'Mike Johnson',
+        capacity: 15,
+      },
+    });
+
+    const section6 = await Section.create({
+      workarea_id: workarea3._id,
+      name: 'Packaging',
+      shift_schedule: '2-shift',
+      capacity: 10,
+      coordinates: { x: 150, y: 450 },
+    });
+
+    const section7 = await Section.create({
+      workarea_id: workarea3._id,
+      name: 'Shipping Prep',
+      shift_schedule: 'Day shift',
+      capacity: 5,
+      coordinates: { x: 500, y: 450 },
+    });
+
+// Packaging workstations - HOZZÁAD az assets creation ELŐTT
+const workstations3 = await Workstation.insertMany([
+  { section_id: section6._id, name: 'PKG-1', type: 'Packing Station', status: 'active', coordinates: { x: 170, y: 480 } },
+  { section_id: section6._id, name: 'PKG-2', type: 'Packing Station', status: 'active', coordinates: { x: 250, y: 480 } },
+  { section_id: section6._id, name: 'PKG-3', type: 'Packing Station', status: 'active', coordinates: { x: 330, y: 480 } },
+  { section_id: section7._id, name: 'SHIP-1', type: 'Loading Dock', status: 'active', coordinates: { x: 520, y: 480 } },
+  { section_id: section7._id, name: 'SHIP-2', type: 'Loading Dock', status: 'active', coordinates: { x: 650, y: 480 } },
+]);
+
+console.log(`✅ Created ${workstations3.length} workstations for Packaging`); // ← ADD THIS LINE
+
+    // Assets for Ground Floor
+    const assets1 = await Asset.insertMany([
+      // Assembly Line A assets
+      {
+        hierarchy: {
+          building_id: building1._id,
+          floor_id: floor0._id,
+          workarea_id: workarea1._id,
+          section_id: section1._id,
+          workstation_id: workstations1[0]._id,
+        },
+        itsm: { is_managed: true, hardware_id: 'HW-001', sync_status: 'success' },
+        basic_info: {
+          display_name: 'Assembly PC-01',
+          asset_tag: 'AST-001',
+          serial_number: 'SN-2024-001',
+          model: 'OptiPlex 7090',
+          manufacturer: 'Dell',
+          status: 'Active',
+          os_type: 'Windows',
+          os_version: '11 Pro',
+        },
+        location: {
+          coordinates: { x: 140, y: 210 },
+          rotation: 0,
+          icon_type: 'computer',
+        },
+        assigned_person: { person_id: 'EMP-101', full_name: 'Alice Thompson' },
+      },
+      {
+        hierarchy: {
+          building_id: building1._id,
+          floor_id: floor0._id,
+          workarea_id: workarea1._id,
+          section_id: section1._id,
+          workstation_id: workstations1[1]._id,
+        },
+        itsm: { is_managed: true, hardware_id: 'HW-002', sync_status: 'success' },
+        basic_info: {
+          display_name: 'Assembly PC-02',
+          asset_tag: 'AST-002',
+          serial_number: 'SN-2024-002',
+          model: 'OptiPlex 7090',
+          manufacturer: 'Dell',
+          status: 'Active',
+          os_type: 'Windows',
+          os_version: '11 Pro',
+        },
+        location: {
+          coordinates: { x: 190, y: 210 },
+          rotation: 0,
+          icon_type: 'computer',
+        },
+        assigned_person: { person_id: 'EMP-102', full_name: 'Bob Williams' },
+      },
+      {
+        hierarchy: {
+          building_id: building1._id,
+          floor_id: floor0._id,
+          workarea_id: workarea1._id,
+          section_id: section2._id,
+          workstation_id: workstations1[2]._id,
+        },
+        itsm: { is_managed: true, hardware_id: 'HW-003', sync_status: 'success' },
+        basic_info: {
+          display_name: 'Assembly PC-03',
+          asset_tag: 'AST-003',
+          serial_number: 'SN-2024-003',
+          model: 'ThinkCentre M720',
+          manufacturer: 'Lenovo',
+          status: 'Active',
+          os_type: 'Windows',
+          os_version: '11 Pro',
+        },
+        location: {
+          coordinates: { x: 270, y: 210 },
+          rotation: 0,
+          icon_type: 'computer',
+        },
+        assigned_person: { person_id: 'EMP-103', full_name: 'Carol Davis' },
+      },
+      // Quality Control assets
+      {
+        hierarchy: {
+          building_id: building1._id,
+          floor_id: floor0._id,
+          workarea_id: workarea2._id,
+          section_id: section4._id,
+          workstation_id: workstations2[0]._id,
+        },
+        itsm: { is_managed: true, hardware_id: 'HW-010', sync_status: 'success' },
+        basic_info: {
+          display_name: 'QC-Testing-01',
+          asset_tag: 'AST-010',
+          serial_number: 'SN-2024-010',
+          model: 'Precision 3650',
+          manufacturer: 'Dell',
+          status: 'Active',
+          os_type: 'Windows',
+          os_version: '11 Pro',
+        },
+        location: {
+          coordinates: { x: 590, y: 210 },
+          rotation: 0,
+          icon_type: 'computer',
+        },
+        assigned_person: { person_id: 'EMP-201', full_name: 'David Martinez' },
+      },
+      {
+        hierarchy: {
+          building_id: building1._id,
+          floor_id: floor0._id,
+          workarea_id: workarea2._id,
+          section_id: section4._id,
+          workstation_id: workstations2[1]._id,
+        },
+        itsm: { is_managed: false },
+        basic_info: {
+          display_name: 'QC-Testing-02',
+          asset_tag: 'AST-011',
+          serial_number: 'SN-2024-011',
+          model: 'Precision 3650',
+          manufacturer: 'Dell',
+          status: 'Active',
+        },
+        location: {
+          coordinates: { x: 640, y: 210 },
+          rotation: 0,
+          icon_type: 'computer',
+        },
+        assigned_person: { person_id: 'EMP-202', full_name: 'Emma Wilson' },
+      },
+    ]);
+
+    console.log(`✅ Created Ground Floor with ${assets1.length} assets`);
+
+    // Floor 1 - First Floor (Office & Engineering)
+    const floor1 = await Floor.create({
       building_id: building1._id,
-      floor_id: floor1_1._id,
-      workarea_id: workarea1_1._id,
-      section_id: section1_1_1._id,
-      workstation_id: workstations_a[2]._id,
-    },
-    itsm: {
-      hardware_id: null,
-      is_managed: false,
-      last_synced: null,
-      sync_status: 'never',
-      sync_errors: [],
-    },
-    basic_info: {
-      display_name: 'Régi Tekercselő PC',
-      model: 'Dell OptiPlex 3060',
-      manufacturer: 'Dell',
-      status: 'In Use',
-    },
-    technical_specs: {
-      cpu: 'Intel i3-8100',
-      ram: '4GB DDR4',
-      storage: '128GB SSD',
-    },
-    network: {
-      ip_address: '192.168.1.103',
-      hostname: 'PC-TEKERCS-03',
-    },
-    location: {
-      coordinates: { x: 265, y: 165 },
-      rotation: 0,
-      icon_type: 'desktop',
-    },
-    custom_fields: {
-      physical_condition: 'Fair',
-      notes: 'Régi gép, frissítés szükséges',
-      tags: ['legacy', 'upgrade-needed'],
-    },
-    created_by: 'seed-script',
-  });
-  console.log(`          ✅ Asset: ${asset3.basic_info.display_name} (Manual)`);
-
-  // Section 2: B sor
-  const section1_1_2 = await Section.create({
-    workarea_id: workarea1_1._id,
-    name: 'Tekercselő sor B',
-    coordinates: { x: 150, y: 300 },
-    capacity: 10,
-    shift_schedule: '2-shift',
-  });
-  console.log(`      ✅ Section: ${section1_1_2.name}`);
-
-  // 3 workstations in Section B
-  for (let i = 1; i <= 3; i++) {
-    const ws = await Workstation.create({
-      section_id: section1_1_2._id,
-      name: `TB-0${i}`,
-      coordinates: { x: 160 + i * 50, y: 310 },
-      rotation: 0,
-      type: 'desk',
-      status: 'active',
+      floor_number: 1,
+      name: 'First Floor - Engineering & Administration',
+      metadata: {
+        area: 5000,
+        ceiling_height: 3.5,
+      },
     });
-    console.log(`        ✅ Workstation: ${ws.name}`);
-  }
 
-  // Work Area 2: Motor gyártás
-  const workarea1_2 = await WorkArea.create({
-    floor_id: floor1_1._id,
-    name: 'Motor gyártás',
-    type: 'production',
-    svg_zone_id: 'zone_motor',
-    color: '#2196F3',
-    manager: 'Szabó Péter',
-  });
-  console.log(`    ✅ Work Area: ${workarea1_2.name}`);
-
-  // Section 1: Motor összeszerelés
-  const section1_2_1 = await Section.create({
-    workarea_id: workarea1_2._id,
-    name: 'Motor összeszerelés',
-    coordinates: { x: 500, y: 150 },
-    capacity: 8,
-    shift_schedule: '3-shift',
-  });
-  console.log(`      ✅ Section: ${section1_2_1.name}`);
-
-  // 4 workstations
-  for (let i = 1; i <= 4; i++) {
-    const ws = await Workstation.create({
-      section_id: section1_2_1._id,
-      name: `MA-0${i}`,
-      coordinates: { x: 510 + i * 50, y: 160 },
-      rotation: 0,
-      type: 'workbench',
-      status: 'active',
+    // Work Area 4: Engineering Office
+    const workarea4 = await WorkArea.create({
+      floor_id: floor1._id,
+      name: 'Engineering Department',
+      type: 'Office',
+      coordinates: { x: 100, y: 150 },
+      dimensions: { width: 400, height: 250 },
+      metadata: {
+        supervisor: 'Lisa Anderson',
+        capacity: 30,
+      },
     });
-    console.log(`        ✅ Workstation: ${ws.name}`);
-  }
 
-  // ==========================================
-  // BUILDING 2: Gyártócsarnok B
-  // ==========================================
-
-  const building2 = await Building.create({
-    name: '2-es Gyártócsarnok',
-    address: 'Gyár utca 2., Budapest',
-    metadata: {
-      total_area: 3000,
-      construction_year: 2015,
-    },
-  });
-  console.log(`\n✅ Building: ${building2.name}`);
-
-  // Floor 1: Földszint
-  const floor2_1 = await Floor.create({
-    building_id: building2._id,
-    floor_number: 0,
-    name: 'Földszint',
-    map_file: 'building_2_floor_0.svg',
-    map_metadata: {
-      viewBox: '0 0 800 600',
-      scale: '1:100',
-      bounds: [[0, 0], [800, 600]],
-    },
-  });
-  console.log(`  ✅ Floor: ${floor2_1.name}`);
-
-  // Work Area: Minőségellenőrzés
-  const workarea2_1 = await WorkArea.create({
-    floor_id: floor2_1._id,
-    name: 'Minőségellenőrzés',
-    type: 'quality-control',
-    svg_zone_id: 'zone_quality',
-    color: '#FF9800',
-    manager: 'Kiss Éva',
-  });
-  console.log(`    ✅ Work Area: ${workarea2_1.name}`);
-
-  // Section: QC Labor
-  const section2_1_1 = await Section.create({
-    workarea_id: workarea2_1._id,
-    name: 'QC Labor',
-    coordinates: { x: 150, y: 150 },
-    capacity: 5,
-    shift_schedule: '1-shift',
-  });
-  console.log(`      ✅ Section: ${section2_1_1.name}`);
-
-  // 3 workstations
-  for (let i = 1; i <= 3; i++) {
-    const ws = await Workstation.create({
-      section_id: section2_1_1._id,
-      name: `QC-0${i}`,
-      coordinates: { x: 160 + i * 50, y: 160 },
-      rotation: 0,
-      type: 'lab-bench',
-      status: 'active',
+    const section8 = await Section.create({
+      workarea_id: workarea4._id,
+      name: 'Mechanical Engineering',
+      shift_schedule: 'Day shift',
+      capacity: 15,
+      coordinates: { x: 150, y: 200 },
     });
-    console.log(`        ✅ Workstation: ${ws.name}`);
-  }
 
-  // ==========================================
-  // SUMMARY
-  // ==========================================
+    const section9 = await Section.create({
+      workarea_id: workarea4._id,
+      name: 'Electrical Engineering',
+      shift_schedule: 'Day shift',
+      capacity: 15,
+      coordinates: { x: 350, y: 200 },
+    });
 
-  const counts = {
-    buildings: await Building.countDocuments(),
-    floors: await Floor.countDocuments(),
-    workareas: await WorkArea.countDocuments(),
-    sections: await Section.countDocuments(),
-    workstations: await Workstation.countDocuments(),
-    assets: await Asset.countDocuments(),
-  };
+    const workstations4 = await Workstation.insertMany([
+      { section_id: section8._id, name: 'DESK-E01', type: 'Engineering Desk', status: 'active', coordinates: { x: 170, y: 230 } },
+      { section_id: section8._id, name: 'DESK-E02', type: 'Engineering Desk', status: 'active', coordinates: { x: 220, y: 230 } },
+      { section_id: section8._id, name: 'DESK-E03', type: 'Engineering Desk', status: 'active', coordinates: { x: 270, y: 230 } },
+      { section_id: section9._id, name: 'DESK-E04', type: 'Engineering Desk', status: 'active', coordinates: { x: 370, y: 230 } },
+      { section_id: section9._id, name: 'DESK-E05', type: 'Engineering Desk', status: 'active', coordinates: { x: 420, y: 230 } },
+    ]);
 
-  console.log('\n✅ Seed completed successfully!\n');
-  console.log('📊 Summary:');
-  console.log(`   Buildings: ${counts.buildings}`);
-  console.log(`   Floors: ${counts.floors}`);
-  console.log(`   Work Areas: ${counts.workareas}`);
-  console.log(`   Sections: ${counts.sections}`);
-  console.log(`   Workstations: ${counts.workstations}`);
-  console.log(`   Assets: ${counts.assets}`);
-  console.log('');
-}
+    // Work Area 5: Administration
+    const workarea5 = await WorkArea.create({
+      floor_id: floor1._id,
+      name: 'Administration',
+      type: 'Office',
+      coordinates: { x: 550, y: 150 },
+      dimensions: { width: 280, height: 250 },
+      metadata: {
+        supervisor: 'Jennifer Brown',
+        capacity: 20,
+      },
+    });
 
-/**
- * Main function
- */
-async function main() {
-  try {
-    await connectDB();
-    await clearDatabase();
-    await seed();
-    
-    console.log('✅ All done! Disconnecting...\n');
+    const section10 = await Section.create({
+      workarea_id: workarea5._id,
+      name: 'HR & Finance',
+      shift_schedule: 'Day shift',
+      capacity: 10,
+      coordinates: { x: 600, y: 200 },
+    });
+
+    const section11 = await Section.create({
+      workarea_id: workarea5._id,
+      name: 'Executive Offices',
+      shift_schedule: 'Day shift',
+      capacity: 10,
+      coordinates: { x: 720, y: 200 },
+    });
+
+    const workstations5 = await Workstation.insertMany([
+      { section_id: section10._id, name: 'DESK-A01', type: 'Office Desk', status: 'active', coordinates: { x: 620, y: 230 } },
+      { section_id: section10._id, name: 'DESK-A02', type: 'Office Desk', status: 'active', coordinates: { x: 670, y: 230 } },
+      { section_id: section11._id, name: 'EXEC-01', type: 'Executive Office', status: 'active', coordinates: { x: 740, y: 230 } },
+    ]);
+
+    // Assets for First Floor
+    const assets2 = await Asset.insertMany([
+      {
+        hierarchy: {
+          building_id: building1._id,
+          floor_id: floor1._id,
+          workarea_id: workarea4._id,
+          section_id: section8._id,
+          workstation_id: workstations4[0]._id,
+        },
+        itsm: { is_managed: true, hardware_id: 'HW-020', sync_status: 'success' },
+        basic_info: {
+          display_name: 'ENG-WS-01',
+          asset_tag: 'AST-020',
+          serial_number: 'SN-2024-020',
+          model: 'Precision 5820',
+          manufacturer: 'Dell',
+          status: 'Active',
+          os_type: 'Windows',
+          os_version: '11 Pro',
+        },
+        technical_specs: {
+          cpu: 'Intel Xeon W-2245',
+          ram: '64GB DDR4',
+          storage: '1TB NVMe SSD',
+          gpu: 'NVIDIA Quadro RTX 4000',
+        },
+        location: {
+          coordinates: { x: 180, y: 240 },
+          rotation: 0,
+          icon_type: 'computer',
+        },
+        assigned_person: { person_id: 'EMP-301', full_name: 'Frank Garcia' },
+      },
+      {
+        hierarchy: {
+          building_id: building1._id,
+          floor_id: floor1._id,
+          workarea_id: workarea4._id,
+          section_id: section8._id,
+          workstation_id: workstations4[1]._id,
+        },
+        itsm: { is_managed: true, hardware_id: 'HW-021', sync_status: 'success' },
+        basic_info: {
+          display_name: 'ENG-WS-02',
+          asset_tag: 'AST-021',
+          serial_number: 'SN-2024-021',
+          model: 'Precision 5820',
+          manufacturer: 'Dell',
+          status: 'Active',
+          os_type: 'Windows',
+          os_version: '11 Pro',
+        },
+        technical_specs: {
+          cpu: 'Intel Xeon W-2245',
+          ram: '64GB DDR4',
+          storage: '1TB NVMe SSD',
+          gpu: 'NVIDIA Quadro RTX 4000',
+        },
+        location: {
+          coordinates: { x: 230, y: 240 },
+          rotation: 0,
+          icon_type: 'computer',
+        },
+        assigned_person: { person_id: 'EMP-302', full_name: 'Grace Lee' },
+      },
+      {
+        hierarchy: {
+          building_id: building1._id,
+          floor_id: floor1._id,
+          workarea_id: workarea5._id,
+          section_id: section10._id,
+          workstation_id: workstations5[0]._id,
+        },
+        itsm: { is_managed: true, hardware_id: 'HW-030', sync_status: 'success' },
+        basic_info: {
+          display_name: 'ADMIN-PC-01',
+          asset_tag: 'AST-030',
+          serial_number: 'SN-2024-030',
+          model: 'OptiPlex 7090',
+          manufacturer: 'Dell',
+          status: 'Active',
+          os_type: 'Windows',
+          os_version: '11 Pro',
+        },
+        location: {
+          coordinates: { x: 630, y: 240 },
+          rotation: 0,
+          icon_type: 'computer',
+        },
+        assigned_person: { person_id: 'EMP-401', full_name: 'Hannah Taylor' },
+      },
+    ]);
+
+    console.log(`✅ Created First Floor with ${assets2.length} assets`);
+
+    // Floor 2 - Second Floor (Storage & Maintenance)
+    const floor2 = await Floor.create({
+      building_id: building1._id,
+      floor_number: 2,
+      name: 'Second Floor - Storage & Maintenance',
+      metadata: {
+        area: 5000,
+        ceiling_height: 5.0,
+      },
+    });
+
+    // Work Area 6: Main Storage
+    const workarea6 = await WorkArea.create({
+      floor_id: floor2._id,
+      name: 'Main Storage',
+      type: 'Storage',
+      coordinates: { x: 100, y: 150 },
+      dimensions: { width: 730, height: 200 },
+      metadata: {
+        supervisor: 'Kevin White',
+        capacity: 8,
+      },
+    });
+
+    const section12 = await Section.create({
+      workarea_id: workarea6._id,
+      name: 'Raw Materials',
+      shift_schedule: 'Day shift',
+      capacity: 4,
+      coordinates: { x: 200, y: 200 },
+    });
+
+    const section13 = await Section.create({
+      workarea_id: workarea6._id,
+      name: 'Finished Goods',
+      shift_schedule: 'Day shift',
+      capacity: 4,
+      coordinates: { x: 550, y: 200 },
+    });
+
+    const workstations6 = await Workstation.insertMany([
+      { section_id: section12._id, name: 'STRG-01', type: 'Storage Station', status: 'active', coordinates: { x: 220, y: 230 } },
+      { section_id: section13._id, name: 'STRG-02', type: 'Storage Station', status: 'active', coordinates: { x: 570, y: 230 } },
+    ]);
+
+    // Work Area 7: Maintenance
+    const workarea7 = await WorkArea.create({
+      floor_id: floor2._id,
+      name: 'Maintenance Workshop',
+      type: 'Maintenance',
+      coordinates: { x: 100, y: 400 },
+      dimensions: { width: 400, height: 180 },
+      metadata: {
+        supervisor: 'Larry Rodriguez',
+        capacity: 10,
+      },
+    });
+
+    const section14 = await Section.create({
+      workarea_id: workarea7._id,
+      name: 'Equipment Repair',
+      shift_schedule: '2-shift',
+      capacity: 10,
+      coordinates: { x: 250, y: 450 },
+    });
+
+    const workstations7 = await Workstation.insertMany([
+      { section_id: section14._id, name: 'MAINT-01', type: 'Repair Bench', status: 'active', coordinates: { x: 270, y: 480 } },
+      { section_id: section14._id, name: 'MAINT-02', type: 'Repair Bench', status: 'active', coordinates: { x: 360, y: 480 } },
+    ]);
+
+    // Assets for Second Floor
+    const assets3 = await Asset.insertMany([
+      {
+        hierarchy: {
+          building_id: building1._id,
+          floor_id: floor2._id,
+          workarea_id: workarea6._id,
+          section_id: section12._id,
+          workstation_id: workstations6[0]._id,
+        },
+        itsm: { is_managed: false },
+        basic_info: {
+          display_name: 'Storage-Terminal-01',
+          asset_tag: 'AST-040',
+          serial_number: 'SN-2024-040',
+          model: 'Tablet T14',
+          manufacturer: 'Lenovo',
+          status: 'Active',
+        },
+        location: {
+          coordinates: { x: 230, y: 240 },
+          rotation: 0,
+          icon_type: 'computer',
+        },
+        assigned_person: { person_id: 'EMP-501', full_name: 'Ivan Petrov' },
+      },
+      {
+        hierarchy: {
+          building_id: building1._id,
+          floor_id: floor2._id,
+          workarea_id: workarea7._id,
+          section_id: section14._id,
+          workstation_id: workstations7[0]._id,
+        },
+        itsm: { is_managed: true, hardware_id: 'HW-050', sync_status: 'success' },
+        basic_info: {
+          display_name: 'Maintenance-PC-01',
+          asset_tag: 'AST-050',
+          serial_number: 'SN-2024-050',
+          model: 'OptiPlex 7090',
+          manufacturer: 'Dell',
+          status: 'Active',
+          os_type: 'Windows',
+          os_version: '10 Pro',
+        },
+        location: {
+          coordinates: { x: 280, y: 490 },
+          rotation: 0,
+          icon_type: 'computer',
+        },
+        assigned_person: { person_id: 'EMP-601', full_name: 'Julia Kim' },
+      },
+    ]);
+
+    console.log(`✅ Created Second Floor with ${assets3.length} assets`);
+
+    // ==================== BUILDING 2: Research & Development Center ====================
+    console.log('🏢 Creating Building 2: Research & Development Center...');
+    const building2 = await Building.create({
+      name: 'Research & Development Center',
+      address: '5678 Innovation Boulevard, Tech Park',
+      metadata: {
+        total_area: 8000,
+        year_built: 2020,
+        num_floors: 2,
+      },
+    });
+
+    // Floor 0 - R&D Labs
+    const floor3 = await Floor.create({
+      building_id: building2._id,
+      floor_number: 0,
+      name: 'Ground Floor - Research Labs',
+      metadata: {
+        area: 4000,
+        ceiling_height: 4.0,
+      },
+    });
+
+    // Work Area 8: Electronics Lab
+    const workarea8 = await WorkArea.create({
+      floor_id: floor3._id,
+      name: 'Electronics Research Lab',
+      type: 'Laboratory',
+      coordinates: { x: 150, y: 200 },
+      dimensions: { width: 350, height: 200 },
+      metadata: {
+        supervisor: 'Dr. Maria Santos',
+        capacity: 15,
+      },
+    });
+
+    const section15 = await Section.create({
+      workarea_id: workarea8._id,
+      name: 'Circuit Design',
+      shift_schedule: 'Day shift',
+      capacity: 8,
+      coordinates: { x: 200, y: 250 },
+    });
+
+    const section16 = await Section.create({
+      workarea_id: workarea8._id,
+      name: 'PCB Fabrication',
+      shift_schedule: 'Day shift',
+      capacity: 7,
+      coordinates: { x: 380, y: 250 },
+    });
+
+    const workstations8 = await Workstation.insertMany([
+      { section_id: section15._id, name: 'LAB-E01', type: 'Research Workstation', status: 'active', coordinates: { x: 220, y: 280 } },
+      { section_id: section15._id, name: 'LAB-E02', type: 'Research Workstation', status: 'active', coordinates: { x: 290, y: 280 } },
+      { section_id: section16._id, name: 'LAB-E03', type: 'Fabrication Station', status: 'active', coordinates: { x: 400, y: 280 } },
+    ]);
+
+    // Work Area 9: Software Lab
+    const workarea9 = await WorkArea.create({
+      floor_id: floor3._id,
+      name: 'Software Development Lab',
+      type: 'Laboratory',
+      coordinates: { x: 550, y: 200 },
+      dimensions: { width: 300, height: 200 },
+      metadata: {
+        supervisor: 'Dr. Nathan Park',
+        capacity: 20,
+      },
+    });
+
+    const section17 = await Section.create({
+      workarea_id: workarea9._id,
+      name: 'Software Engineering',
+      shift_schedule: 'Flexible',
+      capacity: 20,
+      coordinates: { x: 650, y: 250 },
+    });
+
+    const workstations9 = await Workstation.insertMany([
+      { section_id: section17._id, name: 'DEV-01', type: 'Developer Workstation', status: 'active', coordinates: { x: 600, y: 280 } },
+      { section_id: section17._id, name: 'DEV-02', type: 'Developer Workstation', status: 'active', coordinates: { x: 670, y: 280 } },
+      { section_id: section17._id, name: 'DEV-03', type: 'Developer Workstation', status: 'active', coordinates: { x: 740, y: 280 } },
+    ]);
+
+    // Assets for R&D Building
+    const assets4 = await Asset.insertMany([
+      {
+        hierarchy: {
+          building_id: building2._id,
+          floor_id: floor3._id,
+          workarea_id: workarea8._id,
+          section_id: section15._id,
+          workstation_id: workstations8[0]._id,
+        },
+        itsm: { is_managed: true, hardware_id: 'HW-100', sync_status: 'success' },
+        basic_info: {
+          display_name: 'LAB-WS-E01',
+          asset_tag: 'AST-100',
+          serial_number: 'SN-2024-100',
+          model: 'Precision 7920',
+          manufacturer: 'Dell',
+          status: 'Active',
+          os_type: 'Linux',
+          os_version: 'Ubuntu 22.04',
+        },
+        technical_specs: {
+          cpu: 'Intel Xeon Gold 6248R',
+          ram: '128GB DDR4',
+          storage: '2TB NVMe SSD',
+          gpu: 'NVIDIA RTX A6000',
+        },
+        location: {
+          coordinates: { x: 230, y: 290 },
+          rotation: 0,
+          icon_type: 'computer',
+        },
+        assigned_person: { person_id: 'EMP-701', full_name: 'Oscar Chen' },
+      },
+      {
+        hierarchy: {
+          building_id: building2._id,
+          floor_id: floor3._id,
+          workarea_id: workarea9._id,
+          section_id: section17._id,
+          workstation_id: workstations9[0]._id,
+        },
+        itsm: { is_managed: true, hardware_id: 'HW-110', sync_status: 'success' },
+        basic_info: {
+          display_name: 'DEV-MacBook-01',
+          asset_tag: 'AST-110',
+          serial_number: 'SN-2024-110',
+          model: 'MacBook Pro 16"',
+          manufacturer: 'Apple',
+          status: 'Active',
+          os_type: 'macOS',
+          os_version: 'Sonoma 14.2',
+        },
+        technical_specs: {
+          cpu: 'Apple M3 Max',
+          ram: '64GB',
+          storage: '2TB SSD',
+        },
+        location: {
+          coordinates: { x: 610, y: 290 },
+          rotation: 0,
+          icon_type: 'computer',
+        },
+        assigned_person: { person_id: 'EMP-801', full_name: 'Patricia Wu' },
+      },
+      {
+        hierarchy: {
+          building_id: building2._id,
+          floor_id: floor3._id,
+          workarea_id: workarea9._id,
+          section_id: section17._id,
+          workstation_id: workstations9[1]._id,
+        },
+        itsm: { is_managed: true, hardware_id: 'HW-111', sync_status: 'success' },
+        basic_info: {
+          display_name: 'DEV-MacBook-02',
+          asset_tag: 'AST-111',
+          serial_number: 'SN-2024-111',
+          model: 'MacBook Pro 16"',
+          manufacturer: 'Apple',
+          status: 'Active',
+          os_type: 'macOS',
+          os_version: 'Sonoma 14.2',
+        },
+        technical_specs: {
+          cpu: 'Apple M3 Max',
+          ram: '64GB',
+          storage: '2TB SSD',
+        },
+        location: {
+          coordinates: { x: 680, y: 290 },
+          rotation: 0,
+          icon_type: 'computer',
+        },
+        assigned_person: { person_id: 'EMP-802', full_name: 'Quincy Adams' },
+      },
+    ]);
+
+    console.log(`✅ Created R&D Building with ${assets4.length} assets`);
+
+    // Summary
+    console.log('\n📊 Seeding Summary:');
+    console.log(`✅ Buildings: 2`);
+    console.log(`✅ Floors: 4`);
+    console.log(`✅ Work Areas: 9`);
+    console.log(`✅ Sections: 17`);
+    console.log(`✅ Workstations: ${await Workstation.countDocuments()}`);
+    console.log(`✅ Assets: ${await Asset.countDocuments()}`);
+    console.log('\n🎉 Seed completed successfully!');
+
     await mongoose.disconnect();
     process.exit(0);
   } catch (error) {
-    console.error('❌ Error during seeding:', error);
+    console.error('❌ Error seeding database:', error);
     await mongoose.disconnect();
     process.exit(1);
   }
 }
 
-// Run
-main();
+seed();
