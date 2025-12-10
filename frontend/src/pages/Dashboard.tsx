@@ -4,6 +4,7 @@ import Card from '../components/common/Card';
 import Button from '../components/common/Button';
 import Badge from '../components/common/Badge';
 import SearchBar from '../components/common/SearchBar';
+import { CardSkeleton, ListSkeleton } from '../components/common/Skeleton';
 import AdvancedFilter, { FilterCriteria } from '../components/filter/AdvancedFilter';
 import { assetService, Asset } from '../services/asset.service';
 import { hierarchyService, Building } from '../services/hierarchy.service';
@@ -147,11 +148,29 @@ const Dashboard: React.FC = () => {
     floors: floors.length,
   };
 
+  // Loading state with skeletons
   if (loading) {
     return (
-      <div className={styles.loading}>
-        <div className={styles.spinner}></div>
-        <p>Loading dashboard...</p>
+      <div className={styles.dashboard}>
+        <div className={styles.header}>
+          <div>
+            <h1>Dashboard</h1>
+            <p>Overview of your factory assets and locations</p>
+          </div>
+        </div>
+
+        {/* Skeleton for stats cards */}
+        <div className={styles.statsGrid}>
+          <CardSkeleton />
+          <CardSkeleton />
+          <CardSkeleton />
+          <CardSkeleton />
+        </div>
+
+        {/* Skeleton for assets list */}
+        <Card padding="lg">
+          <ListSkeleton count={8} />
+        </Card>
       </div>
     );
   }
@@ -249,7 +268,13 @@ const Dashboard: React.FC = () => {
           ) : (
             <div className={styles.emptyState}>
               <p>No assets found matching your criteria</p>
-              <Button variant="outline" onClick={() => { setSearchQuery(''); setFilters({ itsmManaged: 'all' }); }}>
+              <Button 
+                variant="outline" 
+                onClick={() => { 
+                  setSearchQuery(''); 
+                  setFilters({ itsmManaged: 'all' }); 
+                }}
+              >
                 Clear Filters
               </Button>
             </div>
