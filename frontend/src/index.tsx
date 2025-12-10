@@ -1,6 +1,6 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import './styles/globals.css';  // ← Globális CSS importálása
+import './styles/global.css';  // ← Globális CSS importálása
 import App from './App';
 
 const root = ReactDOM.createRoot(

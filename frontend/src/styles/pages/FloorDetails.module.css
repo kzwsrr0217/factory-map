@@ -13,7 +13,7 @@
   align-items: center;
   justify-content: center;
   padding: var(--spacing-2xl);
-  color: var(--color-gray-500);
+  color: var(--color-text-secondary);
 }
 
 .spinner {
@@ -57,13 +57,13 @@
 .floorName {
   font-size: var(--font-size-3xl);
   font-weight: var(--font-weight-bold);
-  color: var(--color-gray-900);
+  color: var(--color-text-primary);
   margin: 0 0 var(--spacing-sm) 0;
 }
 
 .floorMeta {
   font-size: var(--font-size-base);
-  color: var(--color-gray-600);
+  color: var(--color-text-secondary);
   margin: 0;
 }
 
@@ -77,7 +77,7 @@
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: var(--spacing-lg);
   padding-top: var(--spacing-lg);
-  border-top: 1px solid var(--color-gray-200);
+  border-top: 1px solid var(--color-border);
 }
 
 .metadataItem {
@@ -89,7 +89,7 @@
 .metadataLabel {
   font-size: var(--font-size-xs);
   font-weight: var(--font-weight-semibold);
-  color: var(--color-gray-600);
+  color: var(--color-text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
@@ -97,7 +97,7 @@
 .metadataValue {
   font-size: var(--font-size-lg);
   font-weight: var(--font-weight-semibold);
-  color: var(--color-gray-900);
+  color: var(--color-text-primary);
 }
 
 /* Section Header */
@@ -111,8 +111,13 @@
 .sectionHeader h2 {
   font-size: var(--font-size-xl);
   font-weight: var(--font-weight-semibold);
-  color: var(--color-gray-900);
+  color: var(--color-text-primary);
   margin: 0;
+}
+
+.headerActions {
+  display: flex;
+  gap: var(--spacing-sm);
 }
 
 /* Map Placeholder */
@@ -123,7 +128,7 @@
   justify-content: center;
   padding: var(--spacing-2xl);
   background: var(--color-gray-50);
-  border: 2px dashed var(--color-gray-300);
+  border: 2px dashed var(--color-border);
   border-radius: var(--radius-lg);
   text-align: center;
   min-height: 300px;
@@ -137,13 +142,13 @@
 
 .mapPlaceholder p {
   font-size: var(--font-size-base);
-  color: var(--color-gray-600);
+  color: var(--color-text-secondary);
   margin: var(--spacing-sm) 0;
 }
 
 .mapHint {
   font-size: var(--font-size-sm);
-  color: var(--color-gray-500);
+  color: var(--color-text-secondary);
 }
 
 /* Work Areas List */
@@ -158,15 +163,15 @@
   align-items: center;
   gap: var(--spacing-lg);
   padding: var(--spacing-lg);
-  border: 1px solid var(--color-gray-200);
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
-  background: var(--color-gray-50);
+  background: var(--color-surface);
   cursor: pointer;
   transition: all var(--transition-base);
 }
 
 .workareaItem:hover {
-  background: var(--color-white);
+  background: var(--color-gray-50);
   border-color: var(--color-primary);
   transform: translateY(-2px);
   box-shadow: var(--shadow-md);
@@ -185,14 +190,20 @@
 .workareaName {
   font-size: var(--font-size-base);
   font-weight: var(--font-weight-semibold);
-  color: var(--color-gray-900);
+  color: var(--color-text-primary);
   margin: 0 0 var(--spacing-xs) 0;
 }
 
 .workareaDetails {
   font-size: var(--font-size-sm);
-  color: var(--color-gray-600);
+  color: var(--color-text-secondary);
   margin: 0;
+}
+
+.workareaActions {
+  display: flex;
+  gap: var(--spacing-sm);
+  flex-shrink: 0;
 }
 
 .emptyWorkareas {
@@ -202,7 +213,7 @@
   justify-content: center;
   padding: var(--spacing-2xl);
   text-align: center;
-  color: var(--color-gray-500);
+  color: var(--color-text-secondary);
 }
 
 .emptyWorkareas p {
@@ -221,15 +232,15 @@
   align-items: center;
   gap: var(--spacing-lg);
   padding: var(--spacing-lg);
-  border: 1px solid var(--color-gray-200);
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
-  background: var(--color-gray-50);
+  background: var(--color-surface);
   cursor: pointer;
   transition: all var(--transition-base);
 }
 
 .assetItem:hover {
-  background: var(--color-white);
+  background: var(--color-gray-50);
   border-color: var(--color-primary);
   transform: translateY(-2px);
   box-shadow: var(--shadow-md);
@@ -248,28 +259,18 @@
 .assetName {
   font-size: var(--font-size-base);
   font-weight: var(--font-weight-semibold);
-  color: var(--color-gray-900);
+  color: var(--color-text-primary);
   margin: 0 0 var(--spacing-xs) 0;
 }
 
 .assetDetails {
   font-size: var(--font-size-sm);
-  color: var(--color-gray-600);
+  color: var(--color-text-secondary);
   margin: 0;
 }
 
 .emptyAssets {
   padding: var(--spacing-xl);
   text-align: center;
-  color: var(--color-gray-500);
-}
-
-.workareaActions {
-  display: flex;
-  gap: var(--spacing-sm);
-  flex-shrink: 0;
-}
-.headerActions {
-  display: flex;
-  gap: var(--spacing-sm);
+  color: var(--color-text-secondary);
 }

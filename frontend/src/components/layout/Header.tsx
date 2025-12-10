@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
+import { useTheme } from '../../contexts/ThemeContext';
 import GlobalSearch from '../search/GlobalSearch';
 import styles from '../../styles/components/Header.module.css';
 
 const Header: React.FC = () => {
   const [searchOpen, setSearchOpen] = useState(false);
+  const { theme, toggleTheme } = useTheme();
 
-  // Keyboard shortcut: Ctrl+K or Cmd+K
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
@@ -46,6 +47,14 @@ const Header: React.FC = () => {
               <span className={styles.searchIcon}>🔍</span>
               <span className={styles.searchText}>Search...</span>
               <kbd className={styles.kbd}>Ctrl+K</kbd>
+            </button>
+
+            <button
+              className={styles.themeToggle}
+              onClick={toggleTheme}
+              title={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`}
+            >
+              {theme === 'light' ? '🌙' : '☀️'}
             </button>
           </div>
         </div>

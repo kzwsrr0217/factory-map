@@ -1,9 +1,12 @@
+
 .card {
-  background: var(--color-white);
+  background: var(--color-surface);  /* ← változó használata */
+  border: 1px solid var(--color-border);  /* ← változó használata */
   border-radius: var(--radius-lg);
-  border: 1px solid var(--color-gray-200);
   box-shadow: var(--shadow-sm);
+  overflow: hidden;
   transition: all var(--transition-base);
+  color: var(--color-text-primary);  /* ← hozzáadva */
 }
 
 /* Padding variants */

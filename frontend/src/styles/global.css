@@ -1,0 +1,182 @@
+/**
+ * Global Styles
+ */
+
+@import './theme.css';
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-size: var(--font-size-base);
+  color: var(--color-gray-900);
+  background-color: var(--color-gray-50);
+}
+
+#root {
+  height: 100%;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-gray-100);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-gray-400);
+  border-radius: var(--radius-full);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-gray-500);
+}
+
+/* Dark mode scrollbar */
+[data-theme='dark'] ::-webkit-scrollbar-track {
+  background: var(--color-gray-100);
+}
+
+[data-theme='dark'] ::-webkit-scrollbar-thumb {
+  background: var(--color-gray-400);
+}
+
+[data-theme='dark'] ::-webkit-scrollbar-thumb:hover {
+  background: var(--color-gray-500);
+}
+
+/* Dark mode body */
+[data-theme='dark'] body {
+  color: var(--color-text-primary);
+  background-color: var(--color-background);
+}
+
+/* Utility classes */
+.container {
+  width: 100%;
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 0 var(--spacing-lg);
+}
+
+.text-xs { font-size: var(--font-size-xs); }
+.text-sm { font-size: var(--font-size-sm); }
+.text-base { font-size: var(--font-size-base); }
+.text-lg { font-size: var(--font-size-lg); }
+.text-xl { font-size: var(--font-size-xl); }
+.text-2xl { font-size: var(--font-size-2xl); }
+.text-3xl { font-size: var(--font-size-3xl); }
+
+.font-normal { font-weight: var(--font-weight-normal); }
+.font-medium { font-weight: var(--font-weight-medium); }
+.font-semibold { font-weight: var(--font-weight-semibold); }
+.font-bold { font-weight: var(--font-weight-bold); }
+
+.text-primary { color: var(--color-primary); }
+.text-secondary { color: var(--color-secondary); }
+.text-success { color: var(--color-success); }
+.text-warning { color: var(--color-warning); }
+.text-error { color: var(--color-error); }
+.text-gray-500 { color: var(--color-gray-500); }
+.text-gray-600 { color: var(--color-gray-600); }
+.text-gray-700 { color: var(--color-gray-700); }
+
+/* Dark mode global overrides for modules */
+[data-theme='dark'] {
+  /* Override white backgrounds */
+  background: var(--color-background);
+}
+
+[data-theme='dark'] [class*='card'],
+[data-theme='dark'] [class*='Card'] {
+  background: var(--color-surface) !important;
+  border-color: var(--color-border) !important;
+  color: var(--color-text-primary) !important;
+}
+
+[data-theme='dark'] [class*='stat'] {
+  background: var(--color-surface) !important;
+  border-color: var(--color-border) !important;
+}
+
+[data-theme='dark'] input,
+[data-theme='dark'] select,
+[data-theme='dark'] textarea,
+[data-theme='dark'] button {
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  border-color: var(--color-border);
+}
+
+[data-theme='dark'] input::placeholder {
+  color: var(--color-text-secondary);
+}
+
+/* Header dark mode */
+[data-theme='dark'] [class*='header'] {
+  background: var(--color-surface);
+  border-color: var(--color-border);
+}
+
+/* Sidebar dark mode */
+[data-theme='dark'] [class*='sidebar'] {
+  background: var(--color-surface);
+  border-color: var(--color-border);
+}
+
+[data-theme='dark'] [class*='sidebar'] a {
+  color: var(--color-text-secondary);
+}
+
+[data-theme='dark'] [class*='sidebar'] a:hover,
+[data-theme='dark'] [class*='sidebar'] a.active {
+  background: var(--color-gray-100);
+  color: var(--color-text-primary);
+}
+
+/* Modal dark mode */
+[data-theme='dark'] [class*='modal'],
+[data-theme='dark'] [class*='Modal'] {
+  background: var(--color-surface);
+  border-color: var(--color-border);
+  color: var(--color-text-primary);
+}
+
+/* Dropdown, Select dark mode */
+[data-theme='dark'] [class*='dropdown'],
+[data-theme='dark'] [class*='select'] {
+  background: var(--color-surface);
+  border-color: var(--color-border);
+  color: var(--color-text-primary);
+}
+
+/* Table dark mode */
+[data-theme='dark'] table {
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+}
+
+[data-theme='dark'] th,
+[data-theme='dark'] td {
+  border-color: var(--color-border);
+}
+
+/* Asset cards */
+[data-theme='dark'] [class*='asset'] {
+  background: var(--color-surface);
+  border-color: var(--color-border);
+  color: var(--color-text-primary);
+}

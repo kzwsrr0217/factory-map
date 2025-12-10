@@ -409,19 +409,40 @@ const FloorMap: React.FC<FloorMapProps> = ({
           />
         )}
 
-        {/* Grid Background */}
+{/* Background Image/SVG */}
+        {backgroundImage && (
+          <image
+            href={backgroundImage}
+            x="0"
+            y="0"
+            width="1000"
+            height="800"
+            opacity={backgroundOpacity}
+            preserveAspectRatio="xMidYMid slice"
+            pointerEvents="none"
+          />
+        )}
+
+        {/* Grid Background - ALWAYS render if showGrid is true */}
         <defs>
           <pattern id="grid" width={GRID_SIZE} height={GRID_SIZE} patternUnits="userSpaceOnUse">
             <path
               d={`M ${GRID_SIZE} 0 L 0 0 0 ${GRID_SIZE}`}
               fill="none"
-              stroke="#e5e7eb"
+              stroke="#4b5563"
               strokeWidth="1"
-              opacity={showGrid ? "0.5" : "0"}
             />
           </pattern>
         </defs>
-        {!backgroundImage && <rect width="100%" height="100%" fill="url(#grid)" />}
+        {showGrid && (
+          <rect 
+            width="1000" 
+            height="800" 
+            fill="url(#grid)" 
+            opacity={backgroundImage ? "0.6" : "0.3"}
+            pointerEvents="none"
+          />
+        )}
 
         {/* Work Areas */}
         {workareas.map((workarea) => {

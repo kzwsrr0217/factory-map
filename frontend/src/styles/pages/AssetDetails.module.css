@@ -21,7 +21,7 @@
   align-items: center;
   justify-content: center;
   padding: var(--spacing-2xl);
-  color: var(--color-gray-500);
+  color: var(--color-text-secondary);
 }
 
 .spinner {
@@ -65,13 +65,13 @@
 .assetName {
   font-size: var(--font-size-3xl);
   font-weight: var(--font-weight-bold);
-  color: var(--color-gray-900);
+  color: var(--color-text-primary);
   margin: 0 0 var(--spacing-sm) 0;
 }
 
 .assetMeta {
   font-size: var(--font-size-base);
-  color: var(--color-gray-600);
+  color: var(--color-text-secondary);
   display: flex;
   flex-wrap: wrap;
   gap: var(--spacing-sm);
@@ -101,19 +101,19 @@
 .bannerTitle {
   font-size: var(--font-size-base);
   font-weight: var(--font-weight-semibold);
-  color: var(--color-gray-900);
+  color: var(--color-text-primary);
   margin: 0 0 var(--spacing-xs) 0;
 }
 
 .bannerText {
   font-size: var(--font-size-sm);
-  color: var(--color-gray-700);
+  color: var(--color-text-secondary);
   margin: 0;
 }
 
 .bannerTime {
   font-size: var(--font-size-xs);
-  color: var(--color-gray-600);
+  color: var(--color-text-secondary);
   margin: var(--spacing-xs) 0 0 0;
 }
 
@@ -141,7 +141,7 @@
 .sectionTitle {
   font-size: var(--font-size-lg);
   font-weight: var(--font-weight-semibold);
-  color: var(--color-gray-900);
+  color: var(--color-text-primary);
   margin: 0 0 var(--spacing-lg) 0;
 }
 
@@ -161,14 +161,14 @@
 .field label {
   font-size: var(--font-size-xs);
   font-weight: var(--font-weight-semibold);
-  color: var(--color-gray-600);
+  color: var(--color-text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
 
 .field p {
   font-size: var(--font-size-base);
-  color: var(--color-gray-900);
+  color: var(--color-text-primary);
   margin: 0;
   word-break: break-word;
 }
@@ -180,6 +180,7 @@
   gap: var(--spacing-lg);
   padding: var(--spacing-md);
   background: var(--color-gray-50);
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
 }
 
@@ -200,13 +201,13 @@
 .personName {
   font-size: var(--font-size-base);
   font-weight: var(--font-weight-semibold);
-  color: var(--color-gray-900);
+  color: var(--color-text-primary);
   margin: 0;
 }
 
 .personId {
   font-size: var(--font-size-sm);
-  color: var(--color-gray-600);
+  color: var(--color-text-secondary);
   margin: var(--spacing-xs) 0 0 0;
 }
 
@@ -223,18 +224,19 @@
   align-items: center;
   padding: var(--spacing-md);
   background: var(--color-gray-50);
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
 }
 
 .softwareName {
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-medium);
-  color: var(--color-gray-900);
+  color: var(--color-text-primary);
   margin: 0;
 }
 
 .softwareVersion {
   font-size: var(--font-size-xs);
-  color: var(--color-gray-600);
+  color: var(--color-text-secondary);
   margin: var(--spacing-xs) 0 0 0;
 }
