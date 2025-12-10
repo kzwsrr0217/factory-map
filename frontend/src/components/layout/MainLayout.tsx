@@ -8,15 +8,11 @@ interface MainLayoutProps {
 }
 
 const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
-  const [sidebarOpen, setSidebarOpen] = useState(true);
-
-  const toggleSidebar = () => {
-    setSidebarOpen(!sidebarOpen);
-  };
+  const [sidebarOpen] = useState(true); // ← Töröld a setSidebarOpen-t
 
   return (
     <div className={styles.layout}>
-      <Header onMenuToggle={toggleSidebar} />
+      <Header />
       <div className={styles.container}>
         <Sidebar isOpen={sidebarOpen} />
         <main className={styles.main}>

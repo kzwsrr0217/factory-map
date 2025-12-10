@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Card from '../components/common/Card';
 import Button from '../components/common/Button';
@@ -6,51 +6,24 @@ import Badge from '../components/common/Badge';
 import SearchBar from '../components/common/SearchBar';
 import AdvancedFilter, { FilterCriteria } from '../components/filter/AdvancedFilter';
 import { assetService, Asset } from '../services/asset.service';
-import { hierarchyService } from '../services/hierarchy.service';
+import { hierarchyService, Building } from '../services/hierarchy.service';
+import { floorService, Floor } from '../services/floor.service';
+import { workareaService, WorkArea } from '../services/workarea.service';
 import styles from '../styles/pages/Dashboard.module.css';
 
 const Dashboard: React.FC = () => {
   const navigate = useNavigate();
   const [assets, setAssets] = useState<Asset[]>([]);
   const [filteredAssets, setFilteredAssets] = useState<Asset[]>([]);
-  const [buildings, setBuildings] = useState<any[]>([]);
-  const [floors, setFloors] = useState<any[]>([]);
-  const [workareas, setWorkareas] = useState<any[]>([]);
+  const [buildings, setBuildings] = useState<Building[]>([]);
+  const [floors, setFloors] = useState<Floor[]>([]);
+  const [workareas, setWorkareas] = useState<WorkArea[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterOpen, setFilterOpen] = useState(false);
   const [filters, setFilters] = useState<FilterCriteria>({ itsmManaged: 'all' });
 
-  useEffect(() => {
-    loadData();
-  }, []);
-
-  useEffect(() => {
-    applyFilters();
-  }, [assets, searchQuery, filters]);
-
-  const loadData = async () => {
-    try {
-      setLoading(true);
-      const [assetsData, buildingsData, floorsData, workareasData] = await Promise.all([
-        assetService.getAssets(),
-        hierarchyService.getBuildings(),
-        hierarchyService.getFloors(),
-        hierarchyService.getWorkAreas(),
-      ]);
-
-      setAssets(assetsData);
-      setBuildings(buildingsData);
-      setFloors(floorsData);
-      setWorkareas(workareasData);
-    } catch (error) {
-      console.error('Error loading data:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const applyFilters = () => {
+  const applyFilters = useCallback(() => {
     let filtered = [...assets];
 
     // Search query
@@ -128,6 +101,35 @@ const Dashboard: React.FC = () => {
     }
 
     setFilteredAssets(filtered);
+  }, [assets, searchQuery, filters]);
+
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  useEffect(() => {
+    applyFilters();
+  }, [applyFilters]);
+
+  const loadData = async () => {
+    try {
+      setLoading(true);
+      const [assetsData, buildingsData, floorsData, workareasData] = await Promise.all([
+        assetService.getAssets(),
+        hierarchyService.getBuildings(),
+        floorService.getFloors(),
+        workareaService.getWorkAreas(),
+      ]);
+
+      setAssets(assetsData);
+      setBuildings(buildingsData);
+      setFloors(floorsData);
+      setWorkareas(workareasData);
+    } catch (error) {
+      console.error('Error loading data:', error);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleApplyFilters = (newFilters: FilterCriteria) => {
@@ -137,9 +139,6 @@ const Dashboard: React.FC = () => {
   const activeFilterCount = Object.keys(filters).filter(
     (k) => filters[k as keyof FilterCriteria] && k !== 'itsmManaged' && filters[k as keyof FilterCriteria] !== 'all'
   ).length;
-
-  // Rest of the Dashboard component remains the same...
-  // (Stats calculations, rendering, etc.)
 
   const stats = {
     totalAssets: assets.length,
