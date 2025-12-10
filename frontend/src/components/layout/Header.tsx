@@ -1,29 +1,58 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
+import GlobalSearch from '../search/GlobalSearch';
 import styles from '../../styles/components/Header.module.css';
 
-interface HeaderProps {
-  onMenuToggle?: () => void;
-}
+const Header: React.FC = () => {
+  const [searchOpen, setSearchOpen] = useState(false);
 
-const Header: React.FC<HeaderProps> = ({ onMenuToggle }) => {
+  // Keyboard shortcut: Ctrl+K or Cmd+K
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault();
+        setSearchOpen(true);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   return (
-    <header className={styles.header}>
-      <div className={styles.leftSection}>
-        <button className={styles.menuButton} onClick={onMenuToggle}>
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-          </svg>
-        </button>
-        <h1 className={styles.logo}>
-          🏭 Factory Map
-        </h1>
-      </div>
+    <>
+      <header className={styles.header}>
+        <div className={styles.container}>
+          <Link to="/" className={styles.logo}>
+            <span className={styles.logoIcon}>🏭</span>
+            <span className={styles.logoText}>Factory Map</span>
+          </Link>
 
-      <div className={styles.rightSection}>
-        <span className={styles.userName}>Admin User</span>
-        <div className={styles.avatar}>A</div>
-      </div>
-    </header>
+          <nav className={styles.nav}>
+            <Link to="/" className={styles.navLink}>
+              Dashboard
+            </Link>
+            <Link to="/buildings" className={styles.navLink}>
+              Buildings
+            </Link>
+          </nav>
+
+          <div className={styles.actions}>
+            <button
+              className={styles.searchButton}
+              onClick={() => setSearchOpen(true)}
+              title="Search (Ctrl+K)"
+            >
+              <span className={styles.searchIcon}>🔍</span>
+              <span className={styles.searchText}>Search...</span>
+              <kbd className={styles.kbd}>Ctrl+K</kbd>
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <GlobalSearch isOpen={searchOpen} onClose={() => setSearchOpen(false)} />
+    </>
   );
 };
 
