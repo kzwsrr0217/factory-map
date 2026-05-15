@@ -16,9 +16,9 @@
  * incremental list reloads via `useSocket` so the table stays live without
  * manual refresh.
  */
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Monitor, Activity, Wrench, Building2, AlertTriangle, Bell, Eye, Download, Upload, BarChart2, Filter, Trash2, MoveRight, FileText } from 'lucide-react';
+import { Monitor, Activity, Wrench, Building2, AlertTriangle, Bell, Eye, Download, Upload, BarChart2, Filter, Trash2, MoveRight, FileText, LayoutGrid, List, ChevronUp, ChevronDown, ChevronsUpDown, Keyboard } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import Card from '../components/common/Card';
@@ -51,9 +51,11 @@ const Dashboard: React.FC = () => {
   const [workareas, setWorkareas] = useState<WorkArea[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState(() => localStorage.getItem('db_search') ?? '');
   const [filterOpen, setFilterOpen] = useState(false);
-  const [filters, setFilters] = useState<FilterCriteria>({ itsmManaged: 'all' });
+  const [filters, setFilters] = useState<FilterCriteria>(() => {
+    try { return JSON.parse(localStorage.getItem('db_filters') ?? ''); } catch { return { itsmManaged: 'all' }; }
+  });
   const [reportsOpen, setReportsOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [selectedAssetIds, setSelectedAssetIds] = useState<Set<string>>(new Set());
@@ -61,7 +63,9 @@ const Dashboard: React.FC = () => {
   const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false);
   const [bulkMoveFloorId, setBulkMoveFloorId] = useState<string>('');
   const [bulkMoveOpen, setBulkMoveOpen] = useState(false);
-  const [maintenanceFilter, setMaintenanceFilter] = useState<'overdue' | 'upcoming' | null>(null);
+  const [maintenanceFilter, setMaintenanceFilter] = useState<'overdue' | 'upcoming' | null>(
+    () => (localStorage.getItem('db_maint') as 'overdue' | 'upcoming' | null) ?? null
+  );
   const [viewAsset, setViewAsset] = useState<Asset | null>(null);
   const [page, setPage] = useState(1);
   const [createOpen, setCreateOpen] = useState(false);
@@ -69,7 +73,16 @@ const Dashboard: React.FC = () => {
   const [itsmSyncResult, setItsmSyncResult] = useState<{
     created: number; updated: number; snapshotted: number; errors: number;
   } | null>(null);
-  const [conflictFilter, setConflictFilter] = useState(false);
+  const [conflictFilter, setConflictFilter] = useState(
+    () => localStorage.getItem('db_conflict') === 'true'
+  );
+  const [viewMode, setViewMode] = useState<'card' | 'table'>(
+    () => (localStorage.getItem('db_view') as 'card' | 'table') ?? 'card'
+  );
+  const [sortField, setSortField] = useState(() => localStorage.getItem('db_sort') ?? 'name');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>(
+    () => (localStorage.getItem('db_sort_dir') as 'asc' | 'desc') ?? 'asc'
+  );
   const itemsPerPage = loadSettings().itemsPerPage;
   const toast = useToast();
 
@@ -433,6 +446,71 @@ const Dashboard: React.FC = () => {
     }
   };
 
+  // ── Persist filters + view state ────────────────────────────
+  useEffect(() => { localStorage.setItem('db_search', searchQuery); }, [searchQuery]);
+  useEffect(() => { localStorage.setItem('db_filters', JSON.stringify(filters)); }, [filters]);
+  useEffect(() => {
+    if (maintenanceFilter) localStorage.setItem('db_maint', maintenanceFilter);
+    else localStorage.removeItem('db_maint');
+  }, [maintenanceFilter]);
+  useEffect(() => { localStorage.setItem('db_conflict', String(conflictFilter)); }, [conflictFilter]);
+  useEffect(() => { localStorage.setItem('db_view', viewMode); }, [viewMode]);
+  useEffect(() => { localStorage.setItem('db_sort', sortField); }, [sortField]);
+  useEffect(() => { localStorage.setItem('db_sort_dir', sortDir); }, [sortDir]);
+
+  // ── Sort ─────────────────────────────────────────────────────
+  const handleSort = (field: string) => {
+    if (sortField === field) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortField(field); setSortDir('asc'); }
+    setPage(1);
+  };
+
+  const sortedAssets = useMemo(() => {
+    const arr = [...filteredAssets];
+    arr.sort((a, b) => {
+      if (sortField === 'maintenance') {
+        const at = a.maintenance?.next_date ? new Date(a.maintenance.next_date).getTime() : Infinity;
+        const bt = b.maintenance?.next_date ? new Date(b.maintenance.next_date).getTime() : Infinity;
+        return sortDir === 'asc' ? at - bt : bt - at;
+      }
+      const vals: Record<string, [string, string]> = {
+        name:         [a.basic_info?.display_name ?? '', b.basic_info?.display_name ?? ''],
+        type:         [a.basic_info?.type ?? '', b.basic_info?.type ?? ''],
+        status:       [a.basic_info?.status ?? '', b.basic_info?.status ?? ''],
+        manufacturer: [a.basic_info?.manufacturer ?? '', b.basic_info?.manufacturer ?? ''],
+      };
+      const [av, bv] = vals[sortField] ?? ['', ''];
+      return sortDir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
+    });
+    return arr;
+  }, [filteredAssets, sortField, sortDir]);
+
+  const pageAssets = sortedAssets.slice((page - 1) * itemsPerPage, page * itemsPerPage);
+  const totalPages = Math.ceil(sortedAssets.length / itemsPerPage);
+
+  // ── Select all on page ────────────────────────────────────────
+  const allPageSelected = pageAssets.length > 0 && pageAssets.every(a => selectedAssetIds.has(a._id));
+  const toggleSelectAllPage = () => {
+    setSelectedAssetIds(prev => {
+      const next = new Set(prev);
+      if (allPageSelected) pageAssets.forEach(a => next.delete(a._id));
+      else pageAssets.forEach(a => next.add(a._id));
+      return next;
+    });
+  };
+
+  // ── Inline status change ─────────────────────────────────────
+  const handleInlineStatusChange = async (assetId: string, status: string) => {
+    try {
+      await assetService.updateAsset(assetId, { 'basic_info.status': status } as any);
+      setAssets(prev => prev.map(a =>
+        a._id === assetId ? { ...a, basic_info: { ...a.basic_info, status: status as any } } : a
+      ));
+    } catch {
+      toast.error('Failed to update status');
+    }
+  };
+
   const activeFilterCount = Object.keys(filters).filter(
     (k) => filters[k as keyof FilterCriteria] && k !== 'itsmManaged' && filters[k as keyof FilterCriteria] !== 'all'
   ).length;
@@ -773,7 +851,34 @@ const Dashboard: React.FC = () => {
         {/* Assets List */}
         <div className={styles.assetsList}>
           <div className={styles.assetsHeader}>
-            <h3>Assets ({filteredAssets.length})</h3>
+            <div className={styles.assetsHeaderLeft}>
+              <input
+                type="checkbox"
+                className={styles.selectAllCheck}
+                checked={allPageSelected}
+                onChange={toggleSelectAllPage}
+                title="Select / deselect all on this page"
+              />
+              <h3>Assets ({sortedAssets.length})</h3>
+            </div>
+            <div className={styles.assetsHeaderRight}>
+              <div className={styles.viewToggle}>
+                <button
+                  className={`${styles.viewBtn} ${viewMode === 'card' ? styles.viewBtnActive : ''}`}
+                  onClick={() => setViewMode('card')}
+                  title="Card view"
+                >
+                  <LayoutGrid size={15} />
+                </button>
+                <button
+                  className={`${styles.viewBtn} ${viewMode === 'table' ? styles.viewBtnActive : ''}`}
+                  onClick={() => setViewMode('table')}
+                  title="Table view"
+                >
+                  <List size={15} />
+                </button>
+              </div>
+            </div>
             {selectedAssetIds.size > 0 && (
               <div className={styles.bulkBar}>
                 <span className={styles.bulkCount}>{selectedAssetIds.size} selected</span>
@@ -867,92 +972,173 @@ const Dashboard: React.FC = () => {
             )}
           </div>
 
-          {filteredAssets.length > 0 ? (
+          {sortedAssets.length > 0 ? (
             <>
-              <div className={styles.assetsGrid}>
-                {filteredAssets.slice((page - 1) * itemsPerPage, page * itemsPerPage).map((asset) => {
-                  const isSelected = selectedAssetIds.has(asset._id);
-                  return (
-                  <div
-                    key={asset._id}
-                    className={`${styles.assetCard} ${isSelected ? styles.assetCardSelected : ''}`}
-                    onClick={() => navigate(`/assets/${asset._id}`)}
-                  >
-                    <div
-                      className={styles.checkboxWrap}
-                      onClick={(e) => toggleAssetSelection(asset._id, e)}
-                    >
-                      <input
-                        type="checkbox"
-                        className={styles.assetCheckbox}
-                        checked={isSelected}
-                        readOnly
-                      />
-                    </div>
-                    <div className={styles.assetIcon}>{getAssetIcon(asset.basic_info?.type)}</div>
-                    <div className={styles.assetInfo}>
-                      <h4>{asset.basic_info?.display_name}</h4>
-                      <p>
-                        {asset.basic_info?.manufacturer} {asset.basic_info?.model}
-                      </p>
-                      {asset.basic_info?.serial_number && (
-                        <p className={styles.serialNumber}>S/N: {asset.basic_info.serial_number}</p>
-                      )}
-                    </div>
-                    <div className={styles.cardBadges}>
-                      {asset.maintenance?.next_date && (() => {
-                        const t = new Date(asset.maintenance.next_date).getTime();
-                        if (t < now) return <span className={styles.maintenanceBadgeOverdue} title={`Overdue since ${new Date(asset.maintenance.next_date).toLocaleDateString()}`}><AlertTriangle size={11} /> Overdue</span>;
-                        if (t - now < sevenDays) return <span className={styles.maintenanceBadgeSoon} title={`Due ${new Date(asset.maintenance.next_date).toLocaleDateString()}`}><Bell size={11} /> Soon</span>;
-                        return null;
-                      })()}
-                      <Badge
-                        variant={
-                          asset.basic_info?.status === 'active' ? 'success' :
-                          asset.basic_info?.status === 'maintenance' ? 'warning' :
-                          asset.basic_info?.status === 'retired' || asset.basic_info?.status === 'inactive' ? 'error' :
-                          'neutral'
-                        }
-                        size="sm"
+              {/* ── Card view ──────────────────────────────── */}
+              {viewMode === 'card' && (
+                <div className={styles.assetsGrid}>
+                  {pageAssets.map((asset) => {
+                    const isSelected = selectedAssetIds.has(asset._id);
+                    return (
+                      <div
+                        key={asset._id}
+                        className={`${styles.assetCard} ${isSelected ? styles.assetCardSelected : ''}`}
+                        onClick={() => navigate(`/assets/${asset._id}`)}
                       >
-                        {asset.basic_info?.status ?? 'unknown'}
-                      </Badge>
-                      <Badge variant={asset.itsm?.is_managed ? 'success' : 'neutral'} size="sm">
-                        {asset.itsm?.is_managed ? 'ITSM' : 'Manual'}
-                      </Badge>
-                      <button
-                        className={styles.quickViewBtn}
-                        title="Quick view"
-                        onClick={(e) => { e.stopPropagation(); setViewAsset(asset); }}
-                      >
-                        <Eye size={14} />
-                      </button>
-                    </div>
-                  </div>
-                  );
-                })}
-              </div>
+                        <div className={styles.checkboxWrap} onClick={(e) => toggleAssetSelection(asset._id, e)}>
+                          <input type="checkbox" className={styles.assetCheckbox} checked={isSelected} readOnly />
+                        </div>
+                        <div className={styles.assetIcon}>{getAssetIcon(asset.basic_info?.type)}</div>
+                        <div className={styles.assetInfo}>
+                          <h4>{asset.basic_info?.display_name}</h4>
+                          <p>{asset.basic_info?.manufacturer} {asset.basic_info?.model}</p>
+                          {asset.basic_info?.serial_number && (
+                            <p className={styles.serialNumber}>S/N: {asset.basic_info.serial_number}</p>
+                          )}
+                        </div>
+                        <div className={styles.cardBadges}>
+                          {asset.maintenance?.next_date && (() => {
+                            const t = new Date(asset.maintenance.next_date).getTime();
+                            if (t < now) return <span className={styles.maintenanceBadgeOverdue} title={`Overdue since ${new Date(asset.maintenance.next_date).toLocaleDateString()}`}><AlertTriangle size={11} /> Overdue</span>;
+                            if (t - now < sevenDays) return <span className={styles.maintenanceBadgeSoon} title={`Due ${new Date(asset.maintenance.next_date).toLocaleDateString()}`}><Bell size={11} /> Soon</span>;
+                            return null;
+                          })()}
+                          <select
+                            className={styles.inlineStatusSelect}
+                            value={asset.basic_info?.status ?? ''}
+                            onClick={e => e.stopPropagation()}
+                            onChange={e => { e.stopPropagation(); handleInlineStatusChange(asset._id, e.target.value); }}
+                          >
+                            {['active', 'maintenance', 'inactive', 'retired'].map(s => (
+                              <option key={s} value={s}>{s}</option>
+                            ))}
+                          </select>
+                          <Badge variant={asset.itsm?.is_managed ? 'success' : 'neutral'} size="sm">
+                            {asset.itsm?.is_managed ? 'ITSM' : 'Manual'}
+                          </Badge>
+                          <button className={styles.quickViewBtn} title="Quick view" onClick={(e) => { e.stopPropagation(); setViewAsset(asset); }}>
+                            <Eye size={14} />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
 
-              {filteredAssets.length > itemsPerPage && (
+              {/* ── Table view ─────────────────────────────── */}
+              {viewMode === 'table' && (
+                <div className={styles.tableWrapper}>
+                  <table className={styles.assetTable}>
+                    <thead>
+                      <tr>
+                        <th className={styles.thCheck}>
+                          <input type="checkbox" checked={allPageSelected} onChange={toggleSelectAllPage} />
+                        </th>
+                        {([
+                          { key: 'name',         label: 'Name' },
+                          { key: 'type',         label: 'Type' },
+                          { key: 'status',       label: 'Status' },
+                          { key: 'manufacturer', label: 'Manufacturer / Model' },
+                        ] as const).map(({ key, label }) => (
+                          <th key={key} className={styles.thSortable} onClick={() => handleSort(key)}>
+                            {label}
+                            {sortField === key
+                              ? sortDir === 'asc' ? <ChevronUp size={12} style={{ marginLeft: 3 }} /> : <ChevronDown size={12} style={{ marginLeft: 3 }} />
+                              : <ChevronsUpDown size={12} style={{ marginLeft: 3, opacity: 0.35 }} />}
+                          </th>
+                        ))}
+                        <th className={styles.th}>IP / Serial</th>
+                        <th className={styles.th}>Location</th>
+                        <th className={`${styles.thSortable}`} onClick={() => handleSort('maintenance')}>
+                          Next Maint.
+                          {sortField === 'maintenance'
+                            ? sortDir === 'asc' ? <ChevronUp size={12} style={{ marginLeft: 3 }} /> : <ChevronDown size={12} style={{ marginLeft: 3 }} />
+                            : <ChevronsUpDown size={12} style={{ marginLeft: 3, opacity: 0.35 }} />}
+                        </th>
+                        <th className={styles.th}></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pageAssets.map((asset) => {
+                        const isSelected = selectedAssetIds.has(asset._id);
+                        const building = buildings.find(b => b._id === asset.hierarchy?.building_id);
+                        const floor = floors.find(f => f._id === asset.hierarchy?.floor_id);
+                        const nextMaint = asset.maintenance?.next_date ? new Date(asset.maintenance.next_date) : null;
+                        const maintOverdue = nextMaint && nextMaint.getTime() < now;
+                        return (
+                          <tr
+                            key={asset._id}
+                            className={`${styles.tableRow} ${isSelected ? styles.tableRowSelected : ''}`}
+                            onClick={() => navigate(`/assets/${asset._id}`)}
+                          >
+                            <td className={styles.tdCheck} onClick={e => { e.stopPropagation(); toggleAssetSelection(asset._id, e); }}>
+                              <input type="checkbox" checked={isSelected} readOnly />
+                            </td>
+                            <td>
+                              <div className={styles.tableName}>
+                                <span className={styles.tableIcon}>{getAssetIcon(asset.basic_info?.type)}</span>
+                                {asset.basic_info?.display_name}
+                              </div>
+                            </td>
+                            <td className={styles.tdMuted}>{asset.basic_info?.type ?? '—'}</td>
+                            <td onClick={e => e.stopPropagation()}>
+                              <select
+                                className={`${styles.inlineStatusSelect} ${styles[`status_${asset.basic_info?.status ?? 'unknown'}`]}`}
+                                value={asset.basic_info?.status ?? ''}
+                                onChange={e => handleInlineStatusChange(asset._id, e.target.value)}
+                              >
+                                {['active', 'maintenance', 'inactive', 'retired'].map(s => (
+                                  <option key={s} value={s}>{s}</option>
+                                ))}
+                              </select>
+                            </td>
+                            <td className={styles.tdMuted}>{[asset.basic_info?.manufacturer, asset.basic_info?.model].filter(Boolean).join(' ') || '—'}</td>
+                            <td className={styles.tdMono}>{asset.network?.ip_address || asset.basic_info?.serial_number || '—'}</td>
+                            <td className={styles.tdMuted}>{[building?.name, floor?.name].filter(Boolean).join(' · ') || '—'}</td>
+                            <td className={maintOverdue ? styles.tdOverdue : styles.tdMuted}>
+                              {nextMaint ? nextMaint.toLocaleDateString() : '—'}
+                            </td>
+                            <td className={styles.tdActions} onClick={e => e.stopPropagation()}>
+                              <button className={styles.quickViewBtn} title="Quick view" onClick={() => setViewAsset(asset)}>
+                                <Eye size={14} />
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {/* ── Pagination ─────────────────────────────── */}
+              {sortedAssets.length > itemsPerPage && (
                 <div className={styles.pagination}>
-                  <button
-                    className={styles.pageBtn}
-                    onClick={() => setPage((p) => Math.max(1, p - 1))}
-                    disabled={page === 1}
-                  >
-                    ← Prev
-                  </button>
-                  <span className={styles.pageInfo}>
-                    Page {page} of {Math.ceil(filteredAssets.length / itemsPerPage)}
-                    &nbsp;·&nbsp;{filteredAssets.length} assets
-                  </span>
-                  <button
-                    className={styles.pageBtn}
-                    onClick={() => setPage((p) => Math.min(Math.ceil(filteredAssets.length / itemsPerPage), p + 1))}
-                    disabled={page >= Math.ceil(filteredAssets.length / itemsPerPage)}
-                  >
-                    Next →
-                  </button>
+                  <button className={styles.pageBtn} onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}>← Prev</button>
+                  <span className={styles.pageInfo}>Page {page} of {totalPages} · {sortedAssets.length} assets</span>
+                  <div className={styles.pageJump}>
+                    <span>Go to</span>
+                    <input
+                      type="number"
+                      className={styles.pageJumpInput}
+                      min={1}
+                      max={totalPages}
+                      defaultValue={page}
+                      key={page}
+                      onBlur={e => {
+                        const v = parseInt(e.target.value, 10);
+                        if (!isNaN(v)) setPage(Math.max(1, Math.min(totalPages, v)));
+                      }}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') {
+                          const v = parseInt((e.target as HTMLInputElement).value, 10);
+                          if (!isNaN(v)) setPage(Math.max(1, Math.min(totalPages, v)));
+                        }
+                      }}
+                    />
+                  </div>
+                  <button className={styles.pageBtn} onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page >= totalPages}>Next →</button>
                 </div>
               )}
             </>

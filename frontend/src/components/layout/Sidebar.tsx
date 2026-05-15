@@ -11,6 +11,7 @@ import {
   Bell,
   Network,
   Wrench,
+  Keyboard,
   LucideIcon,
 } from 'lucide-react';
 import { useMaintenanceCounts } from '../../hooks/useMaintenanceCounts';
@@ -37,9 +38,10 @@ const menuItems: MenuItem[] = [
 
 interface SidebarProps {
   isOpen: boolean;
+  onShortcuts?: () => void;
 }
 
-const Sidebar: React.FC<SidebarProps> = ({ isOpen }) => {
+const Sidebar: React.FC<SidebarProps> = ({ isOpen, onShortcuts }) => {
   const location = useLocation();
   const { overdue } = useMaintenanceCounts();
 
@@ -77,6 +79,17 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen }) => {
           );
         })}
       </nav>
+      <div className={styles.footer}>
+        <button
+          className={styles.shortcutsBtn}
+          onClick={onShortcuts}
+          title={isOpen ? undefined : 'Keyboard shortcuts (?)'}
+        >
+          <Keyboard size={15} className={styles.icon} aria-hidden="true" />
+          <span className={styles.label}>Shortcuts</span>
+          <span className={styles.shortcutHint}>?</span>
+        </button>
+      </div>
     </aside>
   );
 };

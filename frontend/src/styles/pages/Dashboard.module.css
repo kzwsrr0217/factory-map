@@ -223,6 +223,8 @@
   justify-content: space-between;
   align-items: center;
   margin-bottom: var(--spacing-md);
+  gap: var(--spacing-sm);
+  flex-wrap: wrap;
 }
 
 .assetsHeader h3 {
@@ -665,3 +667,185 @@
   font-size: 0.875rem;
   color: var(--color-text-secondary);
 }
+
+/* ── Assets header (select-all + view toggle) ─── */
+.assetsHeaderLeft {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.assetsHeaderRight {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.selectAllCheck {
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+  accent-color: var(--color-primary);
+  flex-shrink: 0;
+}
+
+.viewToggle {
+  display: flex;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.viewBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px 9px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+
+.viewBtn:first-child { border-right: 1px solid var(--color-border); }
+
+.viewBtn:hover { background: var(--color-bg-secondary); color: var(--color-text-primary); }
+
+.viewBtnActive {
+  background: var(--color-primary);
+  color: #fff;
+}
+
+.viewBtnActive:hover { background: var(--color-primary); color: #fff; }
+
+/* ── Inline status select (card + table) ─────── */
+.inlineStatusSelect {
+  font-size: 0.72rem;
+  font-family: inherit;
+  font-weight: 600;
+  padding: 2px 5px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  text-transform: capitalize;
+}
+
+.status_active    { color: #16a34a; border-color: #bbf7d0; background: #f0fdf4; }
+.status_maintenance { color: #b45309; border-color: #fde68a; background: #fffbeb; }
+.status_inactive  { color: #6b7280; border-color: #e5e7eb; }
+.status_retired   { color: #dc2626; border-color: #fecaca; background: #fef2f2; }
+
+/* ── Table view ──────────────────────────────── */
+.tableWrapper {
+  overflow-x: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.assetTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+  color: var(--color-text-primary);
+}
+
+.assetTable thead {
+  background: var(--color-bg-secondary);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.th,
+.thCheck,
+.thSortable {
+  padding: 8px 10px;
+  text-align: left;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-secondary);
+  border-bottom: 1px solid var(--color-border);
+  white-space: nowrap;
+}
+
+.thCheck { width: 36px; }
+
+.thSortable {
+  cursor: pointer;
+  user-select: none;
+}
+
+.thSortable:hover { color: var(--color-text-primary); }
+
+.tableRow {
+  border-bottom: 1px solid var(--color-border);
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.tableRow:last-child { border-bottom: none; }
+
+.tableRow:hover { background: var(--color-bg-secondary); }
+
+.tableRowSelected { background: color-mix(in srgb, var(--color-primary) 5%, var(--color-surface)); }
+
+.tableRowSelected:hover { background: color-mix(in srgb, var(--color-primary) 8%, var(--color-surface)); }
+
+.assetTable td {
+  padding: 7px 10px;
+  vertical-align: middle;
+}
+
+.tdCheck { width: 36px; }
+
+.tableName {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.tableIcon { font-size: 1rem; flex-shrink: 0; }
+
+.tdMuted { color: var(--color-text-secondary); white-space: nowrap; }
+
+.tdMono {
+  font-family: var(--font-family-mono, monospace);
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.tdOverdue { color: #dc2626; font-weight: 600; white-space: nowrap; }
+
+.tdActions { width: 40px; text-align: center; }
+
+/* ── Jump-to-page ────────────────────────────── */
+.pageJump {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary);
+}
+
+.pageJumpInput {
+  width: 48px;
+  padding: 3px 6px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  font-size: 0.8125rem;
+  text-align: center;
+  font-family: inherit;
+}
+
+.pageJumpInput::-webkit-inner-spin-button,
+.pageJumpInput::-webkit-outer-spin-button { opacity: 0.5; }

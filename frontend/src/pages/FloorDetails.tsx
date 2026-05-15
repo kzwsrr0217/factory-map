@@ -531,6 +531,17 @@ const FloorDetails: React.FC = () => {
           </div>
         </div>
 
+        {!floor.svg_background && workareas.length === 0 && (
+          <div className={styles.floorPlanEmpty}>
+            <Upload size={36} style={{ color: 'var(--color-text-secondary)', marginBottom: 12 }} />
+            <h3>No floor plan yet</h3>
+            <p>Upload an SVG or image to visualise this floor. You can still add work areas without a background.</p>
+            <Button variant="primary" onClick={() => setUploadModalOpen(true)}>
+              <Upload size={15} style={{ marginRight: 6 }} />Upload Floor Plan
+            </Button>
+          </div>
+        )}
+
         <FloorMap
           workareas={workareas}
           assets={placedAssets}

@@ -34,6 +34,8 @@ import Badge from '../components/common/Badge';
 import Breadcrumb from '../components/common/Breadcrumb';
 import ConfirmDialog from '../components/common/ConfirmDialog';
 import { assetService, Asset } from '../services/asset.service';
+import { hierarchyService, Building } from '../services/hierarchy.service';
+import { floorService, Floor } from '../services/floor.service';
 import { useToast } from '../contexts/ToastContext';
 import styles from '../styles/pages/AssetDetails.module.css';
 import AssetFormModal from '../components/asset/AssetFormModal';
@@ -43,6 +45,8 @@ const AssetDetails: React.FC = () => {
   const navigate = useNavigate();
 
   const [asset, setAsset] = useState<Asset | null>(null);
+  const [building, setBuilding] = useState<Building | null>(null);
+  const [floor, setFloor] = useState<Floor | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
@@ -63,6 +67,16 @@ const AssetDetails: React.FC = () => {
         errorCorrectionLevel: 'M',
       });
       setQrDataUrl(dataUrl);
+
+      // Load breadcrumb hierarchy non-blocking
+      const bId = data.hierarchy?.building_id;
+      const fId = data.hierarchy?.floor_id;
+      if (bId) {
+        hierarchyService.getBuilding(bId).then(setBuilding).catch(() => {});
+      }
+      if (fId) {
+        floorService.getFloor(fId).then(setFloor).catch(() => {});
+      }
     } catch (err) {
       console.error('Error loading asset details:', err);
       setError('Failed to load asset details. Please try again.');
@@ -233,6 +247,8 @@ const AssetDetails: React.FC = () => {
     <div className={styles.assetDetails}>
       <Breadcrumb items={[
         { label: 'Dashboard', href: '/' },
+        ...(building ? [{ label: building.name, href: `/buildings/${building._id}` }] : []),
+        ...(floor    ? [{ label: floor.name,     href: `/floors/${floor._id}` }]     : []),
         { label: asset.basic_info?.display_name ?? 'Asset' },
       ]} />
 

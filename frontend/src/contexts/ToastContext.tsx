@@ -95,13 +95,16 @@ const ToastContainer: React.FC<{
     <div style={{
       position: 'fixed',
       bottom: '1.5rem',
-      right: '1.5rem',
+      left: '50%',
+      transform: 'translateX(-50%)',
       zIndex: 99999,
       display: 'flex',
       flexDirection: 'column',
       gap: '0.5rem',
-      maxWidth: '360px',
+      width: 'max-content',
+      maxWidth: 'min(400px, calc(100vw - 3rem))',
       pointerEvents: 'none',
+      alignItems: 'center',
     }}>
       {toasts.map((toast) => (
         <div

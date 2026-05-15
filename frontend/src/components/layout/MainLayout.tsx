@@ -19,6 +19,7 @@ import { Link } from 'react-router-dom';
 import { AlertTriangle, WifiOff, X } from 'lucide-react';
 import Header from './Header';
 import Sidebar from './Sidebar';
+import KeyboardShortcuts from '../common/KeyboardShortcuts';
 import { useAuth } from '../../contexts/AuthContext';
 import styles from '../../styles/components/MainLayout.module.css';
 
@@ -29,12 +30,23 @@ interface MainLayoutProps {
 const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [networkError, setNetworkError] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const { passwordExpired, clearPasswordExpired } = useAuth();
 
   useEffect(() => {
     const handleNetworkError = () => setNetworkError(true);
     window.addEventListener('factory-map:network-error', handleNetworkError);
     return () => window.removeEventListener('factory-map:network-error', handleNetworkError);
+  }, []);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === '?' && !e.ctrlKey && !e.metaKey && !(e.target as HTMLElement).matches('input,textarea,select')) {
+        setShortcutsOpen(v => !v);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
   }, []);
 
   return (
@@ -62,11 +74,12 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
         </div>
       )}
       <div className={styles.container}>
-        <Sidebar isOpen={sidebarOpen} />
+        <Sidebar isOpen={sidebarOpen} onShortcuts={() => setShortcutsOpen(true)} />
         <main className={styles.main}>
           {children}
         </main>
       </div>
+      <KeyboardShortcuts isOpen={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
     </div>
   );
 };
