@@ -18,7 +18,7 @@
  * All data is fetched fresh on open (`isOpen` or `inline` mount) via parallel
  * Promise.all calls to `assetService`, `hierarchyService`, and `floorService`.
  */
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
   PieChart, Pie, Legend,
@@ -43,6 +43,316 @@ const TYPE_COLORS = [
   '#3b82f6', '#8b5cf6', '#06b6d4', '#f97316', '#84cc16',
   '#ec4899', '#14b8a6', '#f59e0b', '#6366f1', '#78716c',
 ];
+
+// ── Topology constants ──────────────────────────────────────
+const VW = 1800;
+const VH = 1200;
+
+const TOPO_TYPE_COLORS = [
+  '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6',
+  '#06b6d4', '#f97316', '#84cc16', '#ec4899', '#14b8a6',
+  '#6366f1', '#78716c', '#a855f7', '#0ea5e9', '#22d3ee',
+];
+
+const EDGE_COLORS: Record<string, string> = {
+  network: '#3b82f6', ethernet: '#3b82f6', fiber: '#8b5cf6',
+  wifi: '#06b6d4', power: '#ef4444', usb: '#f59e0b',
+  bluetooth: '#6366f1', dependency: '#f97316',
+  'parent-child': '#84cc16', peer: '#14b8a6',
+  serial: '#78716c', parallel: '#78716c',
+};
+
+function buildTopoLayout(
+  nodes: Asset[],
+  edges: { s: string; t: string }[],
+): Map<string, { x: number; y: number }> {
+  if (nodes.length === 0) return new Map();
+
+  const typeGroups = new Map<string, Asset[]>();
+  nodes.forEach((n) => {
+    const t = n.basic_info?.type ?? 'other';
+    if (!typeGroups.has(t)) typeGroups.set(t, []);
+    typeGroups.get(t)!.push(n);
+  });
+
+  const groups = Array.from(typeGroups.values());
+  const numGroups = groups.length;
+  const CX = VW / 2;
+  const CY = VH / 2;
+  const CLUSTER_R = Math.min(VW, VH) * 0.35;
+
+  const pos = new Map<string, { x: number; y: number }>();
+  const vel = new Map<string, { vx: number; vy: number }>();
+
+  groups.forEach((group, gi) => {
+    const cAngle = (gi / numGroups) * 2 * Math.PI - Math.PI / 2;
+    const cx = CX + (numGroups > 1 ? CLUSTER_R : 0) * Math.cos(cAngle);
+    const cy = CY + (numGroups > 1 ? CLUSTER_R : 0) * Math.sin(cAngle);
+    const NODES_PER_RING = 8;
+    const BASE_R = 30;
+    const RING_STEP = 36;
+
+    group.forEach((n, ni) => {
+      const ring = Math.floor(ni / NODES_PER_RING);
+      const posInRing = ni % NODES_PER_RING;
+      const ringCount = Math.min(NODES_PER_RING, group.length - ring * NODES_PER_RING);
+      const r = BASE_R + ring * RING_STEP;
+      const angle = (posInRing / ringCount) * 2 * Math.PI;
+      pos.set(n._id, { x: cx + r * Math.cos(angle), y: cy + r * Math.sin(angle) });
+      vel.set(n._id, { vx: 0, vy: 0 });
+    });
+  });
+
+  const REPULSE = 6000, ATTRACT = 0.04, DAMP = 0.82;
+  for (let it = 0; it < 180; it++) {
+    for (let a = 0; a < nodes.length; a++) {
+      for (let b = a + 1; b < nodes.length; b++) {
+        const pa = pos.get(nodes[a]._id)!;
+        const pb = pos.get(nodes[b]._id)!;
+        const va = vel.get(nodes[a]._id)!;
+        const vb = vel.get(nodes[b]._id)!;
+        const dx = pa.x - pb.x; const dy = pa.y - pb.y;
+        const d = Math.sqrt(dx * dx + dy * dy) + 0.1;
+        const f = REPULSE / (d * d);
+        va.vx += (dx / d) * f; va.vy += (dy / d) * f;
+        vb.vx -= (dx / d) * f; vb.vy -= (dy / d) * f;
+      }
+    }
+    edges.forEach((e) => {
+      const pa = pos.get(e.s); const pb = pos.get(e.t);
+      const va = vel.get(e.s); const vb = vel.get(e.t);
+      if (!pa || !pb || !va || !vb) return;
+      const dx = pb.x - pa.x; const dy = pb.y - pa.y;
+      va.vx += dx * ATTRACT; va.vy += dy * ATTRACT;
+      vb.vx -= dx * ATTRACT; vb.vy -= dy * ATTRACT;
+    });
+    nodes.forEach((n) => {
+      const p = pos.get(n._id)!; const v = vel.get(n._id)!;
+      p.x += v.vx; p.y += v.vy;
+      v.vx *= DAMP; v.vy *= DAMP;
+      p.x = Math.max(20, Math.min(VW - 20, p.x));
+      p.y = Math.max(20, Math.min(VH - 20, p.y));
+    });
+  }
+
+  return pos;
+}
+
+const TopologyView: React.FC<{ assets: Asset[] }> = ({ assets }) => {
+  const svgRef = useRef<SVGSVGElement>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<{ sx: number; sy: number; vx: number; vy: number } | null>(null);
+  const [vp, setVp] = useState({ x: 0, y: 0, scale: 1 });
+  const [hoverId, setHoverId] = useState<string | null>(null);
+
+  const { nodes, edges, layout } = useMemo(() => {
+    const connectedIds = new Set<string>();
+    assets.forEach((a) => {
+      if (a.connections?.length) {
+        connectedIds.add(a._id);
+        a.connections.forEach((c) => connectedIds.add(c.connected_asset_id));
+      }
+    });
+    const nodes = assets.filter((a) => connectedIds.has(a._id));
+    const edgeSet = new Set<string>();
+    const edges: { s: string; t: string; type: string }[] = [];
+    assets.forEach((a) => {
+      a.connections?.forEach((c) => {
+        const key = [a._id, c.connected_asset_id].sort().join('|');
+        if (!edgeSet.has(key)) {
+          edgeSet.add(key);
+          edges.push({ s: a._id, t: c.connected_asset_id, type: c.connection_type });
+        }
+      });
+    });
+    const layout = buildTopoLayout(nodes, edges);
+    return { nodes, edges, layout };
+  }, [assets]);
+
+  useEffect(() => {
+    const wrap = wrapRef.current;
+    if (!wrap || nodes.length === 0) return;
+    const { width, height } = wrap.getBoundingClientRect();
+    const scale = Math.min(width / VW, height / VH) * 0.92;
+    setVp({ x: (width - VW * scale) / 2, y: (height - VH * scale) / 2, scale });
+  }, [layout, nodes.length]);
+
+  useEffect(() => {
+    const el = svgRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const factor = e.deltaY < 0 ? 1.12 : 0.89;
+      setVp((prev) => {
+        const s = Math.max(0.05, Math.min(10, prev.scale * factor));
+        const rect = el.getBoundingClientRect();
+        const mx = e.clientX - rect.left;
+        const my = e.clientY - rect.top;
+        return { scale: s, x: mx - (mx - prev.x) * (s / prev.scale), y: my - (my - prev.y) * (s / prev.scale) };
+      });
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, []);
+
+  const onMouseDown = (e: React.MouseEvent<SVGSVGElement>) => {
+    dragRef.current = { sx: e.clientX, sy: e.clientY, vx: vp.x, vy: vp.y };
+  };
+  const onMouseMove = (e: React.MouseEvent<SVGSVGElement>) => {
+    const d = dragRef.current;
+    if (!d) return;
+    setVp((prev) => ({ ...prev, x: d.vx + e.clientX - d.sx, y: d.vy + e.clientY - d.sy }));
+  };
+  const onMouseUp = () => { dragRef.current = null; };
+
+  const degreeMap = useMemo(() => {
+    const m = new Map<string, number>();
+    edges.forEach((e) => {
+      m.set(e.s, (m.get(e.s) ?? 0) + 1);
+      m.set(e.t, (m.get(e.t) ?? 0) + 1);
+    });
+    return m;
+  }, [edges]);
+
+  const typeIndex = useMemo(() => {
+    const types = Array.from(new Set(nodes.map((n) => n.basic_info?.type ?? 'other')));
+    return new Map(types.map((t, i) => [t, i]));
+  }, [nodes]);
+
+  const uniqueEdgeTypes = useMemo(() => Array.from(new Set(edges.map((e) => e.type))), [edges]);
+  const uniqueNodeTypes = useMemo(() => Array.from(typeIndex.keys()), [typeIndex]);
+
+  const fitView = useCallback(() => {
+    const wrap = wrapRef.current;
+    if (!wrap) return;
+    const { width, height } = wrap.getBoundingClientRect();
+    const scale = Math.min(width / VW, height / VH) * 0.92;
+    setVp({ x: (width - VW * scale) / 2, y: (height - VH * scale) / 2, scale });
+  }, []);
+
+  if (nodes.length === 0) {
+    return (
+      <div className={styles.placeholder}>
+        <p>No connections found. Connect assets on the map to see the topology graph.</p>
+      </div>
+    );
+  }
+
+  const hoverNode = hoverId ? nodes.find((n) => n._id === hoverId) : null;
+  const hoverLayout = hoverId ? layout.get(hoverId) : null;
+  const hoverConnIds = hoverId
+    ? new Set(edges.filter((e) => e.s === hoverId || e.t === hoverId).flatMap((e) => [e.s, e.t]))
+    : null;
+
+  return (
+    <div className={styles.topologyContainer}>
+      <div className={styles.topologyToolbar}>
+        <p className={styles.topologyHint}>
+          {nodes.length} nodes · {edges.length} edges · {uniqueNodeTypes.length} types — scroll to zoom, drag to pan
+        </p>
+        <div className={styles.topologyControls}>
+          <button className={styles.topoBtn} onClick={() => setVp((p) => ({ ...p, scale: Math.min(10, p.scale * 1.25) }))}>+</button>
+          <span className={styles.topoZoomLabel}>{Math.round(vp.scale * 100)}%</span>
+          <button className={styles.topoBtn} onClick={() => setVp((p) => ({ ...p, scale: Math.max(0.05, p.scale * 0.8) }))}>−</button>
+          <button className={styles.topoBtn} onClick={fitView}>Fit</button>
+        </div>
+      </div>
+
+      <div ref={wrapRef} className={styles.topologySvgWrap}>
+        <svg
+          ref={svgRef}
+          className={styles.topologySvg}
+          onMouseDown={onMouseDown}
+          onMouseMove={onMouseMove}
+          onMouseUp={onMouseUp}
+          onMouseLeave={onMouseUp}
+        >
+          <g transform={`translate(${vp.x},${vp.y}) scale(${vp.scale})`}>
+            {edges.map((e, i) => {
+              const pa = layout.get(e.s); const pb = layout.get(e.t);
+              if (!pa || !pb) return null;
+              const dimmed = hoverConnIds !== null && !hoverConnIds.has(e.s) && !hoverConnIds.has(e.t);
+              return (
+                <line key={i} x1={pa.x} y1={pa.y} x2={pb.x} y2={pb.y}
+                  stroke={EDGE_COLORS[e.type] ?? '#9ca3af'}
+                  strokeWidth={hoverId && !dimmed ? 2.5 : 1.5}
+                  opacity={dimmed ? 0.07 : 0.6} />
+              );
+            })}
+            {nodes.map((n) => {
+              const p = layout.get(n._id);
+              if (!p) return null;
+              const colorIdx = typeIndex.get(n.basic_info?.type ?? 'other') ?? 0;
+              const color = TOPO_TYPE_COLORS[colorIdx % TOPO_TYPE_COLORS.length];
+              const degree = degreeMap.get(n._id) ?? 0;
+              const r = 8 + Math.min(degree, 12) * 0.8;
+              const isHovered = n._id === hoverId;
+              const isDimmed = hoverConnIds !== null && !hoverConnIds.has(n._id);
+              const showLabel = degree >= 5 || isHovered;
+              return (
+                <g key={n._id} style={{ cursor: 'default' }}
+                  onMouseEnter={() => setHoverId(n._id)}
+                  onMouseLeave={() => setHoverId(null)}>
+                  {isHovered && (
+                    <circle cx={p.x} cy={p.y} r={r + 7} fill="none"
+                      stroke={color} strokeWidth="2" opacity="0.45" />
+                  )}
+                  <circle cx={p.x} cy={p.y} r={r}
+                    fill={color} stroke="var(--color-bg-secondary)" strokeWidth="2"
+                    opacity={isDimmed ? 0.12 : 1} />
+                  {showLabel && (
+                    <text x={p.x} y={p.y + r + 12} textAnchor="middle" fontSize="10"
+                      fill="var(--color-text-primary)"
+                      stroke="var(--color-bg-secondary)" strokeWidth="2.5" paintOrder="stroke"
+                      opacity={isDimmed ? 0.15 : 1}>
+                      {(n.basic_info?.display_name ?? '?').slice(0, 18)}
+                    </text>
+                  )}
+                </g>
+              );
+            })}
+          </g>
+        </svg>
+
+        {hoverNode && hoverLayout && (
+          <div className={styles.topologyTooltip} style={{
+            left: hoverLayout.x * vp.scale + vp.x + 14,
+            top: hoverLayout.y * vp.scale + vp.y - 10,
+          }}>
+            <div className={styles.topologyTooltipName}>{hoverNode.basic_info?.display_name}</div>
+            <div className={styles.topologyTooltipDetail}>
+              {hoverNode.basic_info?.type && <div>Type: {hoverNode.basic_info.type}</div>}
+              {hoverNode.basic_info?.status && <div>Status: {hoverNode.basic_info.status}</div>}
+              <div>Connections: {degreeMap.get(hoverNode._id) ?? 0}</div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className={styles.topologyLegends}>
+        <div className={styles.topologyLegend}>
+          <span className={styles.topologyLegendLabel}>Types:</span>
+          {uniqueNodeTypes.slice(0, 8).map((type) => (
+            <span key={type} className={styles.topologyLegendItem}>
+              <span className={styles.topologyLegendDot}
+                style={{ background: TOPO_TYPE_COLORS[(typeIndex.get(type) ?? 0) % TOPO_TYPE_COLORS.length] }} />
+              {type}
+            </span>
+          ))}
+        </div>
+        <div className={styles.topologyLegend}>
+          <span className={styles.topologyLegendLabel}>Connections:</span>
+          {uniqueEdgeTypes.map((type) => (
+            <span key={type} className={styles.topologyLegendItem}>
+              <span className={styles.topologyLegendLine} style={{ background: EDGE_COLORS[type] ?? '#9ca3af' }} />
+              {type}
+            </span>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};
 
 interface AssetReportsProps {
   isOpen: boolean;
@@ -560,117 +870,7 @@ const AssetReports: React.FC<AssetReportsProps> = ({ isOpen, onClose, inline = f
   };
 
   const renderTopology = () => {
-    const W = 620, H = 440;
-    const connectedIds = new Set<string>();
-    allAssets.forEach((a) => {
-      if (a.connections && a.connections.length > 0) {
-        connectedIds.add(a._id);
-        a.connections.forEach((c) => connectedIds.add(c.connected_asset_id));
-      }
-    });
-    const nodes = allAssets.filter((a) => connectedIds.has(a._id));
-
-    if (nodes.length === 0) {
-      return (
-        <div className={styles.placeholder}>
-          <p>No connections found. Connect assets on the map to see the topology graph.</p>
-        </div>
-      );
-    }
-
-    const edgeSet = new Set<string>();
-    const edges: { s: string; t: string; type: string }[] = [];
-    allAssets.forEach((a) => {
-      a.connections?.forEach((c) => {
-        const key = [a._id, c.connected_asset_id].sort().join('|');
-        if (!edgeSet.has(key)) {
-          edgeSet.add(key);
-          edges.push({ s: a._id, t: c.connected_asset_id, type: c.connection_type });
-        }
-      });
-    });
-
-    const pos = new Map<string, { x: number; y: number }>();
-    nodes.forEach((n, i) => {
-      const angle = (i / nodes.length) * 2 * Math.PI;
-      pos.set(n._id, { x: W / 2 + W * 0.38 * Math.cos(angle), y: H / 2 + H * 0.38 * Math.sin(angle) });
-    });
-
-    const REPULSE = 4500, ATTRACT = 0.08;
-    for (let it = 0; it < 80; it++) {
-      nodes.forEach((a) => {
-        nodes.forEach((b) => {
-          if (a._id === b._id) return;
-          const pa = pos.get(a._id)!; const pb = pos.get(b._id)!;
-          const dx = pa.x - pb.x; const dy = pa.y - pb.y;
-          const d = Math.sqrt(dx * dx + dy * dy) + 0.1;
-          const f = REPULSE / (d * d);
-          pa.x += (dx / d) * f; pa.y += (dy / d) * f;
-        });
-      });
-      edges.forEach((e) => {
-        const pa = pos.get(e.s); const pb = pos.get(e.t);
-        if (!pa || !pb) return;
-        const dx = pb.x - pa.x; const dy = pb.y - pa.y;
-        pa.x += dx * ATTRACT; pa.y += dy * ATTRACT;
-        pb.x -= dx * ATTRACT; pb.y -= dy * ATTRACT;
-      });
-      nodes.forEach((n) => {
-        const p = pos.get(n._id)!;
-        p.x = Math.max(24, Math.min(W - 24, p.x));
-        p.y = Math.max(24, Math.min(H - 24, p.y));
-      });
-    }
-
-    const connColor: Record<string, string> = {
-      network: '#3b82f6', ethernet: '#3b82f6', fiber: '#8b5cf6', wifi: '#06b6d4',
-      power: '#ef4444', usb: '#f59e0b', bluetooth: '#6366f1', dependency: '#f97316',
-      'parent-child': '#84cc16', peer: '#14b8a6', serial: '#78716c', parallel: '#78716c',
-    };
-
-    const uniqueEdgeTypes = Array.from(new Set(edges.map((e) => e.type)));
-
-    return (
-      <div className={styles.topologyWrapper}>
-        <p className={styles.topologyHint}>{nodes.length} nodes · {edges.length} edges</p>
-        <svg width="100%" viewBox={`0 0 ${W} ${H}`} className={styles.topologySvg}>
-          {edges.map((e, i) => {
-            const pa = pos.get(e.s); const pb = pos.get(e.t);
-            if (!pa || !pb) return null;
-            return (
-              <line key={i} x1={pa.x} y1={pa.y} x2={pb.x} y2={pb.y}
-                stroke={connColor[e.type] ?? '#9ca3af'} strokeWidth="1.5" opacity="0.65" />
-            );
-          })}
-          {nodes.map((n) => {
-            const p = pos.get(n._id)!;
-            const statusColor =
-              n.basic_info?.status === 'active' ? '#10b981' :
-              n.basic_info?.status === 'maintenance' ? '#f59e0b' :
-              (n.basic_info?.status === 'retired' || n.basic_info?.status === 'inactive') ? '#ef4444' : '#9ca3af';
-            const label = (n.basic_info?.display_name ?? '?').slice(0, 14);
-            return (
-              <g key={n._id}>
-                <circle cx={p.x} cy={p.y} r="10" fill={statusColor} stroke="var(--color-bg-primary)" strokeWidth="2" />
-                <text x={p.x} y={p.y + 22} textAnchor="middle" fontSize="9"
-                  fill="var(--color-text-primary)" stroke="var(--color-bg-secondary)"
-                  strokeWidth="2.5" paintOrder="stroke">
-                  {label}
-                </text>
-              </g>
-            );
-          })}
-        </svg>
-        <div className={styles.topologyLegend}>
-          {uniqueEdgeTypes.map((type) => (
-            <span key={type} className={styles.topologyLegendItem}>
-              <span style={{ display: 'inline-block', width: 14, height: 3, background: connColor[type] ?? '#9ca3af', verticalAlign: 'middle', borderRadius: 2, marginRight: 4 }} />
-              {type}
-            </span>
-          ))}
-        </div>
-      </div>
-    );
+    return <TopologyView assets={allAssets} />;
   };
 
   const renderContent = () => {
