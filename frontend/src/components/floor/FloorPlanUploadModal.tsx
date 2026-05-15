@@ -128,15 +128,6 @@ const FloorPlanUploadModal: React.FC<FloorPlanUploadModalProps> = ({
 
   return (
     <>
-    <ConfirmDialog
-      isOpen={confirmRemoveOpen}
-      onClose={() => setConfirmRemoveOpen(false)}
-      onConfirm={() => { setConfirmRemoveOpen(false); handleRemove(); }}
-      title="Remove Floor Plan"
-      message="Are you sure you want to remove the current floor plan?"
-      confirmText="Remove"
-      loading={uploading}
-    />
     <Modal
       isOpen={isOpen}
       onClose={handleClose}
@@ -206,6 +197,15 @@ const FloorPlanUploadModal: React.FC<FloorPlanUploadModalProps> = ({
         )}
       </div>
     </Modal>
+    <ConfirmDialog
+      isOpen={confirmRemoveOpen}
+      onClose={() => setConfirmRemoveOpen(false)}
+      onConfirm={() => { setConfirmRemoveOpen(false); handleRemove(); }}
+      title="Remove Floor Plan"
+      message="Are you sure you want to remove the current floor plan?"
+      confirmText="Remove"
+      loading={uploading}
+    />
     </>
   );
 };

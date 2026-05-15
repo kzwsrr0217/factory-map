@@ -553,26 +553,6 @@ const AssetFormModal: React.FC<AssetFormModalProps> = ({
 
   return (
     <>
-    <ConfirmDialog
-      isOpen={discardOpen}
-      onClose={() => setDiscardOpen(false)}
-      onConfirm={() => { setDiscardOpen(false); setIsDirty(false); onClose(); }}
-      title="Discard changes?"
-      message="You have unsaved changes. Are you sure you want to close without saving?"
-      confirmText="Discard"
-      cancelText="Keep editing"
-      variant="danger"
-    />
-    <ConfirmDialog
-      isOpen={itsmConfirming}
-      onClose={() => setItsmConfirming(false)}
-      onConfirm={doSubmit}
-      title="Override ITSM data?"
-      message="This asset is managed by ITSM. Your local changes will diverge from ITSM data and may be overwritten on the next sync. To preserve local changes permanently, set the Source of Truth to 'Local'."
-      confirmText="Save local override"
-      cancelText="Cancel"
-      variant="danger"
-    />
     <Modal
       isOpen={isOpen}
       onClose={handleAttemptClose}
@@ -1250,6 +1230,26 @@ const AssetFormModal: React.FC<AssetFormModalProps> = ({
         )}
       </div>
     </Modal>
+    <ConfirmDialog
+      isOpen={discardOpen}
+      onClose={() => setDiscardOpen(false)}
+      onConfirm={() => { setDiscardOpen(false); setIsDirty(false); onClose(); }}
+      title="Discard changes?"
+      message="You have unsaved changes. Are you sure you want to close without saving?"
+      confirmText="Discard"
+      cancelText="Keep editing"
+      variant="danger"
+    />
+    <ConfirmDialog
+      isOpen={itsmConfirming}
+      onClose={() => setItsmConfirming(false)}
+      onConfirm={doSubmit}
+      title="Override ITSM data?"
+      message="This asset is managed by ITSM. Your local changes will diverge from ITSM data and may be overwritten on the next sync. To preserve local changes permanently, set the Source of Truth to 'Local'."
+      confirmText="Save local override"
+      cancelText="Cancel"
+      variant="danger"
+    />
     </>
   );
 };

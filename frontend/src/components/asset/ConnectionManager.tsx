@@ -227,15 +227,6 @@ const ConnectionManager: React.FC<ConnectionManagerProps> = ({
 
   return (
     <>
-    <ConfirmDialog
-      isOpen={deleteTargetId !== null}
-      onClose={() => setDeleteTargetId(null)}
-      onConfirm={confirmDeleteConnection}
-      title="Delete Connection"
-      message="Are you sure you want to delete this connection?"
-      confirmText="Delete"
-      loading={loading}
-    />
     <Modal isOpen={isOpen} onClose={onClose} title={`Manage Connections - ${assetName}`}>
       <div className={styles.container}>
         <div className={styles.header}>
@@ -457,6 +448,15 @@ const ConnectionManager: React.FC<ConnectionManagerProps> = ({
         )}
       </div>
     </Modal>
+    <ConfirmDialog
+      isOpen={deleteTargetId !== null}
+      onClose={() => setDeleteTargetId(null)}
+      onConfirm={confirmDeleteConnection}
+      title="Delete Connection"
+      message="Are you sure you want to delete this connection?"
+      confirmText="Delete"
+      loading={loading}
+    />
     </>
   );
 };
