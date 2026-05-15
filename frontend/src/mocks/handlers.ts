@@ -70,4 +70,8 @@ export const handlers = [
   rest.get(`${API}/alerts/logs`, (_req, res, ctx) =>
     res(ctx.json({ success: true, data: [], meta: { total: 0, page: 1, limit: 50, totalPages: 0 } })),
   ),
+
+  rest.get(`${API}/alerts/scheduled`, (_req, res, ctx) =>
+    res(ctx.json({ success: true, data: [] })),
+  ),
 ];
