@@ -97,7 +97,7 @@ const AssetReports: React.FC<AssetReportsProps> = ({ isOpen, onClose, inline = f
     setLoading(true);
     try {
       const [assets, buildings, floors] = await Promise.all([
-        assetService.getAssets(),
+        assetService.getAssetsWithConnections(),
         hierarchyService.getBuildings(),
         floorService.getFloors(),
       ]);

@@ -148,9 +148,9 @@ const NetworkGraph: React.FC = () => {
   const [hoveredNode, setHoveredNode] = useState<HoveredNode | null>(null);
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
 
-  // Load all assets once
+  // Load all assets with connections once
   useEffect(() => {
-    assetService.getAssets().then(list => {
+    assetService.getAssetsWithConnections().then(list => {
       setAssets(list);
       setLoading(false);
     }).catch(() => setLoading(false));

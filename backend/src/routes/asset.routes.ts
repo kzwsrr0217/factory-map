@@ -200,6 +200,7 @@ import {
 import { auditLog, captureAuditBefore } from '../middleware/audit.middleware';
 import { requireOperator } from '../middleware/auth.middleware';
 import { Asset } from '../entities/Asset.entity';
+import { notifyTask } from '../controllers/alert.controller';
 
 const router = Router();
 
@@ -229,5 +230,8 @@ router.post('/:id/sync', requireOperator, syncAssetFromITSM);
 router.post('/:id/connections',                    requireOperator, addConnection);
 router.patch('/:id/connections/:connectedAssetId', requireOperator, updateConnection);
 router.delete('/:id/connections/:connectedAssetId', requireOperator, removeConnection);
+
+// Work-item immediate notification — any authenticated operator/admin
+router.post('/:assetId/work-items/:itemId/notify', requireOperator, notifyTask);
 
 export default router;

@@ -1,7 +1,11 @@
 /**
- * alert.service.ts — API client for alert configuration and notification history.
+ * alert.service.ts — API client for alert configuration, history, and scheduled alerts.
  *
- * Wraps GET/PUT /api/alerts/config, GET /api/alerts/logs, and POST /api/alerts/test.
+ * Wraps:
+ *   GET/PUT /api/alerts/config          — global AlertConfig
+ *   GET     /api/alerts/logs            — paginated AlertLog history
+ *   POST    /api/alerts/test            — trigger immediate maintenance check
+ *   GET/POST/DELETE /api/alerts/scheduled — one-off ScheduledAlert CRUD
  */
 import api from './api';
 
@@ -38,6 +42,27 @@ export interface AlertTestResult {
   errors: string[];
 }
 
+export interface ScheduledAlert {
+  id: string;
+  title: string;
+  description: string | null;
+  scheduled_for: string;
+  channels: 'email' | 'teams' | 'both';
+  asset_filter: string | null;
+  sent: boolean;
+  sent_at: string | null;
+  created_by: string | null;
+  created_at: string;
+}
+
+export interface CreateScheduledAlertDto {
+  title: string;
+  description?: string;
+  scheduled_for: string;
+  channels?: 'email' | 'teams' | 'both';
+  asset_filter?: string;
+}
+
 export const alertService = {
   async getConfig(): Promise<AlertConfig> {
     const res = await api.get<{ success: boolean; data: AlertConfig }>('/alerts/config');
@@ -61,5 +86,19 @@ export const alertService = {
   async testNow(): Promise<AlertTestResult> {
     const res = await api.post<{ success: boolean; data: AlertTestResult }>('/alerts/test');
     return res.data.data;
+  },
+
+  async getScheduledAlerts(): Promise<ScheduledAlert[]> {
+    const res = await api.get<{ success: boolean; data: ScheduledAlert[] }>('/alerts/scheduled');
+    return res.data.data;
+  },
+
+  async createScheduledAlert(dto: CreateScheduledAlertDto): Promise<ScheduledAlert> {
+    const res = await api.post<{ success: boolean; data: ScheduledAlert }>('/alerts/scheduled', dto);
+    return res.data.data;
+  },
+
+  async deleteScheduledAlert(id: string): Promise<void> {
+    await api.delete(`/alerts/scheduled/${id}`);
   },
 };

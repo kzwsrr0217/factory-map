@@ -270,7 +270,18 @@ export class Asset {
   fortiedr_active!: boolean | null;
 
   @Column({ name: 'work_items', type: 'simple-json', nullable: true })
-  work_items!: Array<{ id: string; description: string; done: boolean; priority: 'low' | 'medium' | 'high'; created_at: string }> | null;
+  work_items!: Array<{
+    id: string;
+    title: string;
+    description: string;
+    status: 'open' | 'in_progress' | 'done';
+    done: boolean;
+    priority: 'low' | 'medium' | 'high';
+    due_date: string | null;
+    assigned_to: string | null;
+    alert_sent: boolean;
+    created_at: string;
+  }> | null;
 
   // ── Maintenance (flattened) ───────────────────────────────────────────────
   @Column({ name: 'maint_last_date', type: 'date', nullable: true })

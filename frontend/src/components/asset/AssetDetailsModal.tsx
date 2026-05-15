@@ -58,9 +58,13 @@ const AssetDetailsModal: React.FC<AssetDetailsModalProps> = ({
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [currentAsset, setCurrentAsset] = useState<Asset | null>(null);
   const [workItems, setWorkItems] = useState<NonNullable<Asset['work_items']>>([]);
+  const [newItemTitle, setNewItemTitle] = useState('');
   const [newItemDesc, setNewItemDesc] = useState('');
   const [newItemPriority, setNewItemPriority] = useState<'low' | 'medium' | 'high'>('medium');
+  const [newItemDueDate, setNewItemDueDate] = useState('');
+  const [newItemAssignedTo, setNewItemAssignedTo] = useState('');
   const [savingWorkItems, setSavingWorkItems] = useState(false);
+  const [notifyingTaskId, setNotifyingTaskId] = useState<string | null>(null);
   const toast = useToast();
 
   const loadHistory = useCallback(async () => {
@@ -97,11 +101,47 @@ const AssetDetailsModal: React.FC<AssetDetailsModalProps> = ({
   };
 
   const handleAddWorkItem = async () => {
-    if (!newItemDesc.trim()) return;
-    const item = { id: crypto.randomUUID(), description: newItemDesc.trim(), done: false, priority: newItemPriority, created_at: new Date().toISOString() };
+    if (!newItemTitle.trim()) return;
+    const item = {
+      id: crypto.randomUUID(),
+      title: newItemTitle.trim(),
+      description: newItemDesc.trim(),
+      done: false,
+      priority: newItemPriority,
+      due_date: newItemDueDate || null,
+      assigned_to: newItemAssignedTo.trim() || null,
+      alert_sent: false,
+      created_at: new Date().toISOString(),
+    };
     await saveWorkItems([...workItems, item]);
+    // Trigger immediate alert if due_date is set
+    if (item.due_date) {
+      try {
+        await assetService.notifyWorkItem(displayAsset._id, item.id);
+        toast.success('Task saved — alert notification sent');
+      } catch {
+        toast.info('Task saved — alert notification skipped (check alert config)');
+      }
+    } else {
+      toast.success('Task saved');
+    }
+    setNewItemTitle('');
     setNewItemDesc('');
     setNewItemPriority('medium');
+    setNewItemDueDate('');
+    setNewItemAssignedTo('');
+  };
+
+  const handleNotifyTask = async (taskId: string) => {
+    setNotifyingTaskId(taskId);
+    try {
+      await assetService.notifyWorkItem(displayAsset._id, taskId);
+      toast.success('Alert notification sent');
+    } catch {
+      toast.error('Failed to send notification — check alert config');
+    } finally {
+      setNotifyingTaskId(null);
+    }
   };
 
   const handleToggleWorkItem = async (id: string) => {
@@ -217,70 +257,146 @@ const AssetDetailsModal: React.FC<AssetDetailsModalProps> = ({
           </Card>
         )}
 
-        {/* Work Items */}
+        {/* Work Items / Maintenance Tasks */}
         <section className={styles.section}>
           <div className={styles.sectionHeader}>
             <h3 className={styles.sectionTitle}>
-              Work Items
+              Maintenance Tasks
               {workItems.filter(i => !i.done).length > 0 && (
-                <span style={{ marginLeft: 8 }}><Badge variant="warning">{workItems.filter(i => !i.done).length} open</Badge></span>
+                <span style={{ marginLeft: 8 }}>
+                  <Badge variant="warning">{workItems.filter(i => !i.done).length} open</Badge>
+                </span>
+              )}
+              {workItems.some(i => !i.done && i.due_date && new Date(i.due_date) < new Date()) && (
+                <span style={{ marginLeft: 6 }}>
+                  <Badge variant="error">overdue</Badge>
+                </span>
               )}
             </h3>
           </div>
           <Card padding="lg">
             {workItems.length > 0 && (
-              <div style={{ marginBottom: 12 }}>
+              <div style={{ marginBottom: 16 }}>
                 {workItems.map((item) => {
                   const priorityColor = item.priority === 'high' ? '#ef4444' : item.priority === 'medium' ? '#f59e0b' : '#9ca3af';
+                  const isOverdue = !item.done && !!item.due_date && new Date(item.due_date) < new Date();
+                  const dueDays = item.due_date
+                    ? Math.ceil((new Date(item.due_date).setHours(0,0,0,0) - new Date().setHours(0,0,0,0)) / 86400000)
+                    : null;
                   return (
-                    <div key={item.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '8px 0', borderBottom: '1px solid var(--color-border)' }}>
+                    <div key={item.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 0', borderBottom: '1px solid var(--color-border)' }}>
                       <input
                         type="checkbox"
                         checked={item.done}
                         onChange={() => handleToggleWorkItem(item.id)}
                         disabled={savingWorkItems}
-                        style={{ marginTop: 3, cursor: 'pointer', flexShrink: 0 }}
+                        style={{ marginTop: 4, cursor: 'pointer', flexShrink: 0 }}
                       />
-                      <div style={{ flex: 1 }}>
-                        <span style={{ textDecoration: item.done ? 'line-through' : 'none', color: item.done ? 'var(--color-text-muted)' : 'inherit' }}>
-                          {item.description}
-                        </span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                          <span style={{ fontWeight: 600, textDecoration: item.done ? 'line-through' : 'none', color: item.done ? 'var(--color-text-muted)' : 'inherit' }}>
+                            {item.title || item.description}
+                          </span>
+                          <span style={{ fontSize: '0.7rem', fontWeight: 700, color: priorityColor, textTransform: 'uppercase', border: `1px solid ${priorityColor}`, borderRadius: 3, padding: '1px 5px' }}>
+                            {item.priority}
+                          </span>
+                          {isOverdue && <Badge variant="error">OVERDUE</Badge>}
+                          {!isOverdue && dueDays !== null && dueDays <= 7 && !item.done && (
+                            <Badge variant="warning">due in {dueDays}d</Badge>
+                          )}
+                          {item.alert_sent && <Badge variant="info">notified</Badge>}
+                        </div>
+                        {item.title && item.description && (
+                          <div style={{ fontSize: '0.8125rem', color: 'var(--color-text-secondary)', marginTop: 2 }}>{item.description}</div>
+                        )}
+                        <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: 3, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                          {item.due_date && (
+                            <span style={{ color: isOverdue ? '#ef4444' : 'inherit' }}>
+                              📅 {new Date(item.due_date).toLocaleDateString('en-GB')}
+                            </span>
+                          )}
+                          {item.assigned_to && <span>👤 {item.assigned_to}</span>}
+                          <span>{new Date(item.created_at).toLocaleDateString('en-GB')}</span>
+                        </div>
                       </div>
-                      <span style={{ fontSize: '0.7rem', fontWeight: 600, color: priorityColor, textTransform: 'uppercase', flexShrink: 0 }}>{item.priority}</span>
+                      {!item.done && item.due_date && (
+                        <button
+                          onClick={() => handleNotifyTask(item.id)}
+                          disabled={notifyingTaskId === item.id}
+                          style={{ background: 'none', border: '1px solid var(--color-border)', borderRadius: 5, cursor: 'pointer', color: 'var(--color-text-secondary)', fontSize: '0.75rem', padding: '3px 8px', flexShrink: 0, whiteSpace: 'nowrap' }}
+                          title="Send alert notification now"
+                        >
+                          {notifyingTaskId === item.id ? '…' : '🔔 Notify'}
+                        </button>
+                      )}
                       <button
                         onClick={() => handleDeleteWorkItem(item.id)}
                         disabled={savingWorkItems}
                         style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-text-muted)', fontSize: '0.875rem', padding: '0 4px', flexShrink: 0 }}
-                        title="Remove"
+                        title="Remove task"
                       >✕</button>
                     </div>
                   );
                 })}
               </div>
             )}
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+
+            {/* Add new task form */}
+            <div style={{ borderTop: workItems.length > 0 ? '1px solid var(--color-border)' : 'none', paddingTop: workItems.length > 0 ? 14 : 0 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 8, marginBottom: 8 }}>
+                <input
+                  type="text"
+                  placeholder="Task title (e.g. Needs Veeam upgrade) *"
+                  value={newItemTitle}
+                  onChange={(e) => setNewItemTitle(e.target.value)}
+                  disabled={savingWorkItems}
+                  style={{ border: '1px solid var(--color-border)', borderRadius: 6, padding: '6px 10px', fontSize: '0.875rem', background: 'var(--color-surface)', color: 'var(--color-text)' }}
+                />
+                <select
+                  value={newItemPriority}
+                  onChange={(e) => setNewItemPriority(e.target.value as 'low' | 'medium' | 'high')}
+                  disabled={savingWorkItems}
+                  style={{ border: '1px solid var(--color-border)', borderRadius: 6, padding: '6px 8px', fontSize: '0.875rem', background: 'var(--color-surface)', color: 'var(--color-text)' }}
+                >
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                </select>
+              </div>
               <input
                 type="text"
-                placeholder="Add a work item…"
+                placeholder="Description / notes (optional)"
                 value={newItemDesc}
                 onChange={(e) => setNewItemDesc(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') handleAddWorkItem(); }}
                 disabled={savingWorkItems}
-                style={{ flex: 1, border: '1px solid var(--color-border)', borderRadius: 6, padding: '6px 10px', fontSize: '0.875rem', background: 'var(--color-surface)', color: 'var(--color-text)' }}
+                style={{ width: '100%', border: '1px solid var(--color-border)', borderRadius: 6, padding: '6px 10px', fontSize: '0.875rem', background: 'var(--color-surface)', color: 'var(--color-text)', marginBottom: 8, boxSizing: 'border-box' }}
               />
-              <select
-                value={newItemPriority}
-                onChange={(e) => setNewItemPriority(e.target.value as 'low' | 'medium' | 'high')}
-                disabled={savingWorkItems}
-                style={{ border: '1px solid var(--color-border)', borderRadius: 6, padding: '6px 8px', fontSize: '0.875rem', background: 'var(--color-surface)', color: 'var(--color-text)' }}
-              >
-                <option value="low">Low</option>
-                <option value="medium">Medium</option>
-                <option value="high">High</option>
-              </select>
-              <Button variant="primary" size="sm" onClick={handleAddWorkItem} disabled={!newItemDesc.trim() || savingWorkItems} loading={savingWorkItems}>
-                Add
-              </Button>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 8, alignItems: 'center' }}>
+                <input
+                  type="date"
+                  value={newItemDueDate}
+                  onChange={(e) => setNewItemDueDate(e.target.value)}
+                  disabled={savingWorkItems}
+                  title="Due date"
+                  style={{ border: '1px solid var(--color-border)', borderRadius: 6, padding: '6px 8px', fontSize: '0.875rem', background: 'var(--color-surface)', color: 'var(--color-text)' }}
+                />
+                <input
+                  type="text"
+                  placeholder="Assign to (name / email)"
+                  value={newItemAssignedTo}
+                  onChange={(e) => setNewItemAssignedTo(e.target.value)}
+                  disabled={savingWorkItems}
+                  style={{ border: '1px solid var(--color-border)', borderRadius: 6, padding: '6px 10px', fontSize: '0.875rem', background: 'var(--color-surface)', color: 'var(--color-text)' }}
+                />
+                <Button variant="primary" size="sm" onClick={handleAddWorkItem} disabled={!newItemTitle.trim() || savingWorkItems} loading={savingWorkItems}>
+                  Add Task
+                </Button>
+              </div>
+              {newItemDueDate && (
+                <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: 6 }}>
+                  💡 An alert notification will be sent automatically when this task is saved.
+                </p>
+              )}
             </div>
           </Card>
         </section>

@@ -6,6 +6,8 @@
  *    (manufacturer, model, OS, VLAN, etc.) in a single request.
  *  - `getAllAssets`: Supports filtering by hierarchy, status, type, placement, and
  *    free-text search. Optional pagination via `page` + `limit` query params.
+ *    Pass `include_connections=true` to left-join AssetConnection rows (used by
+ *    the network graph and topology report; omitted by default for performance).
  *  - `createAsset` / `updateAsset` / `deleteAsset`: Standard CRUD. Each broadcasts
  *    the change to all connected clients via Socket.io.
  *  - `bulkCreateAssets`: Accepts up to 500 assets in one request. Returns HTTP 207
@@ -19,10 +21,12 @@
  * Internal helpers:
  *  - `applyBodyToAsset()`: Maps the nested API request body to flat entity columns.
  *    This is the single place where the API field names are translated to DB columns.
+ *    Auto-generates a UUID + created_at timestamp for any work_item that lacks one.
  *  - `saveRelations()`: Replaces the software list (delete + insert pattern).
  *  - `loadWithRelations()`: Loads an asset including its software and connections.
  *  - `wouldCreateCycle()`: Traverses the predecessor/successor chain to detect loops.
  */
+import { randomUUID } from 'crypto';
 import { Request, Response, NextFunction } from 'express';
 import { AppDataSource } from '../config/database';
 import { Asset } from '../entities/Asset.entity';
@@ -168,7 +172,14 @@ function applyBodyToAsset(asset: Asset, body: Record<string, unknown>): void {
   }
 
   const wi = body.work_items;
-  if (wi !== undefined) asset.work_items = wi as Asset['work_items'];
+  if (wi !== undefined) {
+    const now = new Date().toISOString();
+    asset.work_items = (wi as Array<Record<string, unknown>>).map(item => ({
+      ...item,
+      id: (item.id as string) || randomUUID(),
+      created_at: (item.created_at as string) || now,
+    })) as Asset['work_items'];
+  }
 
   if (body.predecessor_id !== undefined) asset.predecessor_id = (body.predecessor_id as string) ?? null;
   if (body.successor_id !== undefined) asset.successor_id = (body.successor_id as string) ?? null;
@@ -238,10 +249,14 @@ export const getAssetLookups = async (_req: Request, res: Response, next: NextFu
 
 export const getAllAssets = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const { page, limit, floor_id, building_id, workarea_id, section_id, status, type, is_placed, q } =
+    const { page, limit, floor_id, building_id, workarea_id, section_id, status, type, is_placed, q, include_connections } =
       req.query as Record<string, string | undefined>;
 
     const qb = repo().createQueryBuilder('a');
+
+    if (include_connections === 'true') {
+      qb.leftJoinAndSelect('a.connections', 'conn');
+    }
 
     if (floor_id)    qb.andWhere('a.floor_id = :floor_id', { floor_id });
     if (building_id) qb.andWhere('a.building_id = :building_id', { building_id });

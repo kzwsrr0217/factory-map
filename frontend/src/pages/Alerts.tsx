@@ -2,20 +2,28 @@
  * Alerts.tsx — Maintenance alert configuration and notification history ("/alerts").
  *
  * Sections:
- *   Alert Conditions — toggle alert_on_maintenance / alert_on_overdue, set days_before_alert
- *   Email            — toggle email_enabled, manage recipient addresses as removable chips
- *   Microsoft Teams  — toggle teams_enabled, enter Incoming Webhook URL
- *   Alert History    — table of recent AlertLog rows (channel, status, subject, timestamp)
- *   Test / Save      — "Test Now" runs checkAndSend() immediately; "Save" persists config
+ *   Alert Conditions    — toggle alert_on_maintenance / alert_on_overdue, set days_before_alert
+ *   Email               — toggle email_enabled, manage recipient addresses as removable chips
+ *   Microsoft Teams     — toggle teams_enabled, enter Incoming Webhook URL
+ *   Scheduled Alerts    — create one-off reminders (title, datetime, channel, asset_type filter);
+ *                         fired by the hourly backend cron; operators and admins can manage
+ *   Test / Save         — "Test Now" runs checkAndSend() immediately; "Save" persists config
+ *   Alert History       — table of recent AlertLog rows (channel, status, subject, timestamp)
  *
  * Only admins can save config or run Test Now (enforced by the backend on PUT /alerts/config
- * and POST /alerts/test). Non-admins see the config read-only.
+ * and POST /alerts/test). Scheduled alert management requires operator role or above.
  */
 import React, { useEffect, useState, useCallback } from 'react';
-import { Bell, Mail, MessageSquare, PlayCircle, Save, X } from 'lucide-react';
+import { Bell, Mail, MessageSquare, PlayCircle, Save, X, Clock, Trash2, Plus } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
-import { alertService, AlertConfig, AlertLog, AlertTestResult } from '../services/alert.service';
+import {
+  alertService,
+  AlertConfig,
+  AlertLog,
+  AlertTestResult,
+  ScheduledAlert,
+} from '../services/alert.service';
 import styles from '../styles/pages/Alerts.module.css';
 
 const Alerts: React.FC = () => {
@@ -32,14 +40,25 @@ const Alerts: React.FC = () => {
   // Recipient chip input state
   const [recipientDraft, setRecipientDraft] = useState('');
 
+  // Scheduled alerts state
+  const [scheduledAlerts, setScheduledAlerts] = useState<ScheduledAlert[]>([]);
+  const [newAlertTitle, setNewAlertTitle] = useState('');
+  const [newAlertDesc, setNewAlertDesc] = useState('');
+  const [newAlertDate, setNewAlertDate] = useState('');
+  const [newAlertChannels, setNewAlertChannels] = useState<'email' | 'teams' | 'both'>('both');
+  const [newAlertFilter, setNewAlertFilter] = useState('');
+  const [addingAlert, setAddingAlert] = useState(false);
+
   const load = useCallback(async () => {
     try {
-      const [cfg, { logs: l }] = await Promise.all([
+      const [cfg, { logs: l }, scheduled] = await Promise.all([
         alertService.getConfig(),
         alertService.getLogs(1, 50),
+        alertService.getScheduledAlerts(),
       ]);
       setConfig(cfg);
       setLogs(l);
+      setScheduledAlerts(scheduled);
     } catch {
       toast.error('Failed to load alert settings');
     }
@@ -106,6 +125,41 @@ const Alerts: React.FC = () => {
       toast.error('Alert test failed');
     } finally {
       setTesting(false);
+    }
+  };
+
+  const handleCreateScheduledAlert = async () => {
+    if (!newAlertTitle.trim() || !newAlertDate) return;
+    setAddingAlert(true);
+    try {
+      const created = await alertService.createScheduledAlert({
+        title: newAlertTitle.trim(),
+        description: newAlertDesc.trim() || undefined,
+        scheduled_for: new Date(newAlertDate).toISOString(),
+        channels: newAlertChannels,
+        asset_filter: newAlertFilter.trim() || undefined,
+      });
+      setScheduledAlerts(prev => [created, ...prev]);
+      setNewAlertTitle('');
+      setNewAlertDesc('');
+      setNewAlertDate('');
+      setNewAlertFilter('');
+      setNewAlertChannels('both');
+      toast.success('Scheduled alert created');
+    } catch {
+      toast.error('Failed to create scheduled alert');
+    } finally {
+      setAddingAlert(false);
+    }
+  };
+
+  const handleDeleteScheduledAlert = async (id: string) => {
+    try {
+      await alertService.deleteScheduledAlert(id);
+      setScheduledAlerts(prev => prev.filter(a => a.id !== id));
+      toast.success('Scheduled alert removed');
+    } catch {
+      toast.error('Failed to delete scheduled alert');
     }
   };
 
@@ -288,6 +342,141 @@ const Alerts: React.FC = () => {
                 onChange={e => handleChange('teams_webhook_url', e.target.value || null)}
                 disabled={!isAdmin}
               />
+            </div>
+          )}
+        </section>
+
+        {/* ── Scheduled Alerts ──────────────────────────────────── */}
+        <section className={styles.section}>
+          <h2 className={styles.sectionTitle}>
+            <Clock size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} />
+            Scheduled One-Off Alerts
+          </h2>
+          <p className={styles.hint} style={{ marginBottom: 16 }}>
+            Create a reminder to fire at a specific date and time — e.g. "Check Veeam state next week" or "Review all assets tomorrow".
+          </p>
+
+          {/* Create form */}
+          <div className={styles.scheduledForm}>
+            <div className={styles.scheduledFormRow}>
+              <input
+                type="text"
+                placeholder="Alert title *"
+                value={newAlertTitle}
+                onChange={e => setNewAlertTitle(e.target.value)}
+                className={styles.scheduledInput}
+              />
+              <input
+                type="datetime-local"
+                value={newAlertDate}
+                onChange={e => setNewAlertDate(e.target.value)}
+                className={styles.scheduledInput}
+                style={{ maxWidth: 220 }}
+              />
+              <select
+                value={newAlertChannels}
+                onChange={e => setNewAlertChannels(e.target.value as 'email' | 'teams' | 'both')}
+                className={styles.scheduledInput}
+                style={{ maxWidth: 130 }}
+              >
+                <option value="both">Both</option>
+                <option value="email">Email only</option>
+                <option value="teams">Teams only</option>
+              </select>
+            </div>
+            <div className={styles.scheduledFormRow}>
+              <input
+                type="text"
+                placeholder="Description (optional)"
+                value={newAlertDesc}
+                onChange={e => setNewAlertDesc(e.target.value)}
+                className={styles.scheduledInput}
+              />
+              <input
+                type="text"
+                placeholder="Asset type filter (optional, e.g. server)"
+                value={newAlertFilter}
+                onChange={e => setNewAlertFilter(e.target.value)}
+                className={styles.scheduledInput}
+                style={{ maxWidth: 260 }}
+              />
+              <button
+                className="btn btn-primary"
+                onClick={handleCreateScheduledAlert}
+                disabled={addingAlert || !newAlertTitle.trim() || !newAlertDate}
+                type="button"
+                style={{ whiteSpace: 'nowrap' }}
+              >
+                <Plus size={14} style={{ marginRight: 4 }} />
+                {addingAlert ? 'Adding…' : 'Add Alert'}
+              </button>
+            </div>
+          </div>
+
+          {/* List */}
+          {scheduledAlerts.length === 0 ? (
+            <p className={styles.empty}>No scheduled alerts yet.</p>
+          ) : (
+            <div style={{ overflowX: 'auto' }}>
+              <table className={styles.logTable}>
+                <thead>
+                  <tr>
+                    <th>Title</th>
+                    <th>Scheduled for</th>
+                    <th>Channels</th>
+                    <th>Status</th>
+                    <th>Created by</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {scheduledAlerts.map(alert => (
+                    <tr key={alert.id} style={{ opacity: alert.sent ? 0.6 : 1 }}>
+                      <td>
+                        <div>{alert.title}</div>
+                        {alert.description && (
+                          <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>
+                            {alert.description}
+                          </div>
+                        )}
+                        {alert.asset_filter && (
+                          <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+                            Filter: {alert.asset_filter}
+                          </div>
+                        )}
+                      </td>
+                      <td style={{ whiteSpace: 'nowrap' }}>
+                        {new Date(alert.scheduled_for).toLocaleString('en-GB', {
+                          day: '2-digit', month: 'short', year: 'numeric',
+                          hour: '2-digit', minute: '2-digit',
+                        })}
+                      </td>
+                      <td style={{ textTransform: 'capitalize' }}>{alert.channels}</td>
+                      <td>
+                        {alert.sent ? (
+                          <span className={styles.success}>Sent</span>
+                        ) : new Date(alert.scheduled_for) < new Date() ? (
+                          <span className={styles.failure}>Pending (overdue)</span>
+                        ) : (
+                          <span style={{ color: 'var(--color-text-muted)' }}>Scheduled</span>
+                        )}
+                      </td>
+                      <td>{alert.created_by ?? '—'}</td>
+                      <td>
+                        {!alert.sent && (
+                          <button
+                            className={styles.iconBtn}
+                            onClick={() => handleDeleteScheduledAlert(alert.id)}
+                            title="Delete"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
         </section>

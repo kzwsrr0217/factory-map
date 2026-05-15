@@ -25,6 +25,7 @@ import { User } from '../entities/User.entity';
 import { AuditLog } from '../entities/AuditLog.entity';
 import { AlertConfig } from '../entities/AlertConfig.entity';
 import { AlertLog } from '../entities/AlertLog.entity';
+import { ScheduledAlert } from '../entities/ScheduledAlert.entity';
 import { ActiveSession } from '../entities/ActiveSession.entity';
 
 export const AppDataSource = new DataSource({
@@ -36,7 +37,7 @@ export const AppDataSource = new DataSource({
   database: config.mssql.database,
   synchronize: config.env !== 'production',
   logging: config.env === 'development' ? ['error', 'warn'] : false,
-  entities: [Building, Floor, WorkArea, Section, Workstation, Asset, AssetSoftware, AssetConnection, User, AuditLog, AlertConfig, AlertLog, ActiveSession],
+  entities: [Building, Floor, WorkArea, Section, Workstation, Asset, AssetSoftware, AssetConnection, User, AuditLog, AlertConfig, AlertLog, ScheduledAlert, ActiveSession],
   migrations: ['dist/migrations/*.js'],
   migrationsTableName: 'typeorm_migrations',
   options: {

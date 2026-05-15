@@ -6,6 +6,12 @@
  * initialises the Socket.io server for real-time asset events, connects to the
  * SQL Server database, and registers graceful shutdown handlers for SIGTERM/SIGINT.
  *
+ * Cron jobs registered after DB connect:
+ *   07:00 daily  — checkAndSend(): scan assets for upcoming/overdue maintenance
+ *                  and work-item due dates; send email + Teams notifications.
+ *   Top of hour  — checkScheduledAlerts(): fire any user-defined one-off alerts
+ *                  whose scheduled_for timestamp has passed; mark them sent.
+ *
  * The exported `io` instance is used by controllers to broadcast asset changes
  * (asset:created, asset:updated, asset:deleted) to all connected browser tabs.
  */
@@ -23,7 +29,7 @@ import config from './config/config';
 import { connectDatabase, AppDataSource } from './config/database';
 import { loadRevokedSessions } from './middleware/auth.middleware';
 import { swaggerSpec } from './config/swagger';
-import { checkAndSend } from './services/alert/AlertService';
+import { checkAndSend, checkScheduledAlerts } from './services/alert/AlertService';
 import routes from './routes';
 
 // Initialize Express app
@@ -161,6 +167,15 @@ const startServer = async () => {
         if (result.errors.length) console.warn('   Alert errors:', result.errors);
       } catch (err) {
         console.error('❌ Alert scheduler error:', err);
+      }
+    });
+
+    // Hourly cron — fire any user-defined scheduled alerts whose time has passed
+    cron.schedule('0 * * * *', async () => {
+      try {
+        await checkScheduledAlerts();
+      } catch (err) {
+        console.error('❌ Scheduled alert check error:', err);
       }
     });
 

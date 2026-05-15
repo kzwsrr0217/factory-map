@@ -18,6 +18,8 @@
  *  - `bulkCreateAssets(assets)`: up to 500 assets in one call; returns per-item results
  *  - `syncAsset(id)`: trigger ITSM sync for one asset
  *  - `addConnection / updateConnection / removeConnection`: manage asset links
+ *  - `getAssetsWithConnections()`: all assets with connections joined (network graph/topology)
+ *  - `notifyWorkItem(assetId, itemId)`: send immediate alert for one work-item task
  *  - `acceptItsmSnapshot(id)`: promote pending ITSM snapshot to live data
  *  - `syncAllFromItsm()`: full ITSM sync
  *  - `getAssetHistory(id)`: recent audit log entries for an asset
@@ -121,9 +123,13 @@ export interface Asset {
   }>;
   work_items?: Array<{
     id: string;
+    title: string;
     description: string;
     done: boolean;
     priority: 'low' | 'medium' | 'high';
+    due_date: string | null;
+    assigned_to: string | null;
+    alert_sent: boolean;
     created_at: string;
   }>;
   connections?: Array<{
@@ -181,6 +187,12 @@ export const assetService = {
   // Get all assets
   getAssets: async (): Promise<Asset[]> => {
     const response = await api.get('/assets');
+    return (response.data.data as Asset[]).map(normalizeAsset);
+  },
+
+  // Get all assets including their connections (for network graph / topology)
+  getAssetsWithConnections: async (): Promise<Asset[]> => {
+    const response = await api.get('/assets', { params: { include_connections: 'true' } });
     return (response.data.data as Asset[]).map(normalizeAsset);
   },
 
@@ -284,5 +296,10 @@ export const assetService = {
   getAssetHistory: async (assetId: string, limit = 50): Promise<AssetHistoryEntry[]> => {
     const response = await api.get('/audit', { params: { document_id: assetId, limit } });
     return response.data.data ?? [];
+  },
+
+  notifyWorkItem: async (assetId: string, itemId: string): Promise<{ emailSent: boolean; teamsSent: boolean; errors: string[] }> => {
+    const response = await api.post(`/assets/${assetId}/work-items/${itemId}/notify`);
+    return response.data.data;
   },
 };
