@@ -1,5 +1,33 @@
-import React, { useState, useEffect, useRef } from 'react';
+/**
+ * GlobalSearch.tsx — Full-screen search overlay (Ctrl+K).
+ *
+ * Provides instant prefix-search across all six entity types: buildings,
+ * floors, workareas, sections, workstations, and assets.
+ *
+ * Architecture:
+ *   Module-level cache (`cachedIndex`, `cachedResults`, `indexBuilding`) —
+ *     the inverted prefix index is built once and survives across open/close
+ *     cycles. Call `invalidateSearchCache()` after any create/delete mutation
+ *     to force a rebuild on the next open.
+ *
+ *   `buildRecords()` — flattens all API responses into flat `IndexRecord`
+ *     objects suitable for `buildSearchIndex`. Extra searchable text (tags,
+ *     serial number, asset_tag) is appended to each record's `text` field.
+ *
+ *   `ensureIndex()` — parallel-fetches all entity endpoints and calls
+ *     `buildSearchIndex`; idempotent via `indexBuilding` guard.
+ *
+ *   Keyboard navigation — ArrowUp/ArrowDown moves the selection cursor;
+ *     Enter navigates to the selected result; Escape closes the overlay.
+ *
+ *   120 ms debounce on query input prevents index queries on every keystroke.
+ *
+ * Results are capped at 12 hits via `queryIndex(cachedIndex, trimmed, 12)`.
+ */
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import api from '../../services/api';
+import { buildSearchIndex, queryIndex, IndexRecord, SearchIndex } from '../../utils/searchIndex';
 import styles from '../../styles/components/GlobalSearch.module.css';
 
 interface SearchResult {
@@ -16,6 +44,88 @@ interface GlobalSearchProps {
   onClose: () => void;
 }
 
+// Module-level cache so the index survives across open/close cycles
+let cachedIndex: SearchIndex | null = null;
+let cachedResults: SearchResult[] = [];
+let indexBuilding = false;
+
+function buildRecords(
+  buildings: any[], floors: any[], workareas: any[],
+  sections: any[], workstations: any[], assets: any[]
+): { records: IndexRecord[]; results: SearchResult[] } {
+  const results: SearchResult[] = [];
+  const records: IndexRecord[] = [];
+
+  const add = (
+    id: string,
+    type: SearchResult['type'],
+    title: string,
+    subtitle: string | undefined,
+    icon: string,
+    path: string,
+    extra: string
+  ) => {
+    const text = [title, subtitle, extra].filter(Boolean).join(' ').toLowerCase();
+    results.push({ id, type, title, subtitle, icon, path });
+    records.push({ id, text, payload: results[results.length - 1] });
+  };
+
+  buildings.forEach((b: any) =>
+    add(b._id, 'building', b.name, b.address, '🏢', `/buildings/${b._id}`, '')
+  );
+  floors.forEach((f: any) =>
+    add(f._id, 'floor', f.name, `Level ${f.floor_number}`, '📐', `/floors/${f._id}`, `floor ${f.floor_number}`)
+  );
+  workareas.forEach((wa: any) =>
+    add(wa._id, 'workarea', wa.name, wa.type, '🏭', `/floors/${wa.floor_id}`, wa.type ?? '')
+  );
+  sections.forEach((s: any) =>
+    add(s._id, 'section', s.name, s.shift_schedule, '🔧', `/floors/${s.workarea_id}`, '')
+  );
+  workstations.forEach((ws: any) =>
+    add(ws._id, 'workstation', ws.name, ws.type, '⚙️', `/floors/${ws.section_id}`, ws.type ?? '')
+  );
+  assets.forEach((a: any) => {
+    const name = a.basic_info?.display_name ?? '';
+    const sub = [a.basic_info?.manufacturer, a.basic_info?.model].filter(Boolean).join(' ');
+    const extra = [
+      a.basic_info?.asset_tag,
+      a.basic_info?.serial_number,
+      a.basic_info?.type,
+      a.basic_info?.status,
+    ].filter(Boolean).join(' ');
+    add(a._id, 'asset', name, sub || undefined, '💻', `/assets/${a._id}`, extra);
+  });
+
+  return { records, results };
+}
+
+async function ensureIndex(): Promise<void> {
+  if (cachedIndex || indexBuilding) return;
+  indexBuilding = true;
+  try {
+    const [b, f, wa, s, ws, a] = await Promise.all([
+      api.get('/buildings').then(r => r.data.data ?? []),
+      api.get('/floors').then(r => r.data.data ?? []),
+      api.get('/workareas').then(r => r.data.data ?? []),
+      api.get('/sections').then(r => r.data.data ?? []),
+      api.get('/workstations').then(r => r.data.data ?? []),
+      api.get('/assets').then(r => r.data.data ?? []),
+    ]);
+    const { records, results } = buildRecords(b, f, wa, s, ws, a);
+    cachedResults = results;
+    cachedIndex = buildSearchIndex(records);
+  } finally {
+    indexBuilding = false;
+  }
+}
+
+// Allow other components to invalidate the cache (e.g. after create/delete)
+export function invalidateSearchCache() {
+  cachedIndex = null;
+  cachedResults = [];
+}
+
 const GlobalSearch: React.FC<GlobalSearchProps> = ({ isOpen, onClose }) => {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
@@ -24,145 +134,43 @@ const GlobalSearch: React.FC<GlobalSearchProps> = ({ isOpen, onClose }) => {
   const inputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
 
+  // Pre-load the index as soon as the modal opens
   useEffect(() => {
-    if (isOpen) {
-      inputRef.current?.focus();
-      setQuery('');
-      setResults([]);
-      setSelectedIndex(0);
+    if (!isOpen) return;
+    inputRef.current?.focus();
+    setQuery('');
+    setResults([]);
+    setSelectedIndex(0);
+
+    if (!cachedIndex) {
+      setLoading(true);
+      ensureIndex().then(() => setLoading(false)).catch(() => setLoading(false));
     }
   }, [isOpen]);
 
+  const runSearch = useCallback((q: string) => {
+    const trimmed = q.trim();
+    if (!trimmed) { setResults([]); return; }
+    if (!cachedIndex) return;
+
+    const hits = queryIndex(cachedIndex, trimmed, 12);
+    setResults(hits.map((r) => r.payload as SearchResult));
+    setSelectedIndex(0);
+  }, []);
+
   useEffect(() => {
-    if (!query.trim()) {
-      setResults([]);
-      return;
-    }
-
-    const searchTimeout = setTimeout(async () => {
-      setLoading(true);
-      try {
-        // Search across all entities
-        const [buildings, floors, workareas, sections, workstations, assets] = await Promise.all([
-          fetch(`http://localhost:5000/api/buildings`).then(r => r.json()),
-          fetch(`http://localhost:5000/api/floors`).then(r => r.json()),
-          fetch(`http://localhost:5000/api/workareas`).then(r => r.json()),
-          fetch(`http://localhost:5000/api/sections`).then(r => r.json()),
-          fetch(`http://localhost:5000/api/workstations`).then(r => r.json()),
-          fetch(`http://localhost:5000/api/assets`).then(r => r.json()),
-        ]);
-
-        const searchResults: SearchResult[] = [];
-        const lowerQuery = query.toLowerCase();
-
-        // Buildings
-        buildings.data?.forEach((b: any) => {
-          if (b.name.toLowerCase().includes(lowerQuery) || b.address?.toLowerCase().includes(lowerQuery)) {
-            searchResults.push({
-              id: b._id,
-              type: 'building',
-              title: b.name,
-              subtitle: b.address,
-              icon: '🏢',
-              path: `/buildings/${b._id}`,
-            });
-          }
-        });
-
-        // Floors
-        floors.data?.forEach((f: any) => {
-          if (f.name.toLowerCase().includes(lowerQuery)) {
-            searchResults.push({
-              id: f._id,
-              type: 'floor',
-              title: f.name,
-              subtitle: `Level ${f.floor_number}`,
-              icon: '📐',
-              path: `/floors/${f._id}`,
-            });
-          }
-        });
-
-        // Work Areas
-        workareas.data?.forEach((wa: any) => {
-          if (wa.name.toLowerCase().includes(lowerQuery) || wa.type?.toLowerCase().includes(lowerQuery)) {
-            searchResults.push({
-              id: wa._id,
-              type: 'workarea',
-              title: wa.name,
-              subtitle: wa.type,
-              icon: '🏭',
-              path: `/floors/${wa.floor_id}`,
-            });
-          }
-        });
-
-        // Sections
-        sections.data?.forEach((s: any) => {
-          if (s.name.toLowerCase().includes(lowerQuery)) {
-            searchResults.push({
-              id: s._id,
-              type: 'section',
-              title: s.name,
-              subtitle: s.shift_schedule,
-              icon: '🔧',
-              path: `/floors/${s.workarea_id}`, // Navigate to floor
-            });
-          }
-        });
-
-        // Workstations
-        workstations.data?.forEach((ws: any) => {
-          if (ws.name.toLowerCase().includes(lowerQuery) || ws.type?.toLowerCase().includes(lowerQuery)) {
-            searchResults.push({
-              id: ws._id,
-              type: 'workstation',
-              title: ws.name,
-              subtitle: ws.type,
-              icon: '⚙️',
-              path: `/floors/${ws.section_id}`, // Navigate to floor
-            });
-          }
-        });
-
-        // Assets
-        assets.data?.forEach((a: any) => {
-          if (
-            a.basic_info.display_name.toLowerCase().includes(lowerQuery) ||
-            a.basic_info.asset_tag?.toLowerCase().includes(lowerQuery) ||
-            a.basic_info.serial_number?.toLowerCase().includes(lowerQuery) ||
-            a.basic_info.manufacturer?.toLowerCase().includes(lowerQuery)
-          ) {
-            searchResults.push({
-              id: a._id,
-              type: 'asset',
-              title: a.basic_info.display_name,
-              subtitle: `${a.basic_info.manufacturer || ''} ${a.basic_info.model || ''}`.trim(),
-              icon: '💻',
-              path: `/assets/${a._id}`,
-            });
-          }
-        });
-
-        setResults(searchResults.slice(0, 10)); // Limit to 10 results
-        setSelectedIndex(0);
-      } catch (error) {
-        console.error('Search error:', error);
-      } finally {
-        setLoading(false);
-      }
-    }, 300);
-
-    return () => clearTimeout(searchTimeout);
-  }, [query]);
+    if (!isOpen) return;
+    const id = setTimeout(() => runSearch(query), 120);
+    return () => clearTimeout(id);
+  }, [query, isOpen, runSearch]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'ArrowDown') {
       e.preventDefault();
-      setSelectedIndex((prev) => Math.min(prev + 1, results.length - 1));
+      setSelectedIndex((p) => Math.min(p + 1, results.length - 1));
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
-      setSelectedIndex((prev) => Math.max(prev - 1, 0));
+      setSelectedIndex((p) => Math.max(p - 1, 0));
     } else if (e.key === 'Enter' && results[selectedIndex]) {
       handleResultClick(results[selectedIndex]);
     } else if (e.key === 'Escape') {
@@ -192,6 +200,9 @@ const GlobalSearch: React.FC<GlobalSearchProps> = ({ isOpen, onClose }) => {
             className={styles.searchInput}
           />
           {loading && <span className={styles.loader}>⏳</span>}
+          {!loading && query && (
+            <button className={styles.clearBtn} onClick={() => setQuery('')}>✕</button>
+          )}
         </div>
 
         {results.length > 0 && (
@@ -206,7 +217,9 @@ const GlobalSearch: React.FC<GlobalSearchProps> = ({ isOpen, onClose }) => {
                 <span className={styles.resultIcon}>{result.icon}</span>
                 <div className={styles.resultContent}>
                   <div className={styles.resultTitle}>{result.title}</div>
-                  {result.subtitle && <div className={styles.resultSubtitle}>{result.subtitle}</div>}
+                  {result.subtitle && (
+                    <div className={styles.resultSubtitle}>{result.subtitle}</div>
+                  )}
                 </div>
                 <span className={styles.resultType}>{result.type}</span>
               </div>
@@ -214,14 +227,22 @@ const GlobalSearch: React.FC<GlobalSearchProps> = ({ isOpen, onClose }) => {
           </div>
         )}
 
-        {query && !loading && results.length === 0 && (
+        {query.trim() && !loading && results.length === 0 && (
           <div className={styles.noResults}>
-            <p>No results found for "{query}"</p>
+            <p>No results for &ldquo;{query}&rdquo;</p>
+          </div>
+        )}
+
+        {!query && !loading && (
+          <div className={styles.hint}>
+            {cachedIndex
+              ? `${cachedResults.length} items indexed — start typing to search`
+              : 'Loading search index…'}
           </div>
         )}
 
         <div className={styles.footer}>
-          <kbd>↑↓</kbd> Navigate • <kbd>↵</kbd> Select • <kbd>Esc</kbd> Close
+          <kbd>↑↓</kbd> Navigate &nbsp;•&nbsp; <kbd>↵</kbd> Select &nbsp;•&nbsp; <kbd>Esc</kbd> Close
         </div>
       </div>
     </div>

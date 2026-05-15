@@ -1,3 +1,14 @@
+/**
+ * floor.service.ts — API calls for the Floor entity.
+ *
+ * `getFloors(buildingId?)`: When a `buildingId` is provided, returns only floors
+ * for that building. Used by both the building details page and the `useHierarchy`
+ * hook which needs floors for floor-filter dropdowns.
+ *
+ * `svg_background` in the Floor interface holds the full base64-encoded floor
+ * plan image (or SVG text). It is large and should not be fetched in list views
+ * — use `getFloor(id)` only when the floor map actually needs to render.
+ */
 import api from './api';
 
 export interface Floor {

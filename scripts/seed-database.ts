@@ -153,7 +153,7 @@ async function seed() {
       workstation_id: workstations_a[0]._id,
     },
     itsm: {
-      hardware_id: 'HW-PC-0001',
+      hardware_asset_id: 'HW-PC-0001',
       is_managed: true,
       last_synced: new Date(),
       sync_status: 'success',
@@ -216,7 +216,7 @@ async function seed() {
       workstation_id: workstations_a[1]._id,
     },
     itsm: {
-      hardware_id: 'HW-PC-0002',
+      hardware_asset_id: 'HW-PC-0002',
       is_managed: true,
       last_synced: new Date(),
       sync_status: 'success',
@@ -265,7 +265,7 @@ async function seed() {
       workstation_id: workstations_a[2]._id,
     },
     itsm: {
-      hardware_id: null,
+      hardware_asset_id: null,
       is_managed: false,
       last_synced: null,
       sync_status: 'never',

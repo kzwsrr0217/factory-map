@@ -1,52 +1,58 @@
-import mongoose from 'mongoose';
-import config from './config';
-
 /**
- * Connect to MongoDB
+ * database.ts — TypeORM DataSource configuration and database connection helper.
+ *
+ * Exports:
+ *  - `AppDataSource`: the singleton TypeORM DataSource used by all repositories.
+ *  - `connectDatabase()`: initialises the DataSource and logs connection details.
+ *
+ * `synchronize: true` is intentionally enabled in non-production environments so
+ * that entity changes are applied automatically without manual migrations during
+ * development. In production, set NODE_ENV=production to disable this and use
+ * TypeORM migrations instead.
  */
+import 'reflect-metadata';
+import { DataSource } from 'typeorm';
+import config from './config';
+import { Building } from '../entities/Building.entity';
+import { Floor } from '../entities/Floor.entity';
+import { WorkArea } from '../entities/WorkArea.entity';
+import { Section } from '../entities/Section.entity';
+import { Workstation } from '../entities/Workstation.entity';
+import { Asset } from '../entities/Asset.entity';
+import { AssetSoftware } from '../entities/AssetSoftware.entity';
+import { AssetConnection } from '../entities/AssetConnection.entity';
+import { User } from '../entities/User.entity';
+import { AuditLog } from '../entities/AuditLog.entity';
+import { AlertConfig } from '../entities/AlertConfig.entity';
+import { AlertLog } from '../entities/AlertLog.entity';
+import { ActiveSession } from '../entities/ActiveSession.entity';
+
+export const AppDataSource = new DataSource({
+  type: 'mssql',
+  host: config.mssql.host,
+  port: config.mssql.port,
+  username: config.mssql.username,
+  password: config.mssql.password,
+  database: config.mssql.database,
+  synchronize: config.env !== 'production',
+  logging: config.env === 'development' ? ['error', 'warn'] : false,
+  entities: [Building, Floor, WorkArea, Section, Workstation, Asset, AssetSoftware, AssetConnection, User, AuditLog, AlertConfig, AlertLog, ActiveSession],
+  migrations: ['dist/migrations/*.js'],
+  migrationsTableName: 'typeorm_migrations',
+  options: {
+    encrypt: config.mssql.encrypt,
+    trustServerCertificate: config.mssql.trustServerCertificate,
+  },
+});
+
 export const connectDatabase = async (): Promise<void> => {
   try {
-    await mongoose.connect(config.mongodb.uri);
-    
-    console.log('✅ MongoDB connected successfully');
-    console.log(`   Database: ${mongoose.connection.name}`);
-    console.log(`   Host: ${mongoose.connection.host}`);
-    
+    await AppDataSource.initialize();
+    console.log('✅ SQL Server connected successfully');
+    console.log(`   Host: ${config.mssql.host}:${config.mssql.port}`);
+    console.log(`   Database: ${config.mssql.database}`);
   } catch (error) {
-    console.error('❌ MongoDB connection error:', error);
+    console.error('❌ SQL Server connection error:', error);
     process.exit(1);
   }
 };
-
-/**
- * Disconnect from MongoDB
- */
-export const disconnectDatabase = async (): Promise<void> => {
-  try {
-    await mongoose.disconnect();
-    console.log('✅ MongoDB disconnected');
-  } catch (error) {
-    console.error('❌ MongoDB disconnection error:', error);
-  }
-};
-
-/**
- * Handle MongoDB connection events
- */
-mongoose.connection.on('connected', () => {
-  console.log('📡 Mongoose connected to MongoDB');
-});
-
-mongoose.connection.on('error', (err) => {
-  console.error('❌ Mongoose connection error:', err);
-});
-
-mongoose.connection.on('disconnected', () => {
-  console.log('📡 Mongoose disconnected from MongoDB');
-});
-
-// Handle process termination
-process.on('SIGINT', async () => {
-  await disconnectDatabase();
-  process.exit(0);
-});

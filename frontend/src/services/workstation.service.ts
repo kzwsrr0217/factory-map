@@ -1,3 +1,11 @@
+/**
+ * workstation.service.ts — API calls for the Workstation entity.
+ *
+ * Workstations are individual physical positions within sections
+ * (a desk, a CNC machine station, an operator panel). They can be rendered
+ * on the floor map at a specific position and rotation. Assets are linked
+ * to workstations via `asset.workstation_id`.
+ */
 import api from './api';
 
 export interface Workstation {

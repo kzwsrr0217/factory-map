@@ -10,9 +10,12 @@
     "logs": "docker-compose logs -f",
     "logs:backend": "docker-compose logs -f backend",
     "logs:frontend": "docker-compose logs -f frontend",
+    "test": "docker exec -e NODE_ENV=test factory-map-backend npx jest --runInBand --testTimeout=30000 --forceExit && docker exec factory-map-frontend sh -c \"CI=true npm test -- --watchAll=false --passWithNoTests\"",
+    "test:backend": "docker exec -e NODE_ENV=test factory-map-backend npx jest --runInBand --testTimeout=30000 --forceExit",
+    "test:frontend": "docker exec factory-map-frontend sh -c \"CI=true npm test -- --watchAll=false --passWithNoTests\"",
+    "build": "docker-compose build",
     "seed": "docker-compose exec backend npm run seed",
-    "backend:shell": "docker-compose exec backend sh",
-    "mongo:shell": "docker-compose exec mongo mongosh factorymap"
+    "backend:shell": "docker-compose exec backend sh"
   },
   "keywords": [
     "factory-map",
@@ -21,8 +24,5 @@
     "typescript"
   ],
   "author": "",
-  "license": "UNLICENSED",
-  "dependencies": {
-    "react-router-dom": "^7.10.1"
-  }
+  "license": "UNLICENSED"
 }

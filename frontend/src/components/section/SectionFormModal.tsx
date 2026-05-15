@@ -1,8 +1,16 @@
+/**
+ * SectionFormModal.tsx — Create / edit form for sections within a work area.
+ *
+ * Fields: name (required), capacity (optional integer), and shift_schedule
+ * (optional free-text, e.g. "08:00-16:00"). Requires `workareaId` to link
+ * the section to its parent. Supports both create and edit modes.
+ */
 import React, { useState, useEffect } from 'react';
 import Modal from '../common/Modal';
 import Button from '../common/Button';
 import Input from '../common/Input';
 import { sectionService, Section } from '../../services/section.service';
+import { useToast } from '../../contexts/ToastContext';
 import styles from '../../styles/components/SectionFormModal.module.css';
 
 interface SectionFormModalProps {
@@ -27,6 +35,7 @@ const SectionFormModal: React.FC<SectionFormModalProps> = ({
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
+  const toast = useToast();
 
   useEffect(() => {
     if (section) {
@@ -81,11 +90,9 @@ const SectionFormModal: React.FC<SectionFormModalProps> = ({
 
       onSuccess();
       onClose();
-    } catch (error: any) {
-      console.error('Error saving section:', error);
-      const errorMessage =
-        error.response?.data?.error || 'Failed to save section. Please try again.';
-      alert(errorMessage);
+    } catch (err: any) {
+      console.error('Error saving section:', err);
+      toast.error(err.response?.data?.error || 'Failed to save section. Please try again.');
     } finally {
       setSubmitting(false);
     }
@@ -138,7 +145,7 @@ const SectionFormModal: React.FC<SectionFormModalProps> = ({
         />
 
         <div className={styles.note}>
-          <p>💡 Position this section on the floor plan in the Map View</p>
+          <p>Position this section on the floor plan in the Map View after creating it.</p>
         </div>
       </div>
     </Modal>

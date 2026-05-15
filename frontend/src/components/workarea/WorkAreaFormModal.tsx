@@ -1,8 +1,16 @@
+/**
+ * WorkAreaFormModal.tsx — Create / edit form for work areas on a floor.
+ *
+ * Fields: name (required) and type (optional free-text, e.g. "Assembly",
+ * "Storage"). Position and size are managed on the FloorMap canvas, not here.
+ * Requires `floorId` to associate the work area with its parent floor.
+ */
 import React, { useState, useEffect } from 'react';
 import Modal from '../common/Modal';
 import Button from '../common/Button';
 import Input from '../common/Input';
 import { workareaService, WorkArea } from '../../services/workarea.service';
+import { useToast } from '../../contexts/ToastContext';
 import styles from '../../styles/components/WorkAreaFormModal.module.css';
 
 interface WorkAreaFormModalProps {
@@ -28,6 +36,7 @@ const WorkAreaFormModal: React.FC<WorkAreaFormModalProps> = ({
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
+  const toast = useToast();
 
   useEffect(() => {
     if (workarea) {
@@ -79,8 +88,6 @@ const WorkAreaFormModal: React.FC<WorkAreaFormModalProps> = ({
         },
       };
 
-      console.log('Submitting work area payload:', payload); // Debug log
-
       if (workarea) {
         await workareaService.updateWorkArea(workarea._id, payload);
       } else {
@@ -89,11 +96,9 @@ const WorkAreaFormModal: React.FC<WorkAreaFormModalProps> = ({
 
       onSuccess();
       onClose();
-    } catch (error: any) {
-      console.error('Error saving work area:', error);
-      const errorMessage =
-        error.response?.data?.error || 'Failed to save work area. Please try again.';
-      alert(errorMessage);
+    } catch (err: any) {
+      console.error('Error saving work area:', err);
+      toast.error(err.response?.data?.error || 'Failed to save work area. Please try again.');
     } finally {
       setSubmitting(false);
     }
@@ -154,7 +159,7 @@ const WorkAreaFormModal: React.FC<WorkAreaFormModalProps> = ({
         </div>
 
         <div className={styles.note}>
-          <p>💡 Position this work area on the floor plan in the Map View</p>
+          <p>Position this work area on the floor plan in the Map View after creating it.</p>
         </div>
       </div>
     </Modal>

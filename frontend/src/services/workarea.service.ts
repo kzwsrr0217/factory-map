@@ -1,3 +1,11 @@
+/**
+ * workarea.service.ts — API calls for the WorkArea entity.
+ *
+ * Work areas are rectangular zones on a floor map. Their `coordinates` (position)
+ * and `dimensions` (width/height) are updated when the user drags or resizes
+ * them on the floor plan canvas. The `type` field describes the zone's function
+ * (e.g., "assembly", "server room", "office").
+ */
 import api from './api';
 
 export interface WorkArea {

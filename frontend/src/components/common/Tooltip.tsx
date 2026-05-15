@@ -1,3 +1,14 @@
+/**
+ * Tooltip.tsx — Viewport-aware floating tooltip positioned at mouse coordinates.
+ *
+ * Unlike CSS-only tooltips, this component adjusts its x/y position after
+ * mounting to avoid overflowing the right edge or bottom of the viewport.
+ * The offset is 15 px from the provided cursor coordinates; if the tooltip
+ * would overflow it flips to the opposite side.
+ *
+ * Used by FloorMap to show asset details when hovering over placed asset icons.
+ * Callers track mouse position and pass it directly as `x`/`y`.
+ */
 import React, { useState, useRef, useEffect } from 'react';
 import styles from '../../styles/components/Tooltip.module.css';
 

@@ -1,0 +1,184 @@
+.container {
+  max-height: 600px;
+  overflow-y: auto;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.header h3 {
+  margin: 0;
+  color: #374151;
+}
+
+.loading {
+  text-align: center;
+  padding: 20px;
+  color: #6b7280;
+}
+
+.connectionsList {
+  margin-bottom: 20px;
+}
+
+.empty {
+  text-align: center;
+  color: #6b7280;
+  font-style: italic;
+  padding: 40px 20px;
+}
+
+.connectionItem {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 15px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  margin-bottom: 10px;
+  background: #ffffff;
+}
+
+.connectionInfo {
+  flex: 1;
+}
+
+.connectionHeader {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 5px;
+}
+
+.assetName {
+  font-weight: 600;
+  color: #111827;
+}
+
+.connectionType {
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+  text-transform: uppercase;
+}
+
+/* Connection type colors */
+.network { background: #dbeafe; color: #1e40af; }
+.power { background: #fef3c7; color: #92400e; }
+.usb { background: #d1fae5; color: #065f46; }
+.serial { background: #e0e7ff; color: #3730a3; }
+.parallel { background: #fce7f3; color: #be185d; }
+.bluetooth { background: #dbeafe; color: #1e40af; }
+.wifi { background: #dbeafe; color: #1e40af; }
+.ethernet { background: #dbeafe; color: #1e40af; }
+.fiber { background: #ecfdf5; color: #047857; }
+.dependency { background: #f3f4f6; color: #374151; }
+.parent-child { background: #f9fafb; color: #111827; }
+.peer { background: #f3f4f6; color: #374151; }
+.other { background: #f9fafb; color: #6b7280; }
+
+.connectionLabel {
+  font-weight: 500;
+  color: #4b5563;
+  margin-bottom: 5px;
+}
+
+.connectionDescription {
+  color: #6b7280;
+  font-size: 14px;
+  margin-bottom: 8px;
+}
+
+.connectionMeta {
+  display: flex;
+  gap: 15px;
+  font-size: 12px;
+  color: #9ca3af;
+}
+
+.connectionActions {
+  display: flex;
+  gap: 8px;
+  margin-left: 20px;
+}
+
+.formContainer {
+  border-top: 1px solid #e5e7eb;
+  padding-top: 20px;
+  margin-top: 20px;
+}
+
+.formContainer h4 {
+  margin: 0 0 15px 0;
+  color: #374151;
+}
+
+.connectionForm {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.formGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.formGroup label {
+  font-weight: 500;
+  color: #374151;
+  font-size: 14px;
+}
+
+.formGroup input,
+.formGroup select,
+.formGroup textarea {
+  padding: 8px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 14px;
+}
+
+.formGroup input:focus,
+.formGroup select:focus,
+.formGroup textarea:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.formGroup textarea {
+  resize: vertical;
+  min-height: 60px;
+}
+
+.formRow {
+  display: flex;
+  gap: 20px;
+  align-items: center;
+}
+
+.formRow .formGroup {
+  flex: 1;
+}
+
+.formGroup label input[type="checkbox"] {
+  margin-right: 8px;
+}
+
+.formActions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  margin-top: 10px;
+  padding-top: 15px;
+  border-top: 1px solid #e5e7eb;
+}

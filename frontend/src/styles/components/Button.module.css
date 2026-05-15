@@ -69,6 +69,15 @@
   background: #dc2626;
 }
 
+.warning {
+  background: #f59e0b;
+  color: var(--color-white);
+}
+
+.warning:hover:not(:disabled) {
+  background: #d97706;
+}
+
 .outline {
   background: transparent;
   border-color: var(--color-gray-300);

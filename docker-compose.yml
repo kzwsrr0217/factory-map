@@ -1,84 +1,119 @@
-version: '3.8'
-
 services:
-  # MongoDB Database
-  mongo:
-    image: mongo:7
-    container_name: factorymap-mongo
+  # Microsoft SQL Server 2022
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: factory-map-mssql
     restart: unless-stopped
-    ##environment:
-    ##  MONGO_INITDB_ROOT_USERNAME: ${MONGODB_USER}
-    ##  MONGO_INITDB_ROOT_PASSWORD: ${MONGODB_PASSWORD}
-    ##  MONGO_INITDB_DATABASE: factorymap
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: ${MSSQL_PASSWORD}
+      MSSQL_PID: Developer
     volumes:
-      - mongo_data:/data/db
+      - mssql_data:/var/opt/mssql
     ports:
-      - "27017:27017"
+      - "1433:1433"
     networks:
-      - factorymap-network
+      - factory-map-network
     healthcheck:
-      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      test: /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$$MSSQL_SA_PASSWORD" -No -Q "SELECT 1" || exit 1
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 30s
+
+  # One-shot container: creates the database if it doesn't exist yet
+  mssql-setup:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: factory-map-mssql-setup
+    restart: on-failure
+    depends_on:
+      mssql:
+        condition: service_healthy
+    networks:
+      - factory-map-network
+    environment:
+      MSSQL_SA_PASSWORD: ${MSSQL_PASSWORD}
+      MSSQL_DATABASE: ${MSSQL_DATABASE}
+    command:
+      - /bin/bash
+      - -c
+      - >-
+        SQL="IF NOT EXISTS (SELECT name FROM sys.databases WHERE name = N'$$MSSQL_DATABASE')
+        CREATE DATABASE [$$MSSQL_DATABASE];" &&
+        /opt/mssql-tools18/bin/sqlcmd -S mssql -U sa -P "$$MSSQL_SA_PASSWORD" -No -Q "$$SQL" &&
+        echo 'Database ready'
 
   # Backend API (Node.js + Express + TypeScript)
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: factorymap-backend
+    container_name: factory-map-backend
     restart: unless-stopped
     environment:
       NODE_ENV: ${NODE_ENV}
+      BACKEND_PORT: ${BACKEND_PORT}
       PORT: ${BACKEND_PORT}
-      MONGODB_URI: ${MONGODB_URI}
+      MSSQL_HOST: mssql
+      MSSQL_PORT: 1433
+      MSSQL_USER: sa
+      MSSQL_PASSWORD: ${MSSQL_PASSWORD}
+      MSSQL_DATABASE: ${MSSQL_DATABASE}
+      MSSQL_TRUST_CERT: "true"
       JWT_SECRET: ${JWT_SECRET}
       ITSM_MODE: ${ITSM_MODE}
       ITSM_MOCK_API_URL: ${ITSM_MOCK_API_URL}
       ITSM_REAL_API_URL: ${ITSM_REAL_API_URL}
       ITSM_API_KEY: ${ITSM_API_KEY}
       ITSM_SYNC_INTERVAL: ${ITSM_SYNC_INTERVAL}
-      DOCKER_ENV: "true"  # <-- ÚJ SOR!
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-factory-map@company.local}
+      TEAMS_WEBHOOK_URL: ${TEAMS_WEBHOOK_URL:-}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:5174}
+      DOCKER_ENV: "true"
     volumes:
       - ./backend/src:/app/src
-      - /app/node_modules
     ports:
       - "${BACKEND_PORT}:${BACKEND_PORT}"
     depends_on:
-      mongo:
-        condition: service_healthy
+      mssql-setup:
+        condition: service_completed_successfully
     networks:
-      - factorymap-network
+      - factory-map-network
     command: npm run dev
-    
+
   # Frontend (React + TypeScript)
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-    container_name: factorymap-frontend
+    container_name: factory-map-frontend
     restart: unless-stopped
     environment:
       REACT_APP_API_URL: ${REACT_APP_API_URL}
+      REACT_APP_PUBLIC_BASE_URL: ${REACT_APP_PUBLIC_BASE_URL:-}
+      PORT: 5174
     volumes:
       - ./frontend/src:/app/src
       - ./frontend/public:/app/public
-      - /app/node_modules
     ports:
-      - "3000:3000"
+      - "5174:5174"
     depends_on:
       - backend
     networks:
-      - factorymap-network
+      - factory-map-network
     stdin_open: true
     tty: true
     command: npm start
 
 volumes:
-  mongo_data:
+  mssql_data:
     driver: local
 
 networks:
-  factorymap-network:
+  factory-map-network:
     driver: bridge

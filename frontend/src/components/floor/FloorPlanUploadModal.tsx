@@ -1,6 +1,20 @@
+/**
+ * FloorPlanUploadModal.tsx — Upload an SVG or image file as a floor plan background.
+ *
+ * Accepts SVG, PNG, JPG, and GIF files up to 5 MB. The file is read as a
+ * base64 data URL client-side and sent as `svg_background` in the PATCH
+ * request to `floorService.updateFloorPlan()`. The backend stores it in the
+ * `svg_background` NVARCHAR(MAX) column.
+ *
+ * If a plan already exists, a ConfirmDialog warns the user before overwriting.
+ * Large files (> ~2 MB base64) may approach SQL Server row size limits —
+ * the 5 MB cap is a safety guard.
+ */
 import React, { useState, useRef } from 'react';
+import { Upload, AlertTriangle } from 'lucide-react';
 import Modal from '../common/Modal';
 import Button from '../common/Button';
+import ConfirmDialog from '../common/ConfirmDialog';
 import { floorService } from '../../services/floor.service';
 import styles from '../../styles/components/FloorPlanUploadModal.module.css';
 
@@ -21,26 +35,28 @@ const FloorPlanUploadModal: React.FC<FloorPlanUploadModalProps> = ({
   const [preview, setPreview] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string>('');
+  const [confirmRemoveOpen, setConfirmRemoveOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const validTypes = [
+    'image/svg+xml',
+    'image/png',
+    'image/jpeg',
+    'image/jpg',
+  ];
+  const validExtensions = ['.svg', '.png', '.jpg', '.jpeg'];
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
     if (!selectedFile) return;
 
-    console.log('Selected file:', {
-      name: selectedFile.name,
-      type: selectedFile.type,
-      size: selectedFile.size,
-    });
+    const fileExtension = selectedFile.name.toLowerCase().substring(selectedFile.name.lastIndexOf('.'));
 
-    // Validate file type
-    const validTypes = ['image/svg+xml', 'image/png', 'image/jpeg', 'image/jpg'];
-    if (!validTypes.includes(selectedFile.type)) {
-      setError('Please select a valid image file (SVG, PNG, JPG)');
+    if (!validTypes.includes(selectedFile.type) && !validExtensions.includes(fileExtension)) {
+      setError('Please select a valid file (SVG, PNG, or JPG). For Visio files, export as SVG or PNG first.');
       return;
     }
 
-    // Validate file size (max 5MB)
     if (selectedFile.size > 5 * 1024 * 1024) {
       setError('File size must be less than 5MB');
       return;
@@ -48,12 +64,13 @@ const FloorPlanUploadModal: React.FC<FloorPlanUploadModalProps> = ({
 
     setError('');
     setFile(selectedFile);
+    processImageFile(selectedFile);
+  };
 
-    // Create preview
+  const processImageFile = (selectedFile: File) => {
     const reader = new FileReader();
     reader.onload = (event) => {
       const result = event.target?.result as string;
-      console.log('Preview data (first 200 chars):', result.substring(0, 200));
       setPreview(result);
     };
     reader.readAsDataURL(selectedFile);
@@ -64,41 +81,32 @@ const FloorPlanUploadModal: React.FC<FloorPlanUploadModalProps> = ({
 
     setUploading(true);
     try {
-      console.log('Uploading floor plan...');
-      // Upload as base64
       await floorService.updateFloor(floorId, {
         svg_background: preview,
       });
-
-      console.log('Upload successful!');
       onSuccess();
       onClose();
       resetForm();
-    } catch (error) {
-      console.error('Error uploading floor plan:', error);
-      setError('Failed to upload floor plan. Please try again.');
+    } catch (err) {
+      console.error('Error uploading floor plan:', err);
+      setError('Failed to upload floor plan. Please try again later.');
     } finally {
       setUploading(false);
     }
   };
 
   const handleRemove = async () => {
-    if (!window.confirm('Are you sure you want to remove the floor plan?')) {
-      return;
-    }
-
     setUploading(true);
     try {
       await floorService.updateFloor(floorId, {
         svg_background: undefined,
       });
-
       onSuccess();
       onClose();
       resetForm();
-    } catch (error) {
-      console.error('Error removing floor plan:', error);
-      setError('Failed to remove floor plan. Please try again.');
+    } catch (err) {
+      console.error('Error removing floor plan:', err);
+      setError('Failed to remove floor plan. Please try again later.');
     } finally {
       setUploading(false);
     }
@@ -118,48 +126,49 @@ const FloorPlanUploadModal: React.FC<FloorPlanUploadModalProps> = ({
     onClose();
   };
 
-  const footer = (
-    <>
-      <Button variant="outline" onClick={handleClose} disabled={uploading}>
-        Cancel
-      </Button>
-      {preview && (
-        <Button variant="danger" onClick={handleRemove} disabled={uploading}>
-          Remove Current
-        </Button>
-      )}
-      <Button
-        variant="primary"
-        onClick={handleUpload}
-        disabled={!file}
-        loading={uploading}
-      >
-        Upload
-      </Button>
-    </>
-  );
-
   return (
+    <>
+    <ConfirmDialog
+      isOpen={confirmRemoveOpen}
+      onClose={() => setConfirmRemoveOpen(false)}
+      onConfirm={() => { setConfirmRemoveOpen(false); handleRemove(); }}
+      title="Remove Floor Plan"
+      message="Are you sure you want to remove the current floor plan?"
+      confirmText="Remove"
+      loading={uploading}
+    />
     <Modal
       isOpen={isOpen}
       onClose={handleClose}
       title="Upload Floor Plan"
       width="lg"
-      footer={footer}
+      footer={
+        <>
+          <Button variant="outline" onClick={handleClose} disabled={uploading}>
+            Cancel
+          </Button>
+          {preview && (
+            <Button variant="danger" onClick={() => setConfirmRemoveOpen(true)} disabled={uploading}>
+              Remove Current
+            </Button>
+          )}
+          <Button variant="primary" onClick={handleUpload} disabled={!file || uploading} loading={uploading}>
+            Upload
+          </Button>
+        </>
+      }
     >
       <div className={styles.uploadContainer}>
-        {/* Instructions */}
         <div className={styles.instructions}>
-          <h4>📋 Instructions</h4>
+          <h4>Upload Instructions</h4>
           <ul>
-            <li>Supported formats: SVG, PNG, JPG</li>
-            <li>Maximum file size: 5MB</li>
-            <li>The image will be displayed as a background on the floor map</li>
-            <li>You can position work areas and assets on top of the floor plan</li>
+            <li>Supported formats: <strong>SVG, PNG, JPG</strong> — max 5MB</li>
+            <li><strong>Using Visio?</strong> Export your drawing: <em>File → Save As → SVG</em> or <em>File → Export → PNG</em></li>
+            <li>SVG gives the best quality and sharp rendering at any zoom level</li>
+            <li>PNG/JPG work well for raster floor plans and photos</li>
           </ul>
         </div>
 
-        {/* File Input */}
         <div className={styles.fileInputContainer}>
           <input
             ref={fileInputRef}
@@ -170,25 +179,26 @@ const FloorPlanUploadModal: React.FC<FloorPlanUploadModalProps> = ({
             id="floor-plan-upload"
           />
           <label htmlFor="floor-plan-upload" className={styles.fileInputLabel}>
-            <div className={styles.uploadIcon}>📤</div>
+            <div className={styles.uploadIcon}><Upload size={32} /></div>
             <p className={styles.uploadText}>
-              {file ? file.name : 'Click to select floor plan image'}
+              {file ? file.name : 'Click to select a floor plan file'}
             </p>
-            <p className={styles.uploadHint}>SVG, PNG, or JPG (max 5MB)</p>
+            <p className={styles.uploadHint}>
+              Recommended: SVG for best quality, PNG/JPG for raster backgrounds.
+            </p>
           </label>
         </div>
 
-        {/* Error Message */}
         {error && (
           <div className={styles.error}>
-            <span>⚠️ {error}</span>
+            <AlertTriangle size={14} style={{ marginRight: 6, flexShrink: 0 }} />
+            <span>{error}</span>
           </div>
         )}
 
-        {/* Preview */}
         {preview && (
           <div className={styles.previewContainer}>
-            <h4>Preview:</h4>
+            <h4>Preview</h4>
             <div className={styles.preview}>
               <img src={preview} alt="Floor plan preview" />
             </div>
@@ -196,6 +206,7 @@ const FloorPlanUploadModal: React.FC<FloorPlanUploadModalProps> = ({
         )}
       </div>
     </Modal>
+    </>
   );
 };
 

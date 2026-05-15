@@ -1,3 +1,24 @@
+/**
+ * theme.css — Design token definitions for light and dark modes.
+ *
+ * All CSS custom properties for colours, spacing, typography, shadows, borders,
+ * and transitions are defined here on `:root` (light mode defaults).
+ * Dark mode overrides are applied via `[data-theme="dark"]` on the `<html>`
+ * element, which ThemeContext toggles at runtime.
+ *
+ * Conventions:
+ *   --color-*        Semantic colour tokens (primary, success, error, etc.)
+ *   --text-*         Text colour hierarchy (primary, secondary, muted, inverse)
+ *   --bg-*           Background layers (primary, secondary, elevated, overlay)
+ *   --border-*       Border colours and radius tokens
+ *   --shadow-*       Box-shadow presets (sm, md, lg)
+ *   --spacing-*      Spacing scale (xs → 2xl)
+ *   --font-size-*    Type scale (xs → 2xl)
+ *   --transition-*   Duration + easing presets
+ *
+ * Import order in global.css: @import './theme.css' first so all other files
+ * can reference these tokens.
+ */
 :root {
   /* Colors */
   --color-primary: #7c3aed;
@@ -6,10 +27,12 @@
   --color-secondary: #10b981;
   --color-success: #10b981;
   --color-success-light: #d1fae5;
+  --color-success-dark: #065f46;
   --color-warning: #f59e0b;
   --color-warning-light: #fef3c7;
   --color-error: #ef4444;
   --color-error-light: #fee2e2;
+  --color-error-dark: #7f1d1d;
   --color-info: #3b82f6;
   --color-info-light: #dbeafe;
 
@@ -87,10 +110,12 @@
   /* Semantic colors */
   --color-success: #34d399;
   --color-success-light: #064e3b;
+  --color-success-dark: #d1fae5;
   --color-warning: #fbbf24;
   --color-warning-light: #78350f;
   --color-error: #f87171;
   --color-error-light: #7f1d1d;
+  --color-error-dark: #fee2e2;
   --color-info: #60a5fa;
   --color-info-light: #1e3a8a;
   

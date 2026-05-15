@@ -1,8 +1,17 @@
-import React, { useState, useEffect } from 'react';
+/**
+ * FloorFormModal.tsx — Create / edit form for floors within a building.
+ *
+ * Requires `buildingId` to associate the new floor. Validates that `name` is
+ * non-empty and `floor_number` is a valid integer before submitting. The
+ * backend also enforces uniqueness of `floor_number` within a building; the
+ * form surfaces that error via the toast if the API rejects it.
+ */
+import React, { useState, useEffect, useCallback } from 'react';
 import Modal from '../common/Modal';
 import Button from '../common/Button';
 import Input from '../common/Input';
 import { floorService, Floor } from '../../services/floor.service';
+import { useToast } from '../../contexts/ToastContext';
 import styles from '../../styles/components/FloorFormModal.module.css';
 
 interface FloorFormModalProps {
@@ -29,6 +38,19 @@ const FloorFormModal: React.FC<FloorFormModalProps> = ({
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
   const [existingFloorNumbers, setExistingFloorNumbers] = useState<number[]>([]);
+  const toast = useToast();
+
+  const loadExistingFloors = useCallback(async () => {
+    try {
+      const floors = await floorService.getFloors(buildingId);
+      const numbers = floors
+        .filter(f => !floor || f._id !== floor._id) // Exclude current floor if editing
+        .map(f => f.floor_number);
+      setExistingFloorNumbers(numbers);
+    } catch (error) {
+      console.error('Error loading floors:', error);
+    }
+  }, [buildingId, floor]);
 
   useEffect(() => {
     if (floor) {
@@ -54,19 +76,7 @@ const FloorFormModal: React.FC<FloorFormModalProps> = ({
     if (isOpen && buildingId) {
       loadExistingFloors();
     }
-  }, [isOpen, buildingId, floor]);
-
-  const loadExistingFloors = async () => {
-    try {
-      const floors = await floorService.getFloors(buildingId);
-      const numbers = floors
-        .filter(f => !floor || f._id !== floor._id) // Exclude current floor if editing
-        .map(f => f.floor_number);
-      setExistingFloorNumbers(numbers);
-    } catch (error) {
-      console.error('Error loading floors:', error);
-    }
-  };
+  }, [isOpen, buildingId, loadExistingFloors]);
 
   const validate = (): boolean => {
     const newErrors: Record<string, string> = {};
@@ -124,12 +134,9 @@ const FloorFormModal: React.FC<FloorFormModalProps> = ({
 
       onSuccess();
       onClose();
-    } catch (error: any) {
-      console.error('Error saving floor:', error);
-      
-      // Show user-friendly error message
-      const errorMessage = error.response?.data?.error || 'Failed to save floor. Please try again.';
-      alert(errorMessage);
+    } catch (err: any) {
+      console.error('Error saving floor:', err);
+      toast.error(err.response?.data?.error || 'Failed to save floor. Please try again.');
     } finally {
       setSubmitting(false);
     }

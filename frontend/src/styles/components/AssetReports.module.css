@@ -1,0 +1,511 @@
+/* ── Shared layout ─────────────────────────────────────────── */
+.container {
+  max-height: 700px;
+  overflow-y: auto;
+}
+
+/* When rendered inline on the Reports page, remove the height cap */
+.containerInline {
+  max-height: none;
+  overflow-y: visible;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  padding-bottom: 15px;
+  border-bottom: 1px solid var(--color-border);
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.reportTabs {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.reportContent {
+  min-height: 400px;
+}
+
+.loading {
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--color-text-secondary);
+  font-size: 1rem;
+}
+
+/* ── Overview grid ─────────────────────────────────────────── */
+.reportGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 20px;
+}
+
+.statCard {
+  text-align: center;
+}
+
+.statCard h4 {
+  margin: 0 0 12px 0;
+  color: var(--color-text-secondary);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 700;
+}
+
+.statValue {
+  font-size: 3rem;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  line-height: 1;
+  margin-bottom: 4px;
+}
+
+.statSubtext {
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary);
+}
+
+.chartCard h4,
+.sectionTitle {
+  margin: 0 0 14px 0;
+  color: var(--color-text-primary);
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
+
+/* ── Skeleton ──────────────────────────────────────────────── */
+@keyframes shimmer {
+  0%   { background-position: -600px 0; }
+  100% { background-position:  600px 0; }
+}
+
+.skeleton {
+  background: linear-gradient(90deg,
+    var(--color-bg-secondary) 25%,
+    var(--color-border) 50%,
+    var(--color-bg-secondary) 75%
+  );
+  background-size: 600px 100%;
+  animation: shimmer 1.4s infinite linear;
+  border-radius: var(--radius-md);
+}
+
+.skeletonGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 20px;
+}
+
+.skeletonCard {
+  height: 120px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+}
+
+.skeletonChartCard {
+  height: 200px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  grid-column: span 2;
+}
+
+/* ── Security tab ──────────────────────────────────────────── */
+.securityGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.securityMetric {
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: 16px;
+  text-align: center;
+}
+
+.securityMetric h5 {
+  margin: 0 0 8px 0;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-secondary);
+}
+
+.securityMetricValue {
+  font-size: 2.25rem;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--color-text-primary);
+}
+
+.securityMetricValue.danger  { color: #ef4444; }
+.securityMetricValue.warning { color: #f59e0b; }
+.securityMetricValue.ok      { color: #22c55e; }
+
+.securityEventsTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+}
+
+.securityEventsTable th {
+  text-align: left;
+  padding: 6px 10px;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-secondary);
+  border-bottom: 2px solid var(--color-border);
+}
+
+.securityEventsTable td {
+  padding: 8px 10px;
+  color: var(--color-text-primary);
+  border-bottom: 1px solid var(--color-border);
+  vertical-align: middle;
+}
+
+.securityEventsTable tr:last-child td {
+  border-bottom: none;
+}
+
+.actionBadge {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: var(--radius-sm);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.actionBadge.login          { background: rgba(34,197,94,0.12);  color: #16a34a; }
+.actionBadge.login_failed   { background: rgba(245,158,11,0.12); color: #b45309; }
+.actionBadge.account_locked { background: rgba(239,68,68,0.12);  color: #dc2626; }
+.actionBadge.password_changed { background: rgba(59,130,246,0.12); color: #2563eb; }
+.actionBadge.logout         { background: rgba(148,163,184,0.12); color: #64748b; }
+
+/* ── Bar charts ────────────────────────────────────────────── */
+.statusChart {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.statusItem {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.statusLabel {
+  min-width: 90px;
+  font-size: 0.875rem;
+  color: var(--color-text-primary);
+  text-transform: capitalize;
+}
+
+.statusBar {
+  flex: 1;
+  height: 8px;
+  background: var(--color-border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.statusFill {
+  height: 100%;
+  background: var(--color-primary);
+  border-radius: 4px;
+  transition: width 0.4s ease;
+}
+
+.statusCount {
+  min-width: 28px;
+  text-align: right;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+/* ── Type list ─────────────────────────────────────────────── */
+.typeList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.typeItem {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 7px 12px;
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  font-size: 0.875rem;
+  color: var(--color-text-primary);
+}
+
+/* ── Connections ───────────────────────────────────────────── */
+.connectionStats {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.statItem {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 0.9375rem;
+  color: var(--color-text-primary);
+}
+
+.statItem:last-child {
+  border-bottom: none;
+}
+
+.statItem strong {
+  font-weight: 700;
+}
+
+.mostConnected {
+  padding: 16px;
+  background: rgba(59, 130, 246, 0.06);
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(59, 130, 246, 0.2);
+}
+
+.assetInfo h5 {
+  margin: 0 0 4px 0;
+  color: var(--color-text-primary);
+  font-size: 1rem;
+}
+
+.assetInfo p {
+  margin: 0 0 10px 0;
+  color: var(--color-text-secondary);
+  font-size: 0.875rem;
+}
+
+/* ── Maintenance ───────────────────────────────────────────── */
+.maintenanceStats {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.maintenanceItem {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  font-size: 0.9375rem;
+  color: var(--color-text-primary);
+}
+
+.attentionList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.attentionItem {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  background: rgba(249, 115, 22, 0.06);
+  border: 1px solid rgba(249, 115, 22, 0.2);
+  border-radius: var(--radius-md);
+}
+
+.attentionInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.attentionInfo strong {
+  color: var(--color-text-primary);
+  font-size: 0.875rem;
+}
+
+.attentionInfo span {
+  color: var(--color-text-secondary);
+  font-size: 0.75rem;
+}
+
+.attentionBadges {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+/* ── Locations ─────────────────────────────────────────────── */
+.locationStats {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.locationItem {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  font-size: 0.9375rem;
+  color: var(--color-text-primary);
+}
+
+/* ── Heatmap ───────────────────────────────────────────────── */
+.heatmapContainer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.heatmapTitle {
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.heatmapGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.heatmapCell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 96px;
+  height: 64px;
+  border-radius: var(--radius-md);
+  background-color: rgba(59, 130, 246, calc(0.1 + var(--heat, 0) * 0.75));
+  border: 1px solid rgba(59, 130, 246, 0.25);
+  cursor: default;
+  transition: transform 0.1s;
+  padding: 4px;
+  text-align: center;
+}
+
+.heatmapCell:hover {
+  transform: scale(1.05);
+}
+
+.heatmapCellLabel {
+  font-size: 0.6875rem;
+  color: var(--color-text-primary);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 88px;
+}
+
+.heatmapCellCount {
+  font-size: 1.375rem;
+  font-weight: 700;
+  color: var(--color-primary);
+}
+
+.heatmapLegend {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  font-size: 0.6875rem;
+  color: var(--color-text-secondary);
+}
+
+.heatmapLegendBar {
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: linear-gradient(to right, rgba(59,130,246,0.1), rgba(59,130,246,0.85));
+  border: 1px solid rgba(59,130,246,0.2);
+}
+
+/* ── Empty / placeholder ───────────────────────────────────── */
+.placeholder {
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--color-text-secondary);
+  border: 2px dashed var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-secondary);
+}
+
+.placeholder p {
+  margin: 4px 0;
+  font-style: italic;
+}
+
+.emptyText {
+  text-align: center;
+  padding: 20px;
+  color: var(--color-text-secondary);
+  font-style: italic;
+  margin: 0;
+}
+
+/* ── Topology graph ────────────────────────────────────────── */
+.topologyWrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.topologyHint {
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary);
+  margin: 0;
+}
+
+.topologySvg {
+  width: 100%;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
+}
+
+.topologyLegend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 6px 0 2px;
+}
+
+.topologyLegendItem {
+  font-size: 0.6875rem;
+  color: var(--color-text-secondary);
+  display: flex;
+  align-items: center;
+}

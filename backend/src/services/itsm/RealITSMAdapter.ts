@@ -1,6 +1,17 @@
 /**
- * Real ITSM Adapter
- * This will be implemented when the real ITSM API is available
+ * RealITSMAdapter.ts — HTTP adapter for a live ITSM REST API.
+ *
+ * Activated when `ITSM_MODE=real` in the environment. Reads the following
+ * env vars via config (see config.ts):
+ *   ITSM_BASE_URL  — base URL of the ITSM REST API.
+ *   ITSM_API_KEY   — Bearer token or API key for authentication.
+ *
+ * Implements IITSMAdapter using HTTP calls to the ITSM system's endpoints.
+ * Map the real API response shapes to the IITSMHardware / IITSMPerson /
+ * IITSMSoftware / IITSMTicket / IITSMSyncResult interfaces from itsm.types.ts.
+ *
+ * NOTE: The real adapter is a stub that must be filled in once the target ITSM
+ * system's API contract is known. The mock adapter is the default.
  */
 
 import { IITSMAdapter } from './IITSMAdapter';
@@ -73,7 +84,13 @@ export class RealITSMAdapter implements IITSMAdapter {
   }
 
   async syncAsset(_hardwareId: string): Promise<IITSMSyncResult> {
-    // TODO: Implement
+    // TODO: Implement when ITSM API is available
+    throw new Error('Real ITSM adapter not yet implemented');
+  }
+
+  async syncAll(): Promise<IITSMHardware[]> {
+    // TODO: Implement — call GetViewData with pagination, normalize raw ITSM format
+    // Example: return this._request<any>('/GetViewData?view=HardwareAssets&pageSize=500&page=1');
     throw new Error('Real ITSM adapter not yet implemented');
   }
 

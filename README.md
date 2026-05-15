@@ -1,367 +1,205 @@
-# Factory Map - Asset Management System
+# Factory Map — IT Asset Management
 
-Modern, full-stack asset management solution for factory environments with ITSM integration, hierarchical location tracking, and interactive floor plans.
-
-![Factory Map Dashboard](docs/screenshots/dashboard.png)
-
-## 🚀 Features
-
-### Core Functionality
-- ✅ **Hierarchical Asset Management** - Buildings → Floors → Work Areas → Sections → Workstations
-- ✅ **ITSM Integration** - Sync with external ITSM systems (ServiceNow, etc.)
-- ✅ **Real-time Search & Filtering** - Find assets instantly
-- ✅ **Interactive Floor Plans** - Visual asset positioning (SVG-based)
-- ✅ **Complete CRUD Operations** - Create, Read, Update, Delete for all entities
-- ✅ **Responsive Design** - Works on desktop, tablet, and mobile
-
-### Technical Features
-- 🔒 **Type-Safe** - Full TypeScript implementation (frontend + backend)
-- 🏗️ **Adapter Pattern** - Flexible ITSM integration (mock/real)
-- 🎨 **Design System** - Consistent UI with CSS custom properties
-- 🐳 **Docker Compose** - Easy development setup
-- 📦 **MongoDB** - Flexible NoSQL database
-- ⚡ **Fast** - Optimized queries and efficient rendering
+Full-stack TypeScript application for tracking and visualizing IT assets in factory environments. Features hierarchical location management, interactive floor plans, ITSM integration, maintenance scheduling, and alerting.
 
 ---
 
-## 📋 Table of Contents
+## Features
 
-- [Quick Start](#quick-start)
-- [Architecture](#architecture)
-- [Tech Stack](#tech-stack)
-- [Project Structure](#project-structure)
-- [API Documentation](#api-documentation)
-- [Development](#development)
-- [Deployment](#deployment)
-- [Contributing](#contributing)
+### Core
+- **Hierarchical Asset Management** — Buildings → Floors → Work Areas → Sections → Workstations
+- **Interactive Floor Plans** — drag-and-drop asset positioning, pan/zoom, minimap, grid snap, map export/print
+- **Asset Connections (Wire Mode)** — model physical/logical links between devices on the floor map
+- **Network Topology Graph** — force-directed graph of all asset connections
+- **ITSM Integration** — sync hardware data from an external ITSM system (mock adapter included; 22 realistic records)
+- **Global Search** — instant client-side prefix-indexed search across all assets (Ctrl+K)
+- **3-Step CSV Import Wizard** — validate, preview, and bulk-import assets
+- **Maintenance Calendar** — monthly calendar view of scheduled maintenance with CSV export
+- **Maintenance Alerts** — daily cron (07:00) sends email and/or Microsoft Teams notifications for overdue/upcoming maintenance
+- **Audit Log** — immutable record of all create/update/delete operations with per-field diffs
+- **QR Code & Print Labels** — per-asset QR codes with deep-link URLs, printable labels
+- **Enhanced Export** — 19-column UTF-8 CSV and JSON export of asset lists; bulk export for selections
+
+### Technical
+- **JWT Authentication** — local login + optional LDAP/Active Directory
+- **RBAC** — three roles: `viewer`, `operator`, `admin`
+- **Swagger/OpenAPI** — browsable, interactive API docs at `/api/docs`
+- **Automated Tests** — Jest + Supertest (backend), React Testing Library + MSW (frontend)
+- **Real-time Updates** — Socket.io pushes `asset:created/updated/deleted` events to all connected tabs
+- **Dark Mode** — toggleable light/dark theme persisted to localStorage
+- **Keyboard Shortcuts** — Ctrl+K (search), Ctrl+N (new asset), ? (shortcuts reference)
 
 ---
 
-## 🏁 Quick Start
+## Quick Start
 
 ### Prerequisites
-- Docker Desktop installed
-- Node.js 18+ (for local development)
-- Git
+- Docker Desktop
+- Node.js 20+
 
-### Installation
+### Start
 
-1. **Clone the repository:**
 ```bash
-git clone https://github.com/kzwsrr0217/factory-map.git
+git clone <repository-url>
 cd factory-map
+cp .env.example .env           # Fill in at minimum: MSSQL_PASSWORD, JWT_SECRET
+docker-compose up -d           # Starts SQL Server 2022 + backend API on port 4000
+cd frontend && npm install && npm start   # React dev server on port 3000
+```
 
-2. **Start with Docker Compose:**
-```bashdocker-compose up
+Open **http://localhost:3000** — you will be prompted to log in.
 
-3. **Seed the database (first time only):**
-```bashdocker-compose exec backend npm run seed
+### Verify backend
 
-4. **Access the application:**
-- **Frontend:** http://localhost:3000
-- **Backend API:** http://localhost:5000/api
-- **MongoDB:** localhost:27017
+```bash
+curl http://localhost:4000/health
+# → {"status":"OK","timestamp":"...","environment":"development","itsm_mode":"mock"}
+```
 
-### First Steps
-1. Navigate to http://localhost:3000
-2. Explore the **Dashboard** with pre-seeded data
-3. Check **Buildings** → Click a building → See floors and assets
-4. Try **Search & Filter** on the dashboard
-5. Click an asset to see detailed information
+### API documentation (Swagger)
 
----
-
-## 🏛️ Architecture
-
-### System Overview┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│   React     │────▶│   Express   │────▶│   MongoDB   │
-│  Frontend   │     │   Backend   │     │  Database   │
-└─────────────┘     └─────────────┘     └─────────────┘
-│
-│ Adapter Pattern
-▼
-┌─────────────┐
-│    ITSM     │
-│  (Mock/Real)│
-└─────────────┘
-
-### Data Model HierarchyBuilding
-└── Floor
-└── WorkArea
-└── Section
-└── Workstation
-└── Asset
-
-### Key Design Patterns
-- **Adapter Pattern** - ITSM integration abstraction
-- **Repository Pattern** - Data access layer
-- **Component Pattern** - Reusable UI components
-- **Service Layer** - Business logic separation
+```
+http://localhost:4000/api/docs
+```
 
 ---
 
-## 🛠️ Tech Stack
+## Tech Stack
 
-### Frontend
-- **React 18** - UI library
-- **TypeScript** - Type safety
-- **React Router** - Client-side routing
-- **Axios** - HTTP client
-- **CSS Modules** - Scoped styling
-
-### Backend
-- **Node.js** - JavaScript runtime
-- **Express** - Web framework
-- **TypeScript** - Type safety
-- **MongoDB** - NoSQL database
-- **Mongoose** - ODM
-
-### DevOps
-- **Docker** - Containerization
-- **Docker Compose** - Multi-container orchestration
-- **Nodemon** - Hot reload
+| Layer | Technology |
+|-------|-----------|
+| Frontend | React 18 + TypeScript (Create React App) |
+| Routing | React Router v6 |
+| Styles | CSS Modules |
+| HTTP client | axios (JWT interceptor + proactive token refresh) |
+| Real-time | socket.io-client |
+| Backend | Node.js + Express + TypeScript |
+| ORM | TypeORM 0.3.x |
+| Database | Microsoft SQL Server 2022 (Dockerised) |
+| Auth | jsonwebtoken + bcryptjs; optional LDAP via ldapjs |
+| Security | helmet, express-rate-limit |
+| API docs | swagger-jsdoc + swagger-ui-express |
+| Alerts | nodemailer (email) + fetch (Teams webhook) + node-cron |
+| Tests | Jest + Supertest (backend), RTL + MSW (frontend) |
+| Containers | Docker Compose |
 
 ---
 
-## 📁 Project Structurefactory-map/
-├── backend/
-│   ├── src/
-│   │   ├── adapters/       # ITSM adapters (mock/real)
-│   │   ├── config/         # Configuration
-│   │   ├── controllers/    # Route controllers
-│   │   ├── models/         # MongoDB models
-│   │   ├── routes/         # API routes
-│   │   ├── scripts/        # Utility scripts (seed, etc.)
-│   │   └── server.ts       # Entry point
-│   ├── Dockerfile
-│   └── package.json
+## Project Structure
+
+```
+factory-map/
+├── backend/src/
+│   ├── config/
+│   │   ├── config.ts          # All env-var driven configuration
+│   │   ├── database.ts        # TypeORM DataSource + connectDatabase()
+│   │   └── swagger.ts         # swagger-jsdoc spec definition
+│   ├── controllers/           # asset, auth, building, floor, alert, itsm, section, user, …
+│   ├── entities/              # TypeORM entities
+│   │   ├── Asset.entity.ts
+│   │   ├── AssetConnection.entity.ts
+│   │   ├── AssetSoftware.entity.ts
+│   │   ├── AlertConfig.entity.ts
+│   │   ├── AlertLog.entity.ts
+│   │   ├── AuditLog.entity.ts
+│   │   ├── Building.entity.ts
+│   │   ├── Floor.entity.ts
+│   │   ├── Section.entity.ts
+│   │   ├── User.entity.ts
+│   │   ├── WorkArea.entity.ts
+│   │   └── Workstation.entity.ts
+│   ├── middleware/            # authenticate, requireAdmin, auditLog, captureAuditBefore
+│   ├── routes/                # index.ts mounts all routers (all /api/* require JWT)
+│   ├── services/
+│   │   ├── alert/             # AlertService — checkAndSend(), sendEmail(), sendTeams()
+│   │   ├── auth/              # LdapAuthService
+│   │   └── itsm/              # ITSMService + MockITSMAdapter + RealITSMAdapter + SyncService
+│   ├── types/                 # api.types, asset.types, hierarchy.types, itsm.types
+│   ├── utils/                 # passwordPolicy
+│   └── server.ts              # Express bootstrap, Socket.io, daily cron for alerts
 │
-├── frontend/
-│   ├── src/
-│   │   ├── components/     # React components
-│   │   │   ├── common/     # Shared components
-│   │   │   ├── layout/     # Layout components
-│   │   │   ├── asset/      # Asset-specific
-│   │   │   ├── building/   # Building-specific
-│   │   │   └── floor/      # Floor-specific
-│   │   ├── pages/          # Page components
-│   │   ├── services/       # API services
-│   │   ├── styles/         # CSS modules
-│   │   ├── App.tsx
-│   │   └── index.tsx
-│   ├── Dockerfile
-│   └── package.json
+├── frontend/src/
+│   ├── components/
+│   │   ├── asset/             # AssetDetailsModal, AssetFormModal, ImportModal, AddConnectionModal
+│   │   ├── common/            # Button, Card, Badge, Modal, ConfirmDialog, ErrorBoundary, …
+│   │   ├── layout/            # Header, Sidebar, MainLayout
+│   │   ├── map/               # FloorMap (SVG canvas with drag, zoom, wire mode, popover)
+│   │   └── search/            # GlobalSearch (Ctrl+K overlay)
+│   ├── contexts/              # AuthContext, ThemeContext, ToastContext
+│   ├── hooks/                 # useAssets, useHierarchy, useAssetLookups, useSocket, …
+│   ├── pages/
+│   │   ├── Dashboard.tsx      # Stats, asset list, bulk actions, export
+│   │   ├── Buildings.tsx      # Building list + CRUD
+│   │   ├── BuildingDetails.tsx
+│   │   ├── FloorDetails.tsx
+│   │   ├── AssetDetails.tsx   # Full-page asset view with QR code + print label
+│   │   ├── MapView.tsx        # Floor plan selector
+│   │   ├── UnplacedAssets.tsx # Assets not yet positioned on any floor
+│   │   ├── NetworkGraph.tsx   # Force-directed connection graph
+│   │   ├── Maintenance.tsx    # Monthly maintenance calendar
+│   │   ├── Alerts.tsx         # Alert config (email, Teams) + alert history
+│   │   ├── Reports.tsx        # Statistics + ITSM sync
+│   │   ├── AuditLog.tsx       # Paginated audit trail
+│   │   ├── Settings.tsx       # Personal preferences + map settings
+│   │   ├── UserManagement.tsx # Admin user CRUD
+│   │   └── Login.tsx
+│   ├── services/              # assetService, hierarchyService, alertService, api (axios)
+│   └── styles/                # CSS Modules — components/ and pages/ subdirectories
 │
+├── docs/
+│   ├── ADMIN_GUIDE.md
+│   ├── DEVELOPER_GUIDE.md
+│   └── USER_GUIDE.md
+├── uploads/                   # Python import/seed scripts
+├── ARCHITECTURE.md
 ├── docker-compose.yml
-└── README.md
+└── .env.example
+```
 
 ---
 
-## 📡 API Documentation
+## Environment Variables
 
-### Base URLhttp://localhost:5000/api
+Copy `.env.example` to `.env`. Key variables:
 
-### Endpoints
+| Variable | Description |
+|----------|-------------|
+| `MSSQL_PASSWORD` | SQL Server SA password (**required**) |
+| `MSSQL_DATABASE` | Database name (default: `factorymap`) |
+| `JWT_SECRET` | Token signing secret — `openssl rand -hex 32` |
+| `NODE_ENV` | `development` or `production` |
+| `ITSM_MODE` | `mock` (default) or `real` |
+| `SMTP_HOST` | SMTP server for maintenance alert emails |
+| `SMTP_PORT` | SMTP port (default: `587`) |
+| `SMTP_USER` / `SMTP_PASS` | SMTP credentials |
+| `SMTP_FROM` | Sender address (default: `factory-map@company.local`) |
+| `TEAMS_WEBHOOK_URL` | Microsoft Teams incoming webhook URL |
+| `LDAP_ENABLED` | `true` to enable Active Directory login |
+| `REACT_APP_API_URL` | Frontend API base URL (default: `http://localhost:4000/api`) |
 
-#### BuildingsGET    /api/buildings          # List all buildings
-GET    /api/buildings/:id      # Get building by ID
-POST   /api/buildings          # Create building
-PATCH  /api/buildings/:id      # Update building
-DELETE /api/buildings/:id      # Delete building
-
-#### FloorsGET    /api/floors                         # List all floors
-GET    /api/floors?building_id=<id>       # Filter by building
-GET    /api/floors/:id                    # Get floor by ID
-POST   /api/floors                        # Create floor
-PATCH  /api/floors/:id                    # Update floor
-DELETE /api/floors/:id                    # Delete floor
-
-#### AssetsGET    /api/assets             # List all assets
-GET    /api/assets/:id         # Get asset by ID
-POST   /api/assets             # Create asset
-PATCH  /api/assets/:id         # Update asset
-DELETE /api/assets/:id         # Delete asset
-POST   /api/assets/:id/sync    # Sync from ITSM
-
-#### Work Areas, Sections, Workstations
-Similar CRUD patterns as above.
-
-### Example Request
-
-**Create Building:**
-```bashcurl -X POST http://localhost:5000/api/buildings 
--H "Content-Type: application/json" 
--d '{
-"name": "Factory Building C",
-"address": "123 Industrial Ave",
-"metadata": {
-"total_area": 8000,
-"construction_year": 2020
-}
-}'
+See [docs/ADMIN_GUIDE.md](docs/ADMIN_GUIDE.md) for the complete variable reference.
 
 ---
 
-## 💻 Development
+## Running Tests
 
-### Local Development (without Docker)
+```bash
+# Backend — runs all suites sequentially against the Docker MSSQL instance
+docker exec factory-map-backend npm test
 
-#### Backend
-```bashcd backend
-npm install
-npm run dev
+# Frontend
+cd frontend && npm test -- --watchAll=false
+```
 
-#### Frontend
-```bashcd frontend
-npm install
-npm start
-
-#### MongoDB
-```bashInstall MongoDB locally or use MongoDB Atlas
-mongod --dbpath /path/to/data
-
-### Environment Variables
-
-**Backend (.env):**
-```envPORT=5000
-MONGODB_URI=mongodb://mongo:27017/factory_map
-ITSM_MODE=mock
-NODE_ENV=development
-
-**Frontend (.env):**
-```envREACT_APP_API_URL=http://localhost:5000/api
-
-### Database Seeding
-
-Seed with sample data:
-```bashnpm run seed              # Inside backend container
-or
-docker-compose exec backend npm run seed
-
-This creates:
-- 2 Buildings
-- 2 Floors per building
-- 3 Work Areas
-- 4 Sections
-- 15 Workstations
-- 3 Assets (2 ITSM managed, 1 manual)
+Backend tests use `--runInBand --forceExit` to avoid parallel DB conflicts. The `NODE_ENV=test` environment variable is set via a `setupFiles` entry before any module is imported, which prevents the server from binding a port during test runs.
 
 ---
 
-## 🚀 Deployment
+## Documentation
 
-### Production Build
-
-#### Frontend
-```bashcd frontend
-npm run build
-Output: build/ directory
-
-#### Backend
-```bashcd backend
-npm run build
-Output: dist/ directory
-
-### Docker Production
-```bashBuild production images
-docker-compose -f docker-compose.prod.yml buildStart production containers
-docker-compose -f docker-compose.prod.yml up -d
-
-### Environment Considerations
-- Set `NODE_ENV=production`
-- Use proper MongoDB credentials
-- Enable HTTPS
-- Configure CORS properly
-- Set up monitoring/logging
-
----
-
-## 🧪 Testing
-
-### Run Tests
-```bashBackend tests
-cd backend
-npm testFrontend tests
-cd frontend
-npm test
-
-### Manual Testing Checklist
-- [ ] Create building
-- [ ] Add floors to building
-- [ ] Create assets
-- [ ] Search and filter assets
-- [ ] Edit building/floor/asset
-- [ ] Delete entities
-- [ ] ITSM sync (if real adapter configured)
-- [ ] Navigate between pages
-- [ ] Responsive design on mobile
-
----
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit changes (`git commit -m 'Add amazing feature'`)
-4. Push to branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-### Code Style
-- Use TypeScript strict mode
-- Follow ESLint configuration
-- Use meaningful variable names
-- Write comments for complex logic
-- Keep components small and focused
-
----
-
-## 📝 License
-
-This project is licensed under the MIT License - see LICENSE file for details.
-
----
-
-## 🙏 Acknowledgments
-
-- Built with React, Express, and MongoDB
-- Icons from emoji (temporary - replace with icon library)
-- Inspired by modern asset management systems
-
----
-
-## 📞 Contact
-
-- **Project Link:** https://github.com/kzwsrr0217/factory-map
-- **Issues:** https://github.com/kzwsrr0217/factory-map/issues
-
----
-
-## 📸 Screenshots
-
-### Dashboard
-![Dashboard](docs/screenshots/dashboard.png)
-
-### Building Details
-![Building Details](docs/screenshots/building-details.png)
-
-### Asset Details
-![Asset Details](docs/screenshots/asset-details.png)
-
----
-
-## 🗺️ Roadmap
-
-- [ ] **Map Component** - Interactive SVG floor plans
-- [ ] **File Upload** - Upload floor plan images
-- [ ] **Advanced Search** - Full-text search
-- [ ] **Reporting** - Export data to Excel/PDF
-- [ ] **User Authentication** - Login system
-- [ ] **Real-time Updates** - WebSocket integration
-- [ ] **Mobile App** - React Native version
-- [ ] **QR Code Scanning** - Asset identification
-- [ ] **Barcode Integration** - Asset tracking
-- [ ] **Notifications** - Email/SMS alerts
-
----
-
-**Made with ❤️ for efficient factory asset management**
+| Document | Contents |
+|----------|----------|
+| [ARCHITECTURE.md](ARCHITECTURE.md) | System diagram, data model, design patterns |
+| [docs/ADMIN_GUIDE.md](docs/ADMIN_GUIDE.md) | Installation, all env vars, user management, backup, production |
+| [docs/DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md) | API reference, code conventions, adding features |
+| [docs/USER_GUIDE.md](docs/USER_GUIDE.md) | End-user walkthrough of every page and feature |

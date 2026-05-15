@@ -1,332 +1,266 @@
-# Factory Map - Architecture Documentation
+# Factory Map — Architecture Documentation
 
-## Overview
+## System Overview
 
-Factory Map is a full-stack TypeScript application designed for hierarchical asset management in factory environments with ITSM integration capabilities.
-
-## System Architecture
-
-### High-Level Architecture
 ```
-┌──────────────────────────────────────────────────────────────┐
-│                         Client Layer                          │
-│  ┌────────────┐  ┌────────────┐  ┌────────────┐             │
-│  │  Browser   │  │   Mobile   │  │   Tablet   │             │
-│  └─────┬──────┘  └─────┬──────┘  └─────┬──────┘             │
-└────────┼───────────────┼───────────────┼────────────────────┘
-         │               │               │
-         └───────────────┴───────────────┘
-                         │
-         ┌───────────────▼────────────────┐
-         │      React Frontend App         │
-         │  (TypeScript + React Router)    │
-         └───────────────┬────────────────┘
-                         │ REST API
-         ┌───────────────▼────────────────┐
-         │    Express Backend API          │
-         │     (TypeScript + Node.js)      │
-         ├─────────────────────────────────┤
-         │    Controllers & Routes         │
-         │    Business Logic Layer         │
-         │    ITSM Adapter Layer          │
-         └───────────────┬────────────────┘
-                         │
-         ┌───────────────▼────────────────┐
-         │        MongoDB Database         │
-         │      (NoSQL Document Store)     │
-         └─────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│                     Browser (React 18 SPA)                        │
+│                                                                    │
+│  AuthContext  → JWT in localStorage → axios interceptor           │
+│  ThemeContext (light/dark, persisted)                             │
+│  ToastContext (app-wide notifications)                            │
+│                                                                    │
+│  Pages: Dashboard | Buildings | FloorDetails | MapView            │
+│         Maintenance | Alerts | Network | UnplacedAssets           │
+│         Reports | AuditLog | Settings | UserManagement            │
+│                                                                    │
+│  socket.io-client → live asset:created / updated / deleted        │
+└──────────────────────────┬───────────────────────────────────────┘
+                           │ HTTP REST + WebSocket (same port)
+                           ▼
+┌──────────────────────────────────────────────────────────────────┐
+│              Node.js / Express Backend  (port 4000)               │
+│                                                                    │
+│  Middleware:  helmet | cors | morgan | express-rate-limit         │
+│  JWT authenticate (all /api/* except /auth)                       │
+│  auditLog middleware wraps POST / PATCH / DELETE                  │
+│                                                                    │
+│  Routes → Controllers → TypeORM Repositories                      │
+│                                                                    │
+│  Services:                                                         │
+│    AlertService  — email (nodemailer) + Teams (webhook fetch)     │
+│    ITSMService   — adapter pattern: MockAdapter | RealAdapter     │
+│    LdapAuthService — optional Active Directory login              │
+│    SyncService   — ITSM → DB reconciliation (create/update/snap) │
+│                                                                    │
+│  Swagger UI at /api/docs  (swagger-jsdoc + swagger-ui-express)   │
+│  node-cron  — 07:00 daily → AlertService.checkAndSend()          │
+│  socket.io  — emits asset:created / updated / deleted             │
+└──────────────────────────┬───────────────────────────────────────┘
+                           │ TDS protocol (TCP 1433)
+                           ▼
+┌──────────────────────────────────────────────────────────────────┐
+│           Microsoft SQL Server 2022 (Docker container)            │
+│           Database: factorymap                                     │
+│                                                                    │
+│  buildings | floors | work_areas | sections | workstations        │
+│  assets | asset_software | asset_connections                      │
+│  alert_config | alert_logs                                        │
+│  users | audit_logs                                               │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
-### Component Diagram
-```
-Frontend Components
-├── Layout
-│   ├── Header (navigation, user info)
-│   ├── Sidebar (menu, navigation)
-│   └── MainLayout (wrapper)
-├── Pages
-│   ├── Dashboard (stats, search, assets list)
-│   ├── Buildings (list, CRUD)
-│   ├── BuildingDetails (floors, assets)
-│   ├── FloorDetails (work areas, map)
-│   └── AssetDetails (full info, ITSM)
-└── Common Components
-    ├── Button, Card, Badge, Modal
-    ├── Input, Textarea, Select
-    ├── Table, SearchBar, FilterButton
-    └── ConfirmDialog
-
-Backend Structure
-├── Routes (API endpoints)
-├── Controllers (request handlers)
-├── Models (Mongoose schemas)
-├── Adapters (ITSM integration)
-└── Scripts (seed, utilities)
-```
+---
 
 ## Data Model
 
-### Entity Relationships
+### Entity hierarchy
+
 ```
-Building (1) ──────< Floor (N)
-                       │
-                       └──────< WorkArea (N)
-                                   │
-                                   └──────< Section (N)
-                                               │
-                                               └──────< Workstation (N)
-                                                           │
-                                                           └──────< Asset (N)
+Building (1)
+  └── Floor (N)
+        └── WorkArea (N)
+              └── Section (N)
+                    └── Workstation (N)
+
+Asset (N) — FK columns reference any level of the hierarchy
+  ├── AssetSoftware (N)    — CASCADE DELETE
+  ├── AssetConnection (N)  — CASCADE DELETE (also removes reverse connection)
+  └── AuditLog entries     — stored via document_id; no FK constraint
+
+AlertConfig (1 row, id = 'global') — email + Teams alert configuration
+AlertLog    (append-only)          — history of every sent alert
+User        (N)                    — local + LDAP-provisioned accounts
 ```
 
-### MongoDB Collections
+### Key entity columns
 
-#### Buildings
-```typescript
-{
-  _id: ObjectId,
-  name: string,
-  address?: string,
-  metadata?: {
-    total_area?: number,
-    construction_year?: number
-  },
-  created_at: Date,
-  updated_at: Date
-}
-```
+#### Asset
 
-#### Assets
-```typescript
-{
-  _id: ObjectId,
-  hierarchy: {
-    building_id: ObjectId,
-    floor_id: ObjectId,
-    workarea_id: ObjectId,
-    section_id: ObjectId,
-    workstation_id: ObjectId
-  },
-  itsm: {
-    hardware_id: string | null,
-    is_managed: boolean,
-    last_synced: Date | null,
-    sync_status: 'success' | 'failed' | 'never'
-  },
-  basic_info: {
-    display_name: string,
-    manufacturer?: string,
-    model?: string,
-    serial_number?: string,
-    // ...
-  },
-  // ...
-}
-```
+| Group | Columns |
+|-------|---------|
+| Identity | `id` (UUID), `display_name`, `asset_tag`, `serial_number` |
+| Type / status | `asset_type`, `status` (`active` / `maintenance` / `inactive` / `retired`) |
+| Hardware | `manufacturer`, `model`, `cpu`, `ram`, `storage`, `gpu`, `mac_address` |
+| Network | `ip_address`, `hostname`, `vlan`, `switch_port`, `dhcp_static` |
+| OS | `os_type`, `os_version` |
+| Location | `building_id`, `floor_id`, `workarea_id`, `section_id`, `workstation_id`, `loc_x`, `loc_y`, `loc_rotation`, `loc_icon_type`, `loc_history` (JSON) |
+| Person | `person_id`, `person_full_name` |
+| ITSM | `itsm_guid`, `hardware_asset_id`, `source_of_truth` (`local` / `itsm`), `sync_status`, `itsm_snapshot` |
+| Maintenance | `maint_last_date`, `maint_next_date`, `maint_interval_days`, `maint_notes` |
+| Operational | `remote_access_tool`, `backup_tool`, `backup_status`, `fortiedr_active`, `winupdate_date` |
+| Custom | `environment`, `notes`, `tags` (JSON), `object_id`, `serial_object` |
+| Work items | `work_items` (JSON array: `{id, description, done, priority, created_at}`) |
+| Lifecycle | `predecessor_id`, `successor_id` — replacement chain |
+
+#### AssetConnection
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | UUID | |
+| `asset_id` | UUID FK | Source asset |
+| `connected_asset_id` | UUID FK | Target asset |
+| `connection_type` | string | `Ethernet`, `WiFi`, `USB`, `Fiber`, etc. |
+| `label` | string | Short description |
+| `bidirectional` | bool | Whether the reverse connection also exists |
+| `strength` | int | Signal/link strength (1–5) |
+| `patch_panel_name/port` | string | Patch panel routing |
+| `switch_name/port` | string | Switch routing |
+
+#### AlertConfig
+
+Single-row table (id = `'global'`):
+
+| Column | Notes |
+|--------|-------|
+| `email_enabled`, `email_recipients` | Comma-separated list of recipient addresses |
+| `teams_enabled`, `teams_webhook_url` | Teams incoming webhook |
+| `days_before_alert` | Alert N days before `maint_next_date` (default 7) |
+| `alert_on_maintenance`, `alert_on_overdue` | Which conditions trigger an alert |
+
+---
 
 ## Design Patterns
 
-### 1. Adapter Pattern (ITSM Integration)
+### 1. Adapter Pattern — ITSM integration
 
-**Purpose:** Abstract ITSM system differences
+`ITSMService` is a singleton that picks `MockITSMAdapter` or `RealITSMAdapter` at startup based on `ITSM_MODE`. All callers depend only on the `IITSMAdapter` interface.
+
 ```typescript
-// Interface
-interface ITSMAdapter {
-  searchHardware(query: string): Promise<Hardware[]>;
-  getHardwareDetails(id: string): Promise<HardwareDetails>;
-  syncAsset(assetId: string): Promise<SyncResult>;
-}
-
-// Implementations
-class MockITSMAdapter implements ITSMAdapter { /* ... */ }
-class ServiceNowAdapter implements ITSMAdapter { /* ... */ }
-
-// Usage
-const adapter = getAdapter(config.itsm.mode);
-```
-
-### 2. Service Layer Pattern
-
-**Purpose:** Separate business logic from routes
-```typescript
-// Service
-export const hierarchyService = {
-  getBuildings: () => api.get('/buildings'),
-  createBuilding: (data) => api.post('/buildings', data),
-  // ...
-};
-
-// Component
-const buildings = await hierarchyService.getBuildings();
-```
-
-### 3. Component Composition
-
-**Purpose:** Reusable UI components
-```typescript
-<Modal title="Delete Building">
-  <ConfirmDialog
-    message="Are you sure?"
-    onConfirm={handleDelete}
-  />
-</Modal>
-```
-
-## API Design
-
-### RESTful Principles
-
-- Use HTTP methods semantically (GET, POST, PATCH, DELETE)
-- Resource-based URLs
-- Consistent response format
-- Proper status codes
-
-### Response Format
-```typescript
-// Success
-{
-  success: true,
-  data: { /* ... */ }
-}
-
-// Error
-{
-  success: false,
-  error: "Error message"
+// backend/src/services/itsm/IITSMAdapter.ts
+interface IITSMAdapter {
+  searchHardware(query: string): Promise<IITSMHardware[]>;
+  getHardwareById(id: string): Promise<IITSMHardware>;
+  syncAll(): Promise<IITSMSyncResult>;
 }
 ```
 
-## State Management
+### 2. `toApiResponse()` — flat SQL ↔ nested JSON
 
-### Frontend State
+Every entity exposes `toApiResponse()` which maps flat SQL columns to the nested JSON shape the frontend expects. Frontend code never reads raw column names — it always reads the API shape.
+
 ```typescript
-// Component State (useState)
-const [assets, setAssets] = useState<Asset[]>([]);
+// entity stores flat columns:
+asset.ip_address, asset.person_full_name, asset.maint_next_date
 
-// URL State (React Router)
-const { id } = useParams();
-
-// Form State
-const [formData, setFormData] = useState({ /* ... */ });
+// toApiResponse() reconstructs:
+{ network: { ip_address }, assigned_person: { full_name }, maintenance: { next_date } }
 ```
 
-### Data Flow
+### 3. Response envelope
+
+All endpoints return `{ success: boolean, data: ... }` on success and `{ success: false, error: string }` on failure.
+
+### 4. Audit middleware chain
+
 ```
-User Action → Event Handler → API Call → Update State → Re-render
-```
-
-## Security Considerations
-
-### Current Implementation
-- Input validation (TypeScript types)
-- MongoDB injection prevention (Mongoose)
-- CORS configuration
-- Environment variables for secrets
-
-### Future Enhancements
-- [ ] Authentication (JWT)
-- [ ] Authorization (RBAC)
-- [ ] API rate limiting
-- [ ] Input sanitization
-- [ ] HTTPS enforcement
-
-## Performance Optimizations
-
-### Implemented
-- MongoDB indexing
-- CSS modules (scoped styles)
-- Lazy loading (React.lazy)
-- Efficient re-renders (React.memo)
-
-### Future
-- [ ] Redis caching
-- [ ] CDN for static assets
-- [ ] Database query optimization
-- [ ] Image compression
-- [ ] Code splitting
-
-## Scalability
-
-### Horizontal Scaling
-- Stateless backend (easy to replicate)
-- MongoDB sharding support
-- Load balancer ready
-
-### Vertical Scaling
-- Node.js cluster mode
-- MongoDB replica sets
-- Efficient queries
-
-## Monitoring & Logging
-
-### Current
-- Console logging
-- Docker logs
-
-### Recommended
-- Winston/Pino for structured logging
-- Application Performance Monitoring (APM)
-- Error tracking (Sentry)
-- Health check endpoints
-
-## Testing Strategy
-
-### Unit Tests
-- Components (Jest + React Testing Library)
-- Services (Jest)
-- Controllers (Jest + Supertest)
-
-### Integration Tests
-- API endpoints
-- Database operations
-
-### E2E Tests
-- Critical user flows (Cypress/Playwright)
-
-## Deployment Architecture
-
-### Development
-```
-Docker Compose → Local containers
+POST/PATCH/DELETE request
+  → captureAuditBefore(Entity)   — snapshots the pre-change row
+  → controller handler           — mutates + saves the entity
+  → auditLog('entity_type')      — wraps res.json; writes AuditLog row with diff on response finish
 ```
 
-### Production (Recommended)
+### 5. Global search — client-side inverted index
+
+`searchIndex.ts` builds a prefix-token inverted index over all loaded assets on the client. `GlobalSearch.tsx` (Ctrl+K) queries this index — no server round-trip after initial load.
+
+### 6. Custom DOM event bus
+
+`Header.tsx` dispatches `new CustomEvent('app:new-asset')` on Ctrl+N. `Dashboard.tsx` listens for this event and opens the asset creation modal. This avoids threading state or callbacks through the component tree.
+
+---
+
+## Authentication & Authorization
+
+### JWT flow
+
+1. `POST /api/auth/login` → returns `{ token, user }`
+2. Token stored in `localStorage`; axios interceptor attaches `Authorization: Bearer <token>` on every request
+3. Token lifetime: **8 hours**; auto-refreshed at 75% of lifetime by `AuthContext` timer
+4. Axios interceptor also proactively calls `POST /api/auth/refresh` if the token expires within 5 minutes (deduplicated via `refreshPromise`)
+5. On 401 → clear storage → redirect to `/login`
+
+### Roles
+
+| Role | Capabilities |
+|------|-------------|
+| `viewer` | Read-only: browse assets, maps, audit log, reports |
+| `operator` | viewer + create/edit assets, connections, floor plans, hierarchy |
+| `admin` | operator + user management, delete buildings/floors, alert config |
+
+### Optional LDAP
+
+`LdapAuthService` binds to the configured LDAP server, searches for the user, then verifies credentials with a second bind. On first login the user is auto-provisioned in `users` with `role = LDAP_DEFAULT_ROLE`.
+
+---
+
+## Maintenance Alerts
+
+`AlertService.checkAndSend()` is called by node-cron at **07:00 every day**. It:
+
+1. Fetches the `AlertConfig` row (or creates a default one)
+2. Queries assets where `maint_next_date` is overdue or within `days_before_alert` days
+3. If `email_enabled`: sends a single email via nodemailer listing all affected assets
+4. If `teams_enabled`: POSTs an Adaptive Card JSON payload to the Teams webhook URL
+5. Writes an `AlertLog` row for each channel (success/failure + body snippet)
+
+Admins can trigger an immediate check via `POST /api/alerts/test` or configure all settings at `/alerts` in the UI.
+
+---
+
+## Real-Time Updates
+
+Socket.io is mounted on the same HTTP server as Express. Asset controllers emit events after each mutation:
+
+```typescript
+io.emit('asset:created', asset.toApiResponse());
+io.emit('asset:updated', asset.toApiResponse());
+io.emit('asset:deleted', { _id: req.params.id });
 ```
-Frontend → Vercel/Netlify
-Backend → AWS ECS / Google Cloud Run
-Database → MongoDB Atlas
+
+Frontend components subscribe via `useSocket(event, handler)`, a shared module-level singleton that ensures only one socket connection exists per browser tab.
+
+---
+
+## API Documentation
+
+Interactive Swagger UI is available at **`http://localhost:4000/api/docs`** (or `/api/docs.json` for the raw OpenAPI spec). All endpoints require Bearer auth except `/api/auth/*`. The spec is generated from `@swagger` JSDoc annotations in route and controller files by `swagger-jsdoc`.
+
+---
+
+## Testing
+
+### Backend
+
+- **Framework**: Jest + Supertest
+- **Test suites**: `auth.test.ts`, `assets.test.ts`, `buildings.test.ts`, `itsm.test.ts`
+- **DB**: tests run against the same Docker MSSQL instance; suites truncate relevant tables in `beforeAll`
+- **Isolation**: `--runInBand` (sequential) prevents cross-suite DB state conflicts
+- **Port conflict prevention**: `NODE_ENV=test` is set via `setupFiles` (before any module import) so `server.ts` skips `startServer()` during tests
+
+```bash
+docker exec factory-map-backend npm test
+# script: jest --runInBand --forceExit --passWithNoTests
 ```
 
-## Technology Decisions
+### Frontend
 
-### Why TypeScript?
-- Type safety
-- Better IDE support
-- Fewer runtime errors
-- Self-documenting code
+- **Framework**: React Testing Library + MSW (Mock Service Worker) for API mocking
+- **Test suites**: `GlobalSearch.test.tsx`, `AssetFormModal.test.tsx`, `Login.test.tsx`
+- **MSW handlers**: `src/mocks/handlers.ts` + `src/mocks/server.ts`
 
-### Why MongoDB?
-- Flexible schema
-- Easy to evolve
-- Good for hierarchical data
-- Horizontal scaling
+```bash
+cd frontend && npm test -- --watchAll=false
+```
 
-### Why React?
-- Component-based
-- Large ecosystem
-- Virtual DOM performance
-- Wide adoption
+---
 
-### Why Docker?
-- Consistent environments
-- Easy setup
-- Portable
-- Production-ready
+## Security Headers
 
-## Future Architectural Improvements
+`helmet` sets automatically:
+- `X-Frame-Options: DENY`
+- `X-Content-Type-Options: nosniff`
+- `Strict-Transport-Security` (in production)
+- `Content-Security-Policy`
 
-1. **Microservices** - Split backend into services
-2. **Event-Driven** - WebSocket real-time updates
-3. **GraphQL** - More flexible API
-4. **Caching Layer** - Redis for performance
-5. **Message Queue** - RabbitMQ for async tasks
+Login is rate-limited: **20 requests / 15 minutes per IP** via `express-rate-limit`. Account lockout kicks in after **5 failed login attempts** (30-minute lockout).

@@ -1,3 +1,18 @@
+/**
+ * AdvancedFilter.tsx — Multi-field filter panel for the asset list.
+ *
+ * Opened from the filter bar on the Assets/FloorDetails page. Users can
+ * combine up to 11 independent criteria:
+ *   Text fields  — assetName, manufacturer, model, serialNumber, assetTag,
+ *                  assignedPerson
+ *   Dropdowns    — status, itsmManaged (all/itsm/manual), buildingId, floorId,
+ *                  workareaId
+ *
+ * The parent receives the composed `FilterCriteria` object via `onApply` and
+ * is responsible for filtering the asset array. "Clear" resets all fields to
+ * empty/undefined. `currentFilters` is used to pre-populate the form when
+ * reopened so active filters persist across open/close cycles.
+ */
 import React, { useState } from 'react';
 import Modal from '../common/Modal';
 import Button from '../common/Button';

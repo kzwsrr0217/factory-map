@@ -1,9 +1,17 @@
+/**
+ * WorkstationFormModal.tsx — Create / edit form for workstations within a section.
+ *
+ * Fields: name (required), type (Select: desk / machine / rack / kiosk /
+ * server / other), position_x, position_y (optional physical coordinates on
+ * the floor plan), and rotation (0–360°). Requires `sectionId`.
+ */
 import React, { useState, useEffect } from 'react';
 import Modal from '../common/Modal';
 import Button from '../common/Button';
 import Input from '../common/Input';
 import Select from '../common/Select';
 import { workstationService, Workstation } from '../../services/workstation.service';
+import { useToast } from '../../contexts/ToastContext';
 import styles from '../../styles/components/WorkstationFormModal.module.css';
 
 interface WorkstationFormModalProps {
@@ -28,6 +36,7 @@ const WorkstationFormModal: React.FC<WorkstationFormModalProps> = ({
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
+  const toast = useToast();
 
   useEffect(() => {
     if (workstation) {
@@ -79,11 +88,9 @@ const WorkstationFormModal: React.FC<WorkstationFormModalProps> = ({
 
       onSuccess();
       onClose();
-    } catch (error: any) {
-      console.error('Error saving workstation:', error);
-      const errorMessage =
-        error.response?.data?.error || 'Failed to save workstation. Please try again.';
-      alert(errorMessage);
+    } catch (err: any) {
+      console.error('Error saving workstation:', err);
+      toast.error(err.response?.data?.error || 'Failed to save workstation. Please try again.');
     } finally {
       setSubmitting(false);
     }
@@ -150,7 +157,7 @@ const WorkstationFormModal: React.FC<WorkstationFormModalProps> = ({
         </div>
 
         <div className={styles.note}>
-          <p>💡 Position this workstation on the floor plan in the Map View</p>
+          <p>Position this workstation on the floor plan in the Map View after creating it.</p>
         </div>
       </div>
     </Modal>

@@ -1,3 +1,13 @@
+/**
+ * variables.css — Legacy CSS custom properties (superseded by theme.css).
+ *
+ * This file was the original token file. theme.css now takes precedence and
+ * defines a more complete set including dark-mode overrides. These rules are
+ * kept for backwards compatibility with older component files that may
+ * reference the variables defined here.
+ *
+ * Prefer adding new tokens to theme.css rather than this file.
+ */
 :root {
   /* Light mode colors */
   --color-primary: #7c3aed;

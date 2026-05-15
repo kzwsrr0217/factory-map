@@ -1,3 +1,13 @@
+/**
+ * Table.tsx — Generic data table with typed columns and optional row click.
+ *
+ * Columns are defined as `{ key, title, render? }`. If `render` is omitted,
+ * the raw value at `record[key]` is displayed. When `onRowClick` is provided
+ * rows get a pointer cursor and call the handler on click.
+ *
+ * Shows a centred spinner when `loading` is true. `T` must extend
+ * `{ _id?: string }` so React keys can be inferred automatically.
+ */
 import React from 'react';
 import styles from '../../styles/components/Table.module.css';
 

@@ -97,3 +97,328 @@
   color: var(--color-gray-600);
   margin: var(--spacing-xs) 0 0 0;
 }
+
+.sectionHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.sectionActions {
+  display: flex;
+  gap: 10px;
+}
+
+.connectionsList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+.connectionItem {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-gray-50);
+}
+
+.connectionTypeDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.connectionInfo {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.connectionType {
+  display: inline-block;
+  padding: 2px 8px;
+  background: var(--color-primary);
+  color: var(--color-white);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.connectionPeer {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  font-weight: var(--font-weight-medium);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.connectionLabel {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  background: var(--color-gray-100);
+  padding: 1px 6px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.connectionDescription {
+  color: var(--color-gray-700);
+  font-size: var(--font-size-sm);
+  margin: var(--spacing-xs) 0 0 0;
+}
+
+.connectionMeta {
+  display: flex;
+  gap: var(--spacing-sm);
+  align-items: center;
+}
+
+.softwareList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.softwareItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--spacing-sm) 0;
+  border-bottom: 1px solid var(--color-gray-100);
+}
+
+.softwareItem:last-child { border-bottom: none; }
+
+.softwareName {
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+}
+
+.softwareMeta {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+.softwareVersion {
+  font-family: monospace;
+  background: var(--color-gray-100);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+}
+
+.noConnections {
+  text-align: center;
+  color: var(--color-gray-500);
+  font-style: italic;
+  margin: var(--spacing-xl) 0;
+}
+
+.personItsmId {
+  font-size: var(--font-size-xs);
+  color: var(--color-gray-500);
+  margin: var(--spacing-xs) 0 0 0;
+  font-family: monospace;
+}
+
+.itsmGuid {
+  font-family: monospace;
+  font-size: var(--font-size-xs);
+  color: var(--color-gray-600);
+  word-break: break-all;
+  margin: 0;
+}
+
+.monoValue {
+  font-family: monospace;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  margin: 0;
+  font-weight: var(--font-weight-medium);
+}
+
+.lifecycleLink {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.lifecycleSuccessor {
+  color: var(--color-warning, #f59e0b);
+  font-weight: var(--font-weight-medium);
+}
+
+/* Conflict visualization */
+.conflictCard {
+  border: 1px solid var(--color-warning, #f59e0b) !important;
+  background: rgba(245, 158, 11, 0.04) !important;
+}
+
+.conflictDescription {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  margin: 0 0 var(--spacing-xs) 0;
+}
+
+.conflictSyncTime {
+  font-size: var(--font-size-xs);
+  color: var(--color-gray-500);
+  margin: 0 0 var(--spacing-md) 0;
+}
+
+.conflictTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-size-sm);
+  margin-top: var(--spacing-md);
+}
+
+.conflictTable th {
+  text-align: left;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-gray-600);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.conflictTable td {
+  padding: var(--spacing-xs) var(--spacing-sm);
+  border-bottom: 1px solid var(--color-gray-100);
+  vertical-align: top;
+}
+
+.conflictTable tr:last-child td {
+  border-bottom: none;
+}
+
+.conflictFieldLabel {
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  width: 140px;
+}
+
+.conflictValueLocal {
+  color: var(--color-gray-600);
+  max-width: 200px;
+  word-break: break-word;
+}
+
+.conflictValueItsm {
+  color: var(--color-success, #16a34a);
+  font-weight: var(--font-weight-medium);
+  max-width: 200px;
+  word-break: break-word;
+}
+
+.conflictRowChanged .conflictValueLocal {
+  text-decoration: line-through;
+  opacity: 0.7;
+}
+
+.conflictEmpty {
+  color: var(--color-gray-400);
+  font-style: italic;
+}
+
+/* History */
+.historyList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+.historyEntry {
+  padding: var(--spacing-sm) 0;
+  border-bottom: 1px solid var(--color-gray-100);
+}
+
+.historyEntry:last-child {
+  border-bottom: none;
+}
+
+.historyMeta {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  margin-bottom: var(--spacing-xs);
+  flex-wrap: wrap;
+}
+
+.historyTime {
+  font-size: var(--font-size-xs);
+  color: var(--color-gray-500);
+}
+
+.historyUser {
+  font-size: var(--font-size-xs);
+  color: var(--color-gray-600);
+  font-weight: var(--font-weight-medium);
+}
+
+.historyChanges {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-left: var(--spacing-md);
+}
+
+.historyChange {
+  display: flex;
+  align-items: baseline;
+  gap: var(--spacing-xs);
+  font-size: var(--font-size-xs);
+  flex-wrap: wrap;
+}
+
+.historyField {
+  font-weight: var(--font-weight-medium);
+  color: var(--color-gray-700);
+  font-family: monospace;
+  flex-shrink: 0;
+}
+
+.historyOld {
+  color: var(--color-gray-500);
+  text-decoration: line-through;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.historyArrow {
+  color: var(--color-gray-400);
+  flex-shrink: 0;
+}
+
+.historyNew {
+  color: var(--color-text-primary);
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.historyMore {
+  font-size: var(--font-size-xs);
+  color: var(--color-gray-500);
+  font-style: italic;
+  margin: var(--spacing-xs) 0 0 0;
+}

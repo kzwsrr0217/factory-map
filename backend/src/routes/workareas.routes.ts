@@ -1,3 +1,7 @@
+/**
+ * workareas.routes.ts — REST routes for the WorkArea resource.
+ * Mounted at /api/workareas. Supports ?floor_id= query filter on GET /.
+ */
 import { Router } from 'express';
 import {
   getAllWorkAreas,

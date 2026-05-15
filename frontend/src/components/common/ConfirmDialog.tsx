@@ -1,3 +1,13 @@
+/**
+ * ConfirmDialog.tsx — Two-button confirmation modal built on top of Modal.
+ *
+ * Used before all destructive operations (delete building, remove connection,
+ * deactivate user, etc.). Renders the confirm button with the specified
+ * `variant` (defaults to 'danger') and disables both buttons while `loading`.
+ *
+ * Props match what every call-site needs: title, message, custom button labels,
+ * variant override, and a loading flag to show a spinner on the confirm button.
+ */
 import React from 'react';
 import Modal from './Modal';
 import Button from './Button';

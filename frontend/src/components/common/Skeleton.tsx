@@ -1,3 +1,16 @@
+/**
+ * Skeleton.tsx — Loading placeholder animations.
+ *
+ * Base `Skeleton` component renders a single animated placeholder block.
+ * Three pre-built composite layouts are also exported:
+ *
+ *   CardSkeleton   — thumbnail + three text lines (used on Buildings/Floors).
+ *   ListSkeleton   — N avatar + two-line rows (used on asset tables).
+ *   TableSkeleton  — grid of M rows × N columns (used on generic data tables).
+ *
+ * Variants: text (default, slight border-radius) | circular | rectangular
+ * Animations: pulse (opacity fade) | wave (shimmer sweep) | none
+ */
 import React from 'react';
 import styles from '../../styles/components/Skeleton.module.css';
 

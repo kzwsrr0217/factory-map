@@ -1,61 +1,106 @@
 .sidebar {
-  width: 240px;
-  background: var(--color-white);
-  border-right: 1px solid var(--color-gray-200);
-  transition: all var(--transition-base);
+  width: 220px;
+  background: var(--color-bg-primary);
+  border-right: 1px solid var(--color-border);
   display: flex;
   flex-direction: column;
   height: 100%;
+  flex-shrink: 0;
+  transition: width 0.2s ease;
+  overflow: hidden;
 }
 
 .sidebar.closed {
-  width: 64px;
+  width: 52px;
 }
 
 .nav {
-  padding: var(--spacing-md);
+  padding: var(--spacing-sm);
   display: flex;
   flex-direction: column;
-  gap: var(--spacing-xs);
+  gap: 2px;
 }
 
 .navItem {
   display: flex;
   align-items: center;
-  gap: var(--spacing-md);
-  padding: var(--spacing-md);
+  gap: var(--spacing-sm);
+  padding: 0.5rem 0.625rem;
   border-radius: var(--radius-md);
-  color: var(--color-gray-700);
+  color: var(--color-text-secondary);
   text-decoration: none;
-  font-weight: var(--font-weight-medium);
-  transition: all var(--transition-base);
+  font-size: 0.9375rem;
+  font-weight: 500;
+  transition: all 0.15s;
   white-space: nowrap;
+  min-height: 38px;
 }
 
 .navItem:hover {
-  background: var(--color-gray-100);
-  color: var(--color-gray-900);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-primary);
 }
 
 .navItem.active {
-  background: var(--color-primary);
-  color: var(--color-white);
+  background: rgba(59, 130, 246, 0.1);
+  color: var(--color-primary);
 }
 
 .navItem.active:hover {
-  background: var(--color-primary-dark);
+  background: rgba(59, 130, 246, 0.15);
 }
 
 .icon {
-  font-size: var(--font-size-xl);
   flex-shrink: 0;
+  width: 18px;
+  height: 18px;
 }
 
+/* Collapsed state — hide label, centre icon */
 .sidebar.closed .label {
   display: none;
 }
 
 .sidebar.closed .navItem {
   justify-content: center;
-  padding: var(--spacing-md) var(--spacing-sm);
+  padding: 0.5rem;
+}
+
+.navItemInner {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  flex: 1;
+  min-width: 0;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: #ef4444;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.sidebar.closed .badge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  min-width: 14px;
+  height: 14px;
+  font-size: 9px;
+  padding: 0 3px;
+}
+
+.sidebar.closed .navItem {
+  position: relative;
 }

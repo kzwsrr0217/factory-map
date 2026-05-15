@@ -1,3 +1,19 @@
+/**
+ * ErrorBoundary.tsx — React class-component error boundary.
+ *
+ * Catches unhandled render-phase errors anywhere in the wrapped subtree and
+ * shows a friendly "Something went wrong" UI instead of a blank screen.
+ *
+ * Props:
+ *   children  — The component subtree to protect.
+ *   fallback  — Optional custom fallback node; if omitted the built-in error
+ *               card is shown.
+ *
+ * In development (`NODE_ENV === 'development'`) a collapsible `<details>`
+ * block renders the raw error message and component stack to aid debugging.
+ * The "Try Again" button resets the error state without a full page reload;
+ * "Reload Page" triggers `window.location.reload()` as a last resort.
+ */
 import React, { Component, ReactNode } from 'react';
 import Card from './Card';
 import Button from './Button';

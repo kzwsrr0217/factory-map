@@ -1,3 +1,12 @@
+/**
+ * hierarchy.service.ts — API calls for the Building entity.
+ *
+ * Buildings are the top level of the location hierarchy. Deleting a building
+ * will be blocked by the backend if any assets are still assigned to it.
+ *
+ * Note: floors are in floor.service.ts, work areas in workarea.service.ts,
+ * sections in section.service.ts, and workstations in workstation.service.ts.
+ */
 import api from './api';
 
 export interface Building {

@@ -1,8 +1,30 @@
+/**
+ * FloorDetails.tsx — Interactive floor page ("/floors/:id").
+ *
+ * The primary page for floor-level asset management. Composes:
+ *   FloorMap        — the SVG canvas showing work areas and placed assets.
+ *   Asset panel     — right-side list of all assets on this floor (placed and
+ *                     unplaced), with filter/search and inline actions.
+ *   Work area tools — create/rename/delete work areas directly on the canvas.
+ *   Asset placement — click a canvas cell in deploy mode to open AssetFormModal
+ *                     pre-populated with the clicked grid coordinates.
+ *   CSV import      — CsvImportModal bulk-creates assets on this floor.
+ *   Floor plan      — FloorPlanUploadModal replaces the background SVG/image.
+ *
+ * Coordinate persistence: after each drag-end, `onAssetMove` or
+ * `onWorkareaMove` calls the respective service PATCH, then reloads the data.
+ * Connection wiring mode is toggled from the toolbar and uses
+ * FloorMap's `connectionMode` + `selectedAssetsForConnection` props.
+ */
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { LayoutGrid, Monitor, Factory, Upload, Pencil, Check, AlertTriangle, FileSpreadsheet, Cable, X } from 'lucide-react';
+import CsvImportModal from '../components/asset/CsvImportModal';
+import AddConnectionModal from '../components/asset/AddConnectionModal';
 import Card from '../components/common/Card';
 import Button from '../components/common/Button';
 import Badge from '../components/common/Badge';
+import Breadcrumb from '../components/common/Breadcrumb';
 import ConfirmDialog from '../components/common/ConfirmDialog';
 import WorkAreaFormModal from '../components/workarea/WorkAreaFormModal';
 import WorkAreaDetailsModal from '../components/workarea/WorkAreaDetailsModal';
@@ -14,6 +36,7 @@ import { workareaService, WorkArea } from '../services/workarea.service';
 import { assetService, Asset } from '../services/asset.service';
 import { sectionService, Section } from '../services/section.service';
 import { workstationService, Workstation } from '../services/workstation.service';
+import { useToast } from '../contexts/ToastContext';
 import styles from '../styles/pages/FloorDetails.module.css';
 
 const FloorDetails: React.FC = () => {
@@ -26,7 +49,12 @@ const FloorDetails: React.FC = () => {
   const [workstations, setWorkstations] = useState<Workstation[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [editMode, setEditMode] = useState(false);
+  const [wireMode, setWireMode] = useState(false);
+  const [selectedForConnection, setSelectedForConnection] = useState<string[]>([]);
+  const [addConnectionOpen, setAddConnectionOpen] = useState(false);
+  const toast = useToast();
   
   // Modal states
   const [floorFormOpen, setFloorFormOpen] = useState(false);
@@ -35,6 +63,7 @@ const FloorDetails: React.FC = () => {
   const [workareaDetailsOpen, setWorkareaDetailsOpen] = useState(false);
   const [selectedWorkarea, setSelectedWorkarea] = useState<WorkArea | null>(null);
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
+  const [csvImportOpen, setCsvImportOpen] = useState(false);
   const [editingWorkarea, setEditingWorkarea] = useState<WorkArea | null>(null);
   const [deletingWorkarea, setDeletingWorkarea] = useState<WorkArea | null>(null);
   const [deleteWorkareaDialogOpen, setDeleteWorkareaDialogOpen] = useState(false);
@@ -80,8 +109,9 @@ const FloorDetails: React.FC = () => {
         (asset) => asset.hierarchy.floor_id === floorId
       );
       setAssets(floorAssets);
-    } catch (error) {
-      console.error('Error loading floor details:', error);
+    } catch (err) {
+      console.error('Error loading floor details:', err);
+      setError('Failed to load floor details. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -94,15 +124,11 @@ const FloorDetails: React.FC = () => {
 
   const handleDeleteFloor = () => {
     if (workareas.length > 0) {
-      alert(
-        `Cannot delete floor with ${workareas.length} work area(s). Please remove work areas first.`
-      );
+      toast.error(`Cannot delete floor with ${workareas.length} work area(s). Please remove work areas first.`);
       return;
     }
     if (assets.length > 0) {
-      alert(
-        `Cannot delete floor with ${assets.length} asset(s). Please remove or reassign assets first.`
-      );
+      toast.error(`Cannot delete floor with ${assets.length} asset(s). Please remove or reassign assets first.`);
       return;
     }
     setDeleteFloorDialogOpen(true);
@@ -115,9 +141,9 @@ const FloorDetails: React.FC = () => {
     try {
       await floorService.deleteFloor(floor._id);
       navigate(`/buildings/${floor.building_id}`);
-    } catch (error) {
-      console.error('Error deleting floor:', error);
-      alert('Failed to delete floor. Please try again.');
+    } catch (err) {
+      console.error('Error deleting floor:', err);
+      toast.error('Failed to delete floor. Please try again.');
     } finally {
       setDeleting(false);
       setDeleteFloorDialogOpen(false);
@@ -157,9 +183,9 @@ const FloorDetails: React.FC = () => {
       if (id) {
         loadFloorDetails(id);
       }
-    } catch (error) {
-      console.error('Error deleting work area:', error);
-      alert('Failed to delete work area. Please try again.');
+    } catch (err) {
+      console.error('Error deleting work area:', err);
+      toast.error('Failed to delete work area. Please try again.');
     } finally {
       setDeleting(false);
       setDeleteWorkareaDialogOpen(false);
@@ -178,6 +204,47 @@ const FloorDetails: React.FC = () => {
       loadFloorDetails(id);
     }
   };
+
+  const handlePlaceUnplacedAsset = useCallback(async (assetId: string, x: number, y: number) => {
+    const asset = assets.find(a => a._id === assetId);
+    if (!asset) return;
+
+    const snappedWorkarea = workareas.find(wa => {
+      const waX = wa.coordinates?.x ?? 0;
+      const waY = wa.coordinates?.y ?? 0;
+      const waW = wa.dimensions?.width ?? 150;
+      const waH = wa.dimensions?.height ?? 100;
+      return x >= waX && x <= waX + waW && y >= waY && y <= waY + waH;
+    }) ?? null;
+
+    setAssets(prev => prev.map(a =>
+      a._id === assetId
+        ? {
+            ...a,
+            location: { ...a.location, coordinates: { x, y } },
+            hierarchy: {
+              ...a.hierarchy,
+              workarea_id: snappedWorkarea ? snappedWorkarea._id : a.hierarchy.workarea_id,
+            },
+          }
+        : a
+    ));
+    try {
+      await assetService.updateAsset(assetId, {
+        location: { ...asset.location, coordinates: { x, y }, icon_type: asset.location.icon_type || 'computer' },
+        hierarchy: {
+          ...asset.hierarchy,
+          workarea_id: snappedWorkarea ? snappedWorkarea._id : asset.hierarchy.workarea_id,
+        },
+      });
+      const suffix = snappedWorkarea ? ` → ${snappedWorkarea.name}` : '';
+      toast.success(`${asset.basic_info.display_name} placed on map${suffix}`);
+    } catch (error) {
+      console.error('Error placing asset:', error);
+      toast.error('Failed to place asset.');
+      if (id) loadFloorDetails(id);
+    }
+  }, [assets, workareas, id, toast]);
 
   // Map handlers with debounce
   const handleWorkareaMove = useCallback((workareaId: string, x: number, y: number) => {
@@ -273,6 +340,25 @@ const FloorDetails: React.FC = () => {
     navigate(`/assets/${asset._id}`);
   };
 
+  const handleAssetSelectForConnection = (assetId: string) => {
+    setSelectedForConnection(prev => {
+      // Deselect if already chosen
+      if (prev.includes(assetId)) return prev.filter(id => id !== assetId);
+      const next = [...prev, assetId];
+      if (next.length === 2) {
+        // Open modal after state update
+        setTimeout(() => setAddConnectionOpen(true), 0);
+      }
+      return next;
+    });
+  };
+
+  const handleExitWireMode = () => {
+    setWireMode(false);
+    setSelectedForConnection([]);
+    setAddConnectionOpen(false);
+  };
+
   // Get assets in selected workarea
   const getAssetsInWorkarea = (workarea: WorkArea): Asset[] => {
     const waX = workarea.coordinates?.x || 0;
@@ -308,6 +394,20 @@ const FloorDetails: React.FC = () => {
     );
   }
 
+  if (error) {
+    return (
+      <Card padding="lg">
+        <div className={styles.empty}>
+          <AlertTriangle size={32} style={{ color: 'var(--color-danger)', marginBottom: 8 }} />
+          <h3>{error}</h3>
+          <Button variant="outline" onClick={() => id && loadFloorDetails(id)}>
+            Retry
+          </Button>
+        </div>
+      </Card>
+    );
+  }
+
   if (!floor) {
     return (
       <Card padding="lg">
@@ -321,8 +421,17 @@ const FloorDetails: React.FC = () => {
     );
   }
 
+  const placedAssets = assets.filter(a => a.is_placed);
+  const unplacedAssets = assets.filter(a => !a.is_placed);
+
   return (
     <div className={styles.floorDetails}>
+      <Breadcrumb items={[
+        { label: 'Buildings', href: '/buildings' },
+        { label: 'Building', href: `/buildings/${floor.building_id}` },
+        { label: floor.name },
+      ]} />
+
       {/* Header */}
       <div className={styles.header}>
         <Button variant="outline" onClick={() => navigate(-1)}>
@@ -333,7 +442,7 @@ const FloorDetails: React.FC = () => {
       {/* Floor Info Card */}
       <Card padding="lg" className={styles.infoCard}>
         <div className={styles.floorHeader}>
-          <div className={styles.floorIcon}>📐</div>
+          <div className={styles.floorIcon}><LayoutGrid size={28} /></div>
           <div className={styles.floorInfo}>
             <h1 className={styles.floorName}>{floor.name}</h1>
             <p className={styles.floorMeta}>Level: {floor.floor_number}</p>
@@ -390,21 +499,41 @@ const FloorDetails: React.FC = () => {
         <div className={styles.sectionHeader}>
           <h2>Floor Plan</h2>
           <div className={styles.headerActions}>
+            <Button variant="outline" onClick={() => setCsvImportOpen(true)}>
+              <FileSpreadsheet size={15} style={{ marginRight: 6 }} />
+              Import CSV
+            </Button>
             <Button variant="outline" onClick={() => setUploadModalOpen(true)}>
-              📤 {floor.svg_background ? 'Change' : 'Upload'} Background
+              <Upload size={15} style={{ marginRight: 6 }} />
+              {floor.svg_background ? 'Change' : 'Upload'} Background
+            </Button>
+            <Button
+              variant={wireMode ? 'warning' : 'outline'}
+              onClick={() => {
+                if (wireMode) { handleExitWireMode(); }
+                else { setWireMode(true); setEditMode(false); }
+              }}
+            >
+              {wireMode
+                ? <><X size={15} style={{ marginRight: 6 }} />Exit Wire Mode{selectedForConnection.length > 0 ? ` (${selectedForConnection.length}/2)` : ''}</>
+                : <><Cable size={15} style={{ marginRight: 6 }} />Wire Mode</>
+              }
             </Button>
             <Button
               variant={editMode ? 'success' : 'outline'}
               onClick={() => setEditMode(!editMode)}
             >
-              {editMode ? '✓ Done Editing' : '✏️ Edit Mode'}
+              {editMode
+                ? <><Check size={15} style={{ marginRight: 6 }} />Done Editing</>
+                : <><Pencil size={15} style={{ marginRight: 6 }} />Edit Mode</>
+              }
             </Button>
           </div>
         </div>
 
         <FloorMap
           workareas={workareas}
-          assets={assets}
+          assets={placedAssets}
           onWorkareaClick={handleWorkareaClick}
           onAssetClick={handleAssetClick}
           onWorkareaMove={handleWorkareaMove}
@@ -412,6 +541,11 @@ const FloorDetails: React.FC = () => {
           onAssetMove={handleAssetMove}
           editable={editMode}
           backgroundImage={floor.svg_background}
+          unplacedAssets={unplacedAssets}
+          onPlaceUnplaced={handlePlaceUnplacedAsset}
+          connectionMode={wireMode}
+          selectedAssetsForConnection={selectedForConnection}
+          onAssetSelectForConnection={handleAssetSelectForConnection}
         />
       </Card>
 
@@ -437,7 +571,7 @@ const FloorDetails: React.FC = () => {
                   className={styles.workareaItem}
                   onClick={() => handleWorkareaClick(workarea)}
                 >
-                  <div className={styles.workareaIcon}>🏭</div>
+                  <div className={styles.workareaIcon}><Factory size={20} /></div>
                   <div className={styles.workareaInfo}>
                     <h4 className={styles.workareaName}>
                       {workarea.name}
@@ -499,15 +633,15 @@ const FloorDetails: React.FC = () => {
                 className={styles.assetItem}
                 onClick={() => navigate(`/assets/${asset._id}`)}
               >
-                <div className={styles.assetIcon}>💻</div>
+                <div className={styles.assetIcon}><Monitor size={20} /></div>
                 <div className={styles.assetInfo}>
-                  <h4 className={styles.assetName}>{asset.basic_info.display_name}</h4>
+                  <h4 className={styles.assetName}>{asset.basic_info?.display_name}</h4>
                   <p className={styles.assetDetails}>
-                    {asset.basic_info.manufacturer} {asset.basic_info.model}
+                    {asset.basic_info?.manufacturer} {asset.basic_info?.model}
                   </p>
                 </div>
-                <Badge variant={asset.itsm.is_managed ? 'success' : 'neutral'}>
-                  {asset.itsm.is_managed ? 'ITSM' : 'Manual'}
+                <Badge variant={asset.itsm?.is_managed ? 'success' : 'neutral'}>
+                  {asset.itsm?.is_managed ? 'ITSM' : 'Manual'}
                 </Badge>
               </div>
             ))}
@@ -569,6 +703,23 @@ const FloorDetails: React.FC = () => {
         onClose={() => setUploadModalOpen(false)}
         onSuccess={handleUploadSuccess}
         floorId={id || ''}
+      />
+
+      {/* CSV Import Modal */}
+      <CsvImportModal
+        isOpen={csvImportOpen}
+        onClose={() => setCsvImportOpen(false)}
+        onSuccess={() => { setCsvImportOpen(false); if (id) loadFloorDetails(id); }}
+        defaultFloorId={id || ''}
+        defaultBuildingId={floor.building_id}
+      />
+
+      <AddConnectionModal
+        isOpen={addConnectionOpen}
+        onClose={() => { setAddConnectionOpen(false); setSelectedForConnection([]); }}
+        onSuccess={() => { setAddConnectionOpen(false); setSelectedForConnection([]); if (id) loadFloorDetails(id); }}
+        fromAsset={assets.find(a => a._id === selectedForConnection[0]) ?? null}
+        toAsset={assets.find(a => a._id === selectedForConnection[1]) ?? null}
       />
 
       {/* Delete WorkArea Confirmation */}

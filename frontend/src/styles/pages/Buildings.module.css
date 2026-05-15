@@ -34,8 +34,11 @@
 }
 
 .buildingIcon {
-  font-size: 3rem;
   flex-shrink: 0;
+  color: var(--color-primary);
+  display: flex;
+  align-items: flex-start;
+  padding-top: 2px;
 }
 
 .buildingInfo {
@@ -54,37 +57,65 @@
   font-size: var(--font-size-sm);
   color: var(--color-gray-600);
   margin: var(--spacing-xs) 0;
+  display: flex;
+  align-items: center;
 }
 
 .buildingMeta {
   font-size: var(--font-size-sm);
   color: var(--color-gray-600);
   margin: var(--spacing-xs) 0;
-}
-
-.loading {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  padding: var(--spacing-2xl);
-  color: var(--color-gray-500);
 }
 
-.spinner {
-  width: 40px;
-  height: 40px;
-  border: 4px solid var(--color-gray-200);
-  border-top-color: var(--color-primary);
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-  margin-bottom: var(--spacing-md);
+.errorState {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-md) var(--spacing-lg);
+  background: var(--color-danger-light, #fef2f2);
+  border: 1px solid var(--color-danger, #ef4444);
+  border-radius: var(--radius-md);
+  color: var(--color-danger, #ef4444);
+  margin-bottom: var(--spacing-lg);
+  font-size: var(--font-size-sm);
 }
 
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
+.skeleton {
+  background: linear-gradient(90deg, var(--color-gray-200) 25%, var(--color-gray-100) 50%, var(--color-gray-200) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s infinite;
+  border-radius: var(--radius-sm);
+}
+
+.skeletonIcon {
+  width: 48px;
+  height: 48px;
+  flex-shrink: 0;
+  border-radius: var(--radius-md);
+}
+
+.skeletonTitle {
+  height: 20px;
+  width: 60%;
+  margin-bottom: var(--spacing-sm);
+}
+
+.skeletonLine {
+  height: 14px;
+  width: 80%;
+  margin-bottom: var(--spacing-xs);
+}
+
+.skeletonLineShort {
+  height: 14px;
+  width: 50%;
+}
+
+@keyframes shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
 }
 
 .empty {
@@ -97,9 +128,9 @@
 }
 
 .emptyIcon {
-  font-size: 4rem;
   margin-bottom: var(--spacing-lg);
-  opacity: 0.5;
+  opacity: 0.4;
+  color: var(--color-gray-500);
 }
 
 .empty h3 {

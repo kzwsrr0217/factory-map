@@ -3,17 +3,25 @@
  */
 
 export interface IITSMHardware {
+  itsm_guid: string;
   itsm_id: string;
   display_name: string;
   serial_number: string;
   asset_tag: string;
   model: string;
   manufacturer: string;
+  asset_class?: string;
   os_type?: string;
   os_version?: string;
   mac_address?: string;
   status: 'Deployed' | 'In Stock' | 'Maintenance' | 'Retired';
+  itsm_modified_at?: string;
   assigned_to_person?: string;
+  assigned_person_name?: string;
+  organization_itsm_id?: string;
+  organization_name?: string;
+  catalog_item_itsm_id?: string;
+  catalog_item_name?: string;
   installed_software?: string[];
   related_tickets?: string[];
 }
@@ -52,4 +60,15 @@ export interface IITSMSyncResult {
   tickets?: IITSMTicket[];
   synced_at: string;
   error?: string;
+}
+
+export interface ISyncAllResult {
+  total: number;
+  created: number;
+  updated: number;
+  snapshotted: number;
+  skipped: number;
+  errors: Array<{ itsm_guid: string; error: string }>;
+  started_at: Date;
+  completed_at: Date;
 }

@@ -1,6 +1,16 @@
 /**
- * ITSM Service
- * Uses the appropriate adapter based on configuration
+ * ITSMService.ts — Singleton ITSM service that delegates to the active adapter.
+ *
+ * On construction reads `config.itsm.mode` (`ITSM_MODE` env var):
+ *   'mock' → MockITSMAdapter  (default for development; uses in-memory data)
+ *   'real' → RealITSMAdapter  (connects to a live ITSM REST API)
+ *
+ * All public methods are thin pass-throughs to the adapter; call-sites import
+ * the singleton (`import itsmService from './ITSMService'`) and never interact
+ * with the adapter class directly.
+ *
+ * Exported as a default singleton (`new ITSMService()`) so state (mock DB,
+ * HTTP client) is shared across all controller calls within a server process.
  */
 
 import { IITSMAdapter } from './IITSMAdapter';
@@ -48,6 +58,10 @@ class ITSMService {
 
   async syncAsset(hardwareId: string) {
     return this.adapter.syncAsset(hardwareId);
+  }
+
+  async syncAll() {
+    return this.adapter.syncAll();
   }
 
   buildTicketUrl(ticketId: string) {

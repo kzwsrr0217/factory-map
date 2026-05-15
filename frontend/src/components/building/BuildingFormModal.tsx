@@ -1,9 +1,21 @@
+/**
+ * BuildingFormModal.tsx — Create / edit form for buildings.
+ *
+ * Shared for both creation (no `building` prop) and editing (pre-fills fields).
+ * Validates that `name` is non-empty before submit; `total_area` and
+ * `construction_year` are optional numeric fields that are coerced to numbers
+ * before the API call (empty strings are sent as undefined).
+ *
+ * Calls `hierarchyService.createBuilding()` or `.updateBuilding()` depending
+ * on whether an existing building was passed in.
+ */
 import React, { useState, useEffect } from 'react';
 import Modal from '../common/Modal';
 import Button from '../common/Button';
 import Input from '../common/Input';
 import Textarea from '../common/Textarea';
 import { hierarchyService, Building } from '../../services/hierarchy.service';
+import { useToast } from '../../contexts/ToastContext';
 import styles from '../../styles/components/BuildingFormModal.module.css';
 
 interface BuildingFormModalProps {
@@ -27,6 +39,7 @@ const BuildingFormModal: React.FC<BuildingFormModalProps> = ({
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
+  const toast = useToast();
 
   useEffect(() => {
     if (building) {
@@ -92,9 +105,9 @@ const BuildingFormModal: React.FC<BuildingFormModalProps> = ({
 
       onSuccess();
       onClose();
-    } catch (error) {
-      console.error('Error saving building:', error);
-      alert('Failed to save building. Please try again.');
+    } catch (err: any) {
+      console.error('Error saving building:', err);
+      toast.error(err.response?.data?.error || 'Failed to save building. Please try again.');
     } finally {
       setSubmitting(false);
     }

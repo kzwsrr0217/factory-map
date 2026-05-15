@@ -1,8 +1,25 @@
+/**
+ * BuildingDetails.tsx — Detail page for a single building ("/buildings/:id").
+ *
+ * Shows building metadata (address, area, construction year, description) and
+ * a list of its floors as cards. Each floor card shows floor number, asset
+ * count, and a link to FloorDetails.
+ *
+ * Provides:
+ *   Edit building    — BuildingFormModal pre-filled with current data.
+ *   Delete building  — ConfirmDialog; backend rejects if floors exist.
+ *   Add floor        — FloorFormModal with pre-set buildingId.
+ *   Add asset        — AssetFormModal with pre-set buildingId for quick create.
+ *   Quick stats      — total assets, placed/unplaced counts derived from
+ *                      assets fetched for this building.
+ */
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { Building2, Package, CheckCircle, Users, FileText, LayoutGrid, Monitor, MapPin, AlertTriangle } from 'lucide-react';
 import Card from '../components/common/Card';
 import Button from '../components/common/Button';
 import Badge from '../components/common/Badge';
+import Breadcrumb from '../components/common/Breadcrumb';
 import ConfirmDialog from '../components/common/ConfirmDialog';
 import BuildingFormModal from '../components/building/BuildingFormModal';
 import AssetFormModal from '../components/asset/AssetFormModal';
@@ -10,6 +27,7 @@ import FloorFormModal from '../components/floor/FloorFormModal';
 import { hierarchyService, Building } from '../services/hierarchy.service';
 import { assetService, Asset } from '../services/asset.service';
 import { floorService, Floor } from '../services/floor.service';
+import { useToast } from '../contexts/ToastContext';
 import styles from '../styles/pages/BuildingDetails.module.css';
 
 const BuildingDetails: React.FC = () => {
@@ -20,7 +38,9 @@ const BuildingDetails: React.FC = () => {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [floors, setFloors] = useState<Floor[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [formOpen, setFormOpen] = useState(false);
+  const toast = useToast();
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [assetFormOpen, setAssetFormOpen] = useState(false);
@@ -51,9 +71,10 @@ const BuildingDetails: React.FC = () => {
       const buildingAssets = allAssets.filter(
         (asset) => asset.hierarchy.building_id === buildingId
       );
-      setAssets(buildingAssets);
-    } catch (error) {
-      console.error('Error loading building details:', error);
+      setAssets(buildingAssets.filter((a) => a.basic_info && a.itsm));
+    } catch (err) {
+      console.error('Error loading building details:', err);
+      setError('Failed to load building details. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -71,9 +92,7 @@ const BuildingDetails: React.FC = () => {
 
   const handleDelete = () => {
     if (assets.length > 0) {
-      alert(
-        `Cannot delete building with ${assets.length} asset(s). Please remove or reassign assets first.`
-      );
+      toast.error(`Cannot delete building with ${assets.length} asset(s). Please remove or reassign assets first.`);
       return;
     }
     setDeleteDialogOpen(true);
@@ -86,9 +105,9 @@ const BuildingDetails: React.FC = () => {
     try {
       await hierarchyService.deleteBuilding(building._id);
       navigate('/buildings');
-    } catch (error) {
-      console.error('Error deleting building:', error);
-      alert('Failed to delete building. Please try again.');
+    } catch (err) {
+      console.error('Error deleting building:', err);
+      toast.error('Failed to delete building. Please try again.');
     } finally {
       setDeleting(false);
       setDeleteDialogOpen(false);
@@ -131,9 +150,9 @@ const BuildingDetails: React.FC = () => {
       if (id) {
         loadBuildingDetails(id);
       }
-    } catch (error) {
-      console.error('Error deleting floor:', error);
-      alert('Failed to delete floor. Please try again.');
+    } catch (err) {
+      console.error('Error deleting floor:', err);
+      toast.error('Failed to delete floor. Please try again.');
     } finally {
       setDeleting(false);
       setDeleteFloorDialogOpen(false);
@@ -156,6 +175,20 @@ const BuildingDetails: React.FC = () => {
     );
   }
 
+  if (error) {
+    return (
+      <Card padding="lg">
+        <div className={styles.empty}>
+          <AlertTriangle size={32} style={{ color: 'var(--color-danger)', marginBottom: 8 }} />
+          <h3>{error}</h3>
+          <Button variant="outline" onClick={() => id && loadBuildingDetails(id)}>
+            Retry
+          </Button>
+        </div>
+      </Card>
+    );
+  }
+
   if (!building) {
     return (
       <Card padding="lg">
@@ -169,11 +202,16 @@ const BuildingDetails: React.FC = () => {
     );
   }
 
-  const itsmManagedCount = assets.filter((a) => a.itsm.is_managed).length;
+  const itsmManagedCount = assets.filter((a) => a.itsm?.is_managed).length;
   const assignedCount = assets.filter((a) => a.assigned_person).length;
 
   return (
     <div className={styles.buildingDetails}>
+      <Breadcrumb items={[
+        { label: 'Buildings', href: '/buildings' },
+        { label: building.name },
+      ]} />
+
       {/* Header */}
       <div className={styles.header}>
         <Button variant="outline" onClick={() => navigate('/buildings')}>
@@ -184,11 +222,11 @@ const BuildingDetails: React.FC = () => {
       {/* Building Info Card */}
       <Card padding="lg" className={styles.infoCard}>
         <div className={styles.buildingHeader}>
-          <div className={styles.buildingIcon}>🏢</div>
+          <div className={styles.buildingIcon}><Building2 size={28} /></div>
           <div className={styles.buildingInfo}>
             <h1 className={styles.buildingName}>{building.name}</h1>
             {building.address && (
-              <p className={styles.buildingAddress}>📍 {building.address}</p>
+              <p className={styles.buildingAddress}><MapPin size={14} style={{ marginRight: 4, verticalAlign: 'middle' }} />{building.address}</p>
             )}
           </div>
           <div className={styles.buildingActions}>
@@ -232,7 +270,7 @@ const BuildingDetails: React.FC = () => {
       <div className={styles.statsGrid}>
         <Card padding="lg">
           <div className={styles.stat}>
-            <div className={styles.statIcon}>📦</div>
+            <div className={styles.statIcon}><Package size={22} /></div>
             <div className={styles.statContent}>
               <p className={styles.statLabel}>Total Assets</p>
               <p className={styles.statValue}>{assets.length}</p>
@@ -242,7 +280,7 @@ const BuildingDetails: React.FC = () => {
 
         <Card padding="lg">
           <div className={styles.stat}>
-            <div className={styles.statIcon}>✅</div>
+            <div className={styles.statIcon}><CheckCircle size={22} /></div>
             <div className={styles.statContent}>
               <p className={styles.statLabel}>ITSM Managed</p>
               <p className={styles.statValue}>{itsmManagedCount}</p>
@@ -252,7 +290,7 @@ const BuildingDetails: React.FC = () => {
 
         <Card padding="lg">
           <div className={styles.stat}>
-            <div className={styles.statIcon}>👥</div>
+            <div className={styles.statIcon}><Users size={22} /></div>
             <div className={styles.statContent}>
               <p className={styles.statLabel}>Assigned</p>
               <p className={styles.statValue}>{assignedCount}</p>
@@ -262,7 +300,7 @@ const BuildingDetails: React.FC = () => {
 
         <Card padding="lg">
           <div className={styles.stat}>
-            <div className={styles.statIcon}>📝</div>
+            <div className={styles.statIcon}><FileText size={22} /></div>
             <div className={styles.statContent}>
               <p className={styles.statLabel}>Manual</p>
               <p className={styles.statValue}>{assets.length - itsmManagedCount}</p>
@@ -288,7 +326,7 @@ const BuildingDetails: React.FC = () => {
                 className={styles.floorItem}
                 onClick={() => navigate(`/floors/${floor._id}`)}
               >
-                <div className={styles.floorIcon}>📐</div>
+                <div className={styles.floorIcon}><LayoutGrid size={20} /></div>
                 <div className={styles.floorInfo}>
                   <h4 className={styles.floorName}>{floor.name}</h4>
                   <p className={styles.floorDetails}>
@@ -344,21 +382,21 @@ const BuildingDetails: React.FC = () => {
                 className={styles.assetItem}
                 onClick={() => navigate(`/assets/${asset._id}`)}
               >
-                <div className={styles.assetIcon}>💻</div>
+                <div className={styles.assetIcon}><Monitor size={20} /></div>
                 <div className={styles.assetInfo}>
-                  <h4 className={styles.assetName}>{asset.basic_info.display_name}</h4>
+                  <h4 className={styles.assetName}>{asset.basic_info?.display_name}</h4>
                   <p className={styles.assetDetails}>
-                    {asset.basic_info.manufacturer} {asset.basic_info.model}
+                    {asset.basic_info?.manufacturer} {asset.basic_info?.model}
                   </p>
                   {asset.assigned_person && (
                     <p className={styles.assetPerson}>
-                      👤 {asset.assigned_person.full_name}
+                      {asset.assigned_person.full_name}
                     </p>
                   )}
                 </div>
                 <div className={styles.assetBadge}>
-                  <Badge variant={asset.itsm.is_managed ? 'success' : 'neutral'}>
-                    {asset.itsm.is_managed ? 'ITSM' : 'Manual'}
+                  <Badge variant={asset.itsm?.is_managed ? 'success' : 'neutral'}>
+                    {asset.itsm?.is_managed ? 'ITSM' : 'Manual'}
                   </Badge>
                 </div>
               </div>

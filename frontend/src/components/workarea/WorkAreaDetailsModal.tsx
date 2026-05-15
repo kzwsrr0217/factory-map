@@ -1,3 +1,15 @@
+/**
+ * WorkAreaDetailsModal.tsx — Drill-down panel for a single work area.
+ *
+ * Displays the work area metadata and its child sections. From here users can:
+ *   - Create / delete sections (opens SectionFormModal).
+ *   - Create workstations within a section (opens WorkstationFormModal).
+ *   - Delete workstations (inline with ConfirmDialog).
+ *
+ * Assets assigned to workstations in this work area are listed under each
+ * workstation row. All mutation actions call their respective services and
+ * trigger a local list reload via `loadSections()`.
+ */
 import React, { useState } from 'react';
 import Modal from '../common/Modal';
 import Button from '../common/Button';
@@ -9,6 +21,7 @@ import { WorkArea } from '../../services/workarea.service';
 import { Asset } from '../../services/asset.service';
 import { Section, sectionService } from '../../services/section.service';
 import { Workstation, workstationService } from '../../services/workstation.service';
+import { useToast } from '../../contexts/ToastContext';
 import styles from '../../styles/components/WorkAreaDetailsModal.module.css';
 
 interface WorkAreaDetailsModalProps {
@@ -47,6 +60,7 @@ const WorkAreaDetailsModal: React.FC<WorkAreaDetailsModalProps> = ({
   const [deleteWorkstationDialogOpen, setDeleteWorkstationDialogOpen] = useState(false);
   
   const [deleting, setDeleting] = useState(false);
+  const toast = useToast();
 
   if (!workarea) return null;
 
@@ -75,9 +89,9 @@ const WorkAreaDetailsModal: React.FC<WorkAreaDetailsModalProps> = ({
     try {
       await sectionService.deleteSection(deletingSection._id);
       onRefresh();
-    } catch (error) {
-      console.error('Error deleting section:', error);
-      alert('Failed to delete section. Please try again.');
+    } catch (err) {
+      console.error('Error deleting section:', err);
+      toast.error('Failed to delete section. Please try again.');
     } finally {
       setDeleting(false);
       setDeleteSectionDialogOpen(false);
@@ -110,9 +124,9 @@ const WorkAreaDetailsModal: React.FC<WorkAreaDetailsModalProps> = ({
     try {
       await workstationService.deleteWorkstation(deletingWorkstation._id);
       onRefresh();
-    } catch (error) {
-      console.error('Error deleting workstation:', error);
-      alert('Failed to delete workstation. Please try again.');
+    } catch (err) {
+      console.error('Error deleting workstation:', err);
+      toast.error('Failed to delete workstation. Please try again.');
     } finally {
       setDeleting(false);
       setDeleteWorkstationDialogOpen(false);
@@ -146,25 +160,25 @@ const WorkAreaDetailsModal: React.FC<WorkAreaDetailsModalProps> = ({
               className={`${styles.tab} ${activeTab === 'info' ? styles.active : ''}`}
               onClick={() => setActiveTab('info')}
             >
-              📋 Information
+              Information
             </button>
             <button
               className={`${styles.tab} ${activeTab === 'sections' ? styles.active : ''}`}
               onClick={() => setActiveTab('sections')}
             >
-              🏭 Sections ({sections.length})
+              Sections ({sections.length})
             </button>
             <button
               className={`${styles.tab} ${activeTab === 'workstations' ? styles.active : ''}`}
               onClick={() => setActiveTab('workstations')}
             >
-              🔧 Workstations ({workstations.length})
+              Workstations ({workstations.length})
             </button>
             <button
               className={`${styles.tab} ${activeTab === 'assets' ? styles.active : ''}`}
               onClick={() => setActiveTab('assets')}
             >
-              💻 Assets ({assets.length})
+              Assets ({assets.length})
             </button>
           </div>
 

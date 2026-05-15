@@ -1,8 +1,20 @@
+/**
+ * Button.tsx — Primary interactive control.
+ *
+ * Extends native `<button>` with visual variants, sizes, and a loading state.
+ * When `loading` is true the button is also disabled and shows a spinner.
+ *
+ * Variants: primary | secondary | success | danger | warning | outline
+ * Sizes:    sm | md (default) | lg
+ * Extra:    fullWidth — stretches to 100% of container.
+ *
+ * All native HTMLButtonElement attributes are forwarded via `...props`.
+ */
 import React from 'react';
 import styles from '../../styles/components/Button.module.css';
 
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
-  variant?: 'primary' | 'secondary' | 'success' | 'danger' | 'outline';
+  variant?: 'primary' | 'secondary' | 'success' | 'danger' | 'warning' | 'outline';
   size?: 'sm' | 'md' | 'lg';
   fullWidth?: boolean;
   loading?: boolean;

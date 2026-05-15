@@ -1,3 +1,17 @@
+/**
+ * Modal.tsx — Accessible overlay dialog.
+ *
+ * Behaviour:
+ *   - Closes on Escape key press (window listener active only while open).
+ *   - Closes on backdrop click; stops propagation on the dialog panel.
+ *   - Sets `document.body.style.overflow = 'hidden'` while open to prevent
+ *     background scroll; restored on close or unmount.
+ *
+ * Props:
+ *   width   — sm | md (default) | lg | xl — controls max-width of the panel.
+ *   footer  — optional ReactNode rendered in a sticky footer bar; typically
+ *             contains Cancel / Submit buttons.
+ */
 import React, { useEffect } from 'react';
 import styles from '../../styles/components/Modal.module.css';
 

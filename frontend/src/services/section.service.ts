@@ -1,3 +1,10 @@
+/**
+ * section.service.ts — API calls for the Section entity.
+ *
+ * Sections are subdivisions within work areas. A section has a name, optional
+ * capacity (maximum number of personnel or workstations), and an optional
+ * shift schedule string (e.g., "Day / Afternoon / Night").
+ */
 import api from './api';
 
 export interface Section {

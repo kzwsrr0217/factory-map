@@ -1,3 +1,7 @@
+/**
+ * workstations.routes.ts — REST routes for the Workstation resource.
+ * Mounted at /api/workstations. Supports ?section_id= query filter on GET /.
+ */
 import { Router } from 'express';
 import { getAllWorkstations, getWorkstationById, createWorkstation, updateWorkstation, deleteWorkstation } from '../controllers/workstation.controller';
 

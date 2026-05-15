@@ -1,3 +1,13 @@
+/**
+ * SearchBar.tsx — Inline text filter input with clear button.
+ *
+ * Lightweight alternative to GlobalSearch for page-level filtering (e.g.
+ * Buildings list, Audit Log). Renders a search icon on the left and an × clear
+ * button that appears when the value is non-empty.
+ *
+ * `onChange` receives the raw string value; callers filter their data lists in
+ * response, typically with a simple `.toLowerCase().includes()` check.
+ */
 import React from 'react';
 import styles from '../../styles/components/SearchBar.module.css';
 

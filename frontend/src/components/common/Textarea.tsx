@@ -1,3 +1,10 @@
+/**
+ * Textarea.tsx — Controlled multiline text input with label and validation.
+ *
+ * Mirrors the Input component API: supports `label`, `error` (red border +
+ * message), and `helperText`. All native HTMLTextAreaElement attributes are
+ * forwarded via `...props` so rows, maxLength, etc. work without extra wiring.
+ */
 import React from 'react';
 import styles from '../../styles/components/Textarea.module.css';
 
