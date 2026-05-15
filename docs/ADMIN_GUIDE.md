@@ -33,7 +33,7 @@
 - **Python 3.x** (only for data import scripts)
 
 ### Network requirements
-- Port **3000** — React frontend (or configured port)
+- Port **5174** — React frontend (or configured port)
 - Port **4000** — Node.js backend API
 - Port **1433** — SQL Server (internal; do not expose to internet)
 - Outbound access to ITSM API URL (if using real ITSM mode)
@@ -61,17 +61,18 @@ docker-compose up -d
 ```
 
 This starts:
-- `factory-map-db` — SQL Server 2022 on port 1433
+- `factory-map-mssql` — SQL Server 2022 on port 1433
 - `factory-map-backend` — Node.js API on port 4000
+- `factory-map-frontend` — React dev server on port 5174 (when using Docker)
 
-### 4. Start the frontend (development)
+### 4. Start the frontend (development — without Docker)
 ```bash
 cd frontend
 npm install
 npm start
 ```
 
-The frontend runs on `http://localhost:3000` and proxies API calls to port 4000.
+The frontend runs on `http://localhost:5174`.
 
 ### 5. Verify installation
 ```bash
@@ -172,15 +173,16 @@ On first startup, TypeORM's `synchronize` option creates all tables. There is no
 **Option 1: Via the REST API**
 ```bash
 # First, create a temporary admin directly in the database
-docker exec -it factory-map-db /opt/mssql-tools/bin/sqlcmd \
+docker exec -it factory-map-mssql /opt/mssql-tools18/bin/sqlcmd \
   -S localhost -U sa -P "YourPassword" -d factorymap \
   -Q "INSERT INTO users (id, username, password, role, active, auth_provider, failed_login_attempts, created_at, updated_at) VALUES (NEWID(), 'admin', '\$2b\$12\$...bcrypt-hash...', 'admin', 1, 'local', 0, GETDATE(), GETDATE())"
 ```
 
-**Option 2: Use the seed script (development only)**
+**Option 2: Use the TypeScript seed script (development only)**
 ```bash
-python uploads/seed_test_data.py
-# The script logs in with admin/admin123 — change this password immediately after
+# Run inside the backend container — creates admin/Admin@1234 plus ~118 sample assets
+docker exec factory-map-backend npx ts-node src/scripts/seed-mssql.ts
+# Change the admin password immediately after
 ```
 
 **Option 3: Add bootstrap endpoint** (recommended for production — see Adding New Features in Developer Guide)
@@ -259,7 +261,9 @@ LDAP users start with `LDAP_DEFAULT_ROLE`. An admin must manually upgrade their 
 
 ## Maintenance Alerts
 
-The backend sends email and/or Microsoft Teams notifications daily at 07:00 for assets that are overdue or approaching their scheduled maintenance date.
+The backend sends email and/or Microsoft Teams notifications on two schedules:
+- **Daily at 07:00** — checks all assets for overdue or upcoming maintenance
+- **Hourly (top of the hour)** — fires any user-created **scheduled one-off alerts** whose time has passed
 
 ### Setup
 1. Configure `SMTP_*` and/or `TEAMS_WEBHOOK_URL` in `.env`
@@ -268,6 +272,24 @@ The backend sends email and/or Microsoft Teams notifications daily at 07:00 for 
 4. Set the **Days before alert** threshold (default: 7)
 5. Enable Email and/or Teams, enter recipients/webhook
 6. Click **Test Now** to verify delivery
+
+### Scheduled one-off alerts
+In addition to the daily maintenance check, admins can schedule one-time alerts for any future date and time. These are stored in the `scheduled_alerts` table and fired by the hourly cron.
+
+```bash
+# Create a scheduled alert (API)
+curl -X POST -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"title":"Quarterly review","scheduled_for":"2026-06-01T09:00:00Z","channels":"email"}' \
+  http://localhost:4000/api/alerts/scheduled
+
+# List scheduled alerts
+curl -H "Authorization: Bearer <token>" http://localhost:4000/api/alerts/scheduled
+
+# Delete a scheduled alert
+curl -X DELETE -H "Authorization: Bearer <token>" \
+  http://localhost:4000/api/alerts/scheduled/<id>
+```
 
 ### Alert history
 The **Alert History** section on the Alerts page shows the last 50 alert sends with status (success/failure), channel, and error message if applicable.
@@ -326,7 +348,7 @@ TypeORM `synchronize: true` is enabled in non-production environments. It **auto
 ### Viewing the database
 Using sqlcmd inside the Docker container:
 ```bash
-docker exec -it factory-map-db /opt/mssql-tools/bin/sqlcmd \
+docker exec -it factory-map-mssql /opt/mssql-tools18/bin/sqlcmd \
   -S localhost -U sa -P "YourPassword" -d factorymap
 ```
 
@@ -353,7 +375,8 @@ DELETE FROM assets;
 
 ### Clearing test data
 ```bash
-python uploads/seed_test_data.py   # Re-seed after clearing
+# Re-seed after clearing (runs inside the backend container)
+docker exec factory-map-backend npx ts-node src/scripts/seed-mssql.ts
 ```
 
 ---
@@ -392,19 +415,19 @@ All create, update, and delete operations on assets are recorded in `audit_logs`
 ### Database backup (SQL Server)
 ```bash
 # Create backup inside the container
-docker exec factory-map-db /opt/mssql-tools/bin/sqlcmd \
+docker exec factory-map-mssql /opt/mssql-tools18/bin/sqlcmd \
   -S localhost -U sa -P "YourPassword" \
   -Q "BACKUP DATABASE factorymap TO DISK = '/var/opt/mssql/data/factorymap.bak' WITH INIT"
 
 # Copy backup to host
-docker cp factory-map-db:/var/opt/mssql/data/factorymap.bak ./backups/factorymap_$(date +%Y%m%d).bak
+docker cp factory-map-mssql:/var/opt/mssql/data/factorymap.bak ./backups/factorymap_$(date +%Y%m%d).bak
 ```
 
 ### Database restore
 ```bash
-docker cp ./backups/factorymap_backup.bak factory-map-db:/var/opt/mssql/data/
+docker cp ./backups/factorymap_backup.bak factory-map-mssql:/var/opt/mssql/data/
 
-docker exec factory-map-db /opt/mssql-tools/bin/sqlcmd \
+docker exec factory-map-mssql /opt/mssql-tools18/bin/sqlcmd \
   -S localhost -U sa -P "YourPassword" \
   -Q "RESTORE DATABASE factorymap FROM DISK = '/var/opt/mssql/data/factorymap_backup.bak' WITH REPLACE"
 ```
@@ -532,7 +555,7 @@ server {
 
     # Frontend
     location / {
-        proxy_pass http://localhost:3000;
+        proxy_pass http://localhost:5174;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;

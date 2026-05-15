@@ -46,7 +46,7 @@ Factory Map is an IT asset management application designed for factory and indus
 
 ## Logging In
 
-1. Open the application in your browser (typically `http://factorymap.company.local` or `http://localhost:3000`)
+1. Open the application in your browser (typically `http://factorymap.company.local` or `http://localhost:5174`)
 2. Enter your **username** and **password**
 3. Click **Sign In**
 
@@ -343,19 +343,31 @@ Work items are a per-asset to-do checklist for IT tasks. Examples:
 - "Schedule OS upgrade from Windows 7"
 
 #### Viewing work items
-Work items appear at the top of the asset details panel. Open items are highlighted with a badge showing the count.
+Work items appear at the top of the asset details panel. Open items are highlighted with a badge showing the count. Any item whose **due date** has passed is shown with an **OVERDUE** badge in red.
 
 #### Adding a work item
 1. Open the asset details panel
 2. In the **Work Items** section, type the task description
 3. Choose a priority: **Low**, **Medium**, or **High**
-4. Press **Enter** or click **Add**
+4. Optionally set a **due date** and **assigned person**
+5. Press **Enter** or click **Add**
+
+Each item automatically gets a unique ID so it can be referenced by alerts.
+
+#### Item status
+Each work item has a status that you can update:
+- **Open** — task has not started
+- **In Progress** — work is underway
+- **Done** — task is complete (same as checking the checkbox)
 
 #### Completing a work item
-Check the checkbox next to the item. It immediately saves and the item is shown as strikethrough.
+Check the checkbox next to the item (sets status to **Done**). It immediately saves and the item is shown as strikethrough.
 
 #### Deleting a work item
 Click the **🗑** (trash) icon next to the item.
+
+#### Sending an alert for one item
+Click the **bell** icon next to a work item to send an immediate email/Teams notification about that specific task. The notification includes the asset name, item description, priority, and due date. The item is marked as **alert sent** after delivery.
 
 ---
 
@@ -428,7 +440,7 @@ If the current month has any scheduled assets, a **CSV** button appears in the c
 
 **(Admin role required)**
 
-The **Alerts** page (`/alerts`) configures the daily maintenance notification system.
+The **Alerts** page (`/alerts`) configures maintenance notifications and lets you create scheduled one-off alerts.
 
 ### Alert conditions
 - **Overdue alerts** — notify when an asset's maintenance date has already passed
@@ -445,6 +457,20 @@ The **Alerts** page (`/alerts`) configures the daily maintenance notification sy
 
 ### Testing
 Click **Test Now** to run the alert check immediately and send notifications for any currently affected assets. This is useful to verify SMTP/Teams configuration before the next daily run (07:00).
+
+### Scheduled one-off alerts
+The **Scheduled Alerts** section lets you create named reminders to be sent at a specific future date and time.
+
+#### Creating a scheduled alert
+1. In the **Scheduled Alerts** section, enter a **title** and **date/time**
+2. Choose the **channel**: Email, Teams, or Both
+3. Optionally enter an **asset filter** keyword to include only matching assets in the notification
+4. Click **Schedule**
+
+The alert fires automatically when the hourly cron next runs after the scheduled time. After it fires, it is marked **Sent** and can no longer be deleted.
+
+#### Cancelling a scheduled alert
+Click the **🗑** icon next to an unsent alert to delete it.
 
 ### Alert history
 The **Alert History** table at the bottom shows the last 50 alert sends with: timestamp, channel (email/Teams), subject, success/failure status, and any error message.

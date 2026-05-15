@@ -72,7 +72,7 @@ Factory Map is a full-stack IT asset management application designed for industr
 │  Tables: buildings | floors | work_areas | sections          │
 │          workstations | assets | asset_software              │
 │          asset_connections | users | audit_logs              │
-│          alert_config | alert_logs                           │
+│          alert_config | alert_logs | scheduled_alerts        │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -131,6 +131,7 @@ factory-map/
 │       ├── entities/
 │       │   ├── AlertConfig.entity.ts      # Single-row global alert configuration
 │       │   ├── AlertLog.entity.ts         # Append-only alert send history
+│       │   ├── ScheduledAlert.entity.ts   # User-created one-off timed alerts
 │       │   ├── Asset.entity.ts            # Main asset with toApiResponse()
 │       │   ├── AssetConnection.entity.ts  # Asset-to-asset connections
 │       │   ├── AssetSoftware.entity.ts    # Software installed on an asset
@@ -159,7 +160,7 @@ factory-map/
 │       │   └── workstations.routes.ts
 │       ├── services/
 │       │   ├── alert/
-│       │   │   └── AlertService.ts        # checkAndSend(), sendEmail(), sendTeams()
+│       │   │   └── AlertService.ts        # checkAndSend(), checkScheduledAlerts(), notifyWorkItem(), sendEmail(), sendTeams()
 │       │   ├── auth/
 │       │   │   └── LdapAuthService.ts     # LDAP bind + search, auto-provision user
 │       │   └── itsm/
@@ -175,7 +176,7 @@ factory-map/
 │       │   └── itsm.types.ts              # IITSMHardware, IITSMSyncResult, etc.
 │       ├── utils/
 │       │   └── passwordPolicy.ts          # validatePassword + constants
-│       └── server.ts                      # Express bootstrap, Socket.io, node-cron daily alert
+│       └── server.ts                      # Express bootstrap, Socket.io, daily cron (07:00) + hourly cron (scheduled alerts)
 │
 ├── frontend/
 │   └── src/
@@ -240,7 +241,7 @@ Asset (N) — has FK columns pointing at any level of the hierarchy
 | ITSM | `itsm_guid`, `hardware_asset_id`, `asset_class`, `source_of_truth`, `is_managed`, `last_synced`, `sync_status`, `itsm_snapshot` | `source_of_truth` = "local" or "itsm" |
 | Location | `loc_x`, `loc_y`, `loc_rotation`, `loc_icon_type`, `loc_description`, `loc_history` (JSON) | Canvas coordinates on floor plan |
 | Custom | `environment`, `notes`, `tags` (JSON), `object_id`, `serial_object`, `remote_access_tool`, `remote_access_version`, `backup_tool`, `backup_status`, `winupdate_date`, `fortiedr_active` | |
-| Work items | `work_items` (simple-json) | `[{id, description, done, priority, created_at}]` |
+| Work items | `work_items` (simple-json) | `[{id, description, done, status, priority, due_date, assigned_to, alert_sent, created_at}]` — `id` auto-generated (UUID) if omitted |
 | Maintenance | `maint_last_date`, `maint_next_date`, `maint_interval_days`, `maint_notes` | |
 
 ### toApiResponse() pattern
@@ -324,6 +325,7 @@ Similar CRUD, filtered by `section_id`.
 | POST | `/:id/connections` | — | Add connection (prevents duplicates) |
 | PATCH | `/:id/connections/:connId` | — | Update connection |
 | DELETE | `/:id/connections/:connId` | — | Remove connection (also removes reverse) |
+| POST | `/:id/work-items/:taskId/notify` | — | Send immediate alert for one work item; sets `alert_sent=true` |
 
 **Pagination**: when `page` and `limit` are provided, response includes `{ data, total, page, limit, pages }`. Without them, all matching assets are returned.
 
@@ -347,6 +349,9 @@ Similar CRUD, filtered by `section_id`.
 | PUT | `/config` | admin | Update AlertConfig (email, Teams, thresholds) |
 | GET | `/logs` | any | Paginated AlertLog (last 50, desc) |
 | POST | `/test` | admin | Run `checkAndSend()` immediately |
+| GET | `/scheduled` | any | List scheduled one-off alerts |
+| POST | `/scheduled` | admin | Create a scheduled alert (title, scheduled_for, channels, asset_filter?) |
+| DELETE | `/scheduled/:id` | admin | Delete a scheduled alert |
 
 ### Users `/api/users` (admin only)
 
@@ -576,8 +581,9 @@ The socket is a **module-level singleton** (`useSocket.ts`) — all components s
 
 ```bash
 # From project root
-docker-compose up -d        # Starts MSSQL + backend (port 4000)
-cd frontend && npm start    # Starts React dev server (port 3000)
+docker-compose up -d        # Starts MSSQL + backend (port 4000) + frontend (port 5174)
+# Or start frontend locally:
+cd frontend && npm start    # React dev server on port 5174
 ```
 
 The backend uses `nodemon` with `ts-node` — it restarts on any `.ts` file change. TypeORM `synchronize: true` auto-creates/alters tables on startup (only in non-production).

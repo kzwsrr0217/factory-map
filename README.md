@@ -16,6 +16,8 @@ Full-stack TypeScript application for tracking and visualizing IT assets in fact
 - **3-Step CSV Import Wizard** — validate, preview, and bulk-import assets
 - **Maintenance Calendar** — monthly calendar view of scheduled maintenance with CSV export
 - **Maintenance Alerts** — daily cron (07:00) sends email and/or Microsoft Teams notifications for overdue/upcoming maintenance
+- **Scheduled One-Off Alerts** — create named reminders for any future date/time, delivered via email and/or Teams; hourly cron fires them at the right moment
+- **Work Item Alerts** — send an immediate targeted notification for any single asset work item (PATCH overdue/upcoming task); items automatically receive a UUID for reliable reference
 - **Audit Log** — immutable record of all create/update/delete operations with per-field diffs
 - **QR Code & Print Labels** — per-asset QR codes with deep-link URLs, printable labels
 - **Enhanced Export** — 19-column UTF-8 CSV and JSON export of asset lists; bulk export for selections
@@ -44,10 +46,10 @@ git clone <repository-url>
 cd factory-map
 cp .env.example .env           # Fill in at minimum: MSSQL_PASSWORD, JWT_SECRET
 docker-compose up -d           # Starts SQL Server 2022 + backend API on port 4000
-cd frontend && npm install && npm start   # React dev server on port 3000
+cd frontend && npm install && npm start   # React dev server on port 5174
 ```
 
-Open **http://localhost:3000** — you will be prompted to log in.
+Open **http://localhost:5174** — you will be prompted to log in.
 
 ### Verify backend
 
@@ -101,6 +103,7 @@ factory-map/
 │   │   ├── AssetSoftware.entity.ts
 │   │   ├── AlertConfig.entity.ts
 │   │   ├── AlertLog.entity.ts
+│   │   ├── ScheduledAlert.entity.ts
 │   │   ├── AuditLog.entity.ts
 │   │   ├── Building.entity.ts
 │   │   ├── Floor.entity.ts
@@ -111,12 +114,12 @@ factory-map/
 │   ├── middleware/            # authenticate, requireAdmin, auditLog, captureAuditBefore
 │   ├── routes/                # index.ts mounts all routers (all /api/* require JWT)
 │   ├── services/
-│   │   ├── alert/             # AlertService — checkAndSend(), sendEmail(), sendTeams()
+│   │   ├── alert/             # AlertService — checkAndSend(), checkScheduledAlerts(), sendEmail(), sendTeams()
 │   │   ├── auth/              # LdapAuthService
 │   │   └── itsm/              # ITSMService + MockITSMAdapter + RealITSMAdapter + SyncService
 │   ├── types/                 # api.types, asset.types, hierarchy.types, itsm.types
 │   ├── utils/                 # passwordPolicy
-│   └── server.ts              # Express bootstrap, Socket.io, daily cron for alerts
+│   └── server.ts              # Express bootstrap, Socket.io, daily cron (07:00) + hourly cron for scheduled alerts
 │
 ├── frontend/src/
 │   ├── components/
