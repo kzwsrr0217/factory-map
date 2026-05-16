@@ -85,7 +85,7 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
     const passwordOk = await user.comparePassword(password);
 
     if (!passwordOk) {
-      const attempts = (user.failed_login_attempts ?? 0) + 1;
+      const attempts = (user.failed_login_attempts | 0) + 1;
       const isNowLocked = attempts >= MAX_FAILED_ATTEMPTS;
       await AppDataSource.getRepository(User).update(user.id, {
         failed_login_attempts: attempts,

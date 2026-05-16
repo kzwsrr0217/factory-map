@@ -9,17 +9,19 @@
  * Assets without a floor assignment are listed under a dedicated "No Floor
  * Assigned" group, reminding the operator to edit the asset's location first.
  */
-import React, { useCallback, useEffect, useState } from 'react';
+import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MapPin, Monitor } from 'lucide-react';
 import Card from '../components/common/Card';
 import Button from '../components/common/Button';
 import Badge from '../components/common/Badge';
-import { assetService, Asset } from '../services/asset.service';
-import { hierarchyService, Building } from '../services/hierarchy.service';
-import { floorService, Floor } from '../services/floor.service';
+import { Asset } from '../services/asset.service';
+import { Building } from '../services/hierarchy.service';
+import { Floor } from '../services/floor.service';
 import { getAssetIcon } from '../utils/assetTypes';
-import { useToast } from '../contexts/ToastContext';
+import { useAssets } from '../hooks/queries/useAssets';
+import { useBuildings } from '../hooks/queries/useBuildings';
+import { useFloors } from '../hooks/queries/useFloors';
 import styles from '../styles/pages/UnplacedAssets.module.css';
 
 interface GroupedEntry {
@@ -30,33 +32,12 @@ interface GroupedEntry {
 
 const UnplacedAssets: React.FC = () => {
   const navigate = useNavigate();
-  const toast = useToast();
-  const [assets, setAssets] = useState<Asset[]>([]);
-  const [buildings, setBuildings] = useState<Building[]>([]);
-  const [floors, setFloors] = useState<Floor[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  const loadData = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [allAssets, allBuildings, allFloors] = await Promise.all([
-        assetService.getAssets(),
-        hierarchyService.getBuildings(),
-        floorService.getFloors(),
-      ]);
-      setAssets(allAssets.filter(a => !a.is_placed));
-      setBuildings(allBuildings);
-      setFloors(allFloors);
-    } catch {
-      toast.error('Failed to load unplaced assets');
-    } finally {
-      setLoading(false);
-    }
-  }, [toast]);
-
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
+  const { data: allAssets = [], isLoading: loadingAssets, refetch } = useAssets();
+  const { data: buildings = [], isLoading: loadingBuildings } = useBuildings();
+  const { data: allFloors = [], isLoading: loadingFloors } = useFloors();
+  const loading = loadingAssets || loadingBuildings || loadingFloors;
+  const assets = allAssets.filter((a: Asset) => !a.is_placed);
+  const floors: Floor[] = allFloors;
 
   const grouped: GroupedEntry[] = React.useMemo(() => {
     const map = new Map<string, Asset[]>();
@@ -101,7 +82,7 @@ const UnplacedAssets: React.FC = () => {
             {assets.length} asset{assets.length !== 1 ? 's' : ''} without map coordinates — open the floor map to place them
           </p>
         </div>
-        <Button variant="outline" onClick={loadData}>Refresh</Button>
+        <Button variant="outline" onClick={() => refetch()}>Refresh</Button>
       </div>
 
       {assets.length === 0 ? (

@@ -7,40 +7,28 @@
  *   Calendar grid — each day cell lists the assets due that day
  *   Clicking an asset row opens AssetDetailsModal
  */
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import { ChevronLeft, ChevronRight, AlertTriangle, Wrench, CalendarDays, Download } from 'lucide-react';
 import Card from '../components/common/Card';
 import Button from '../components/common/Button';
 import Badge from '../components/common/Badge';
 import AssetDetailsModal from '../components/asset/AssetDetailsModal';
-import { assetService, Asset } from '../services/asset.service';
+import { Asset } from '../services/asset.service';
+import { useAssets } from '../hooks/queries/useAssets';
 import { useToast } from '../contexts/ToastContext';
 import styles from '../styles/pages/Maintenance.module.css';
 
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 const Maintenance: React.FC = () => {
+  const { data: allAssets = [], isLoading: loading } = useAssets();
+  const assets = allAssets.filter((a: Asset) => a.maintenance?.next_date);
   const toast = useToast();
-  const [assets, setAssets] = useState<Asset[]>([]);
-  const [loading, setLoading] = useState(true);
   const [today] = useState(() => new Date());
   const [viewYear, setViewYear] = useState(today.getFullYear());
   const [viewMonth, setViewMonth] = useState(today.getMonth()); // 0-based
   const [overdueOpen, setOverdueOpen] = useState(true);
   const [viewAsset, setViewAsset] = useState<Asset | null>(null);
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const data = await assetService.getAssets();
-        setAssets(data.filter((a: Asset) => a.maintenance?.next_date));
-      } catch {
-        toast.error('Failed to load assets');
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, [toast]);
 
   const overdue = useMemo(
     () => assets.filter(a => new Date(a.maintenance!.next_date!).getTime() < today.setHours(0, 0, 0, 0)),

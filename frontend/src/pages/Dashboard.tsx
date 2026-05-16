@@ -16,9 +16,10 @@
  * incremental list reloads via `useSocket` so the table stays live without
  * manual refresh.
  */
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Monitor, Activity, Wrench, Building2, AlertTriangle, Bell, Eye, Download, Upload, BarChart2, Filter, Trash2, MoveRight, FileText, LayoutGrid, List, ChevronUp, ChevronDown, ChevronsUpDown, Keyboard } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
+import { Monitor, Activity, Wrench, Building2, AlertTriangle, Bell, Eye, Download, Upload, BarChart2, Filter, Trash2, MoveRight, FileText, LayoutGrid, List, ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import Card from '../components/common/Card';
@@ -33,24 +34,24 @@ import AssetImportModal from '../components/asset/AssetImportModal';
 import AssetDetailsModal from '../components/asset/AssetDetailsModal';
 import { assetService, Asset } from '../services/asset.service';
 import { getAssetIcon } from '../utils/assetTypes';
-import { hierarchyService, Building } from '../services/hierarchy.service';
-import { floorService, Floor } from '../services/floor.service';
-import { workareaService, WorkArea } from '../services/workarea.service';
 import { loadSettings } from '../utils/settings';
 import { useToast } from '../contexts/ToastContext';
 import { useSocket } from '../hooks/useSocket';
 import AssetFormModal from '../components/asset/AssetFormModal';
+import { useAssets, assetKeys } from '../hooks/queries/useAssets';
+import { useBuildings } from '../hooks/queries/useBuildings';
+import { useFloors } from '../hooks/queries/useFloors';
+import { useWorkareas } from '../hooks/queries/useWorkareas';
 import styles from '../styles/pages/Dashboard.module.css';
 
 const Dashboard: React.FC = () => {
   const navigate = useNavigate();
-  const [assets, setAssets] = useState<Asset[]>([]);
-  const [filteredAssets, setFilteredAssets] = useState<Asset[]>([]);
-  const [buildings, setBuildings] = useState<Building[]>([]);
-  const [floors, setFloors] = useState<Floor[]>([]);
-  const [workareas, setWorkareas] = useState<WorkArea[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const qc = useQueryClient();
+  const { data: rawAssets = [], isLoading, isError } = useAssets();
+  const { data: buildings = [] } = useBuildings();
+  const { data: floors = [] } = useFloors();
+  const { data: workareas = [] } = useWorkareas();
+  const assets = useMemo(() => rawAssets.filter((a: Asset) => a.basic_info && a.itsm), [rawAssets]);
   const [searchQuery, setSearchQuery] = useState(() => localStorage.getItem('db_search') ?? '');
   const [filterOpen, setFilterOpen] = useState(false);
   const [filters, setFilters] = useState<FilterCriteria>(() => {
@@ -93,27 +94,27 @@ const Dashboard: React.FC = () => {
     return () => window.removeEventListener('app:new-asset', handler);
   }, []);
 
-  // Live updates via WebSocket
-  useSocket('asset:created', (newAsset) => {
-    setAssets((prev) => [...prev, newAsset]);
-  });
+  // Live updates via WebSocket — update React Query cache directly
+  useSocket('asset:created', () => { qc.invalidateQueries({ queryKey: assetKeys.all }); });
   useSocket('asset:updated', (updated) => {
-    setAssets((prev) => prev.map((a) => a._id === updated._id ? { ...a, ...updated } : a));
+    qc.setQueryData(assetKeys.all, (prev: Asset[] | undefined) =>
+      prev ? prev.map(a => a._id === updated._id ? { ...a, ...updated } : a) : prev
+    );
   });
-  useSocket('asset:deleted', ({ _id }) => {
-    setAssets((prev) => prev.filter((a) => a._id !== _id));
+  useSocket('asset:deleted', ({ _id }: { _id: string }) => {
+    qc.setQueryData(assetKeys.all, (prev: Asset[] | undefined) =>
+      prev ? prev.filter(a => a._id !== _id) : prev
+    );
   });
 
   const now = Date.now();
   const sevenDays = 7 * 86400000;
   const thirtyDays = 30 * 86400000;
 
-  const applyFilters = useCallback(() => {
-    const now = Date.now();
-    const thirtyDays = 30 * 86400000;
+  const filteredAssets = useMemo(() => {
+    const t = Date.now();
+    const td = 30 * 86400000;
     let filtered = [...assets];
-
-    // Search query
     if (searchQuery) {
       const query = searchQuery.toLowerCase();
       filtered = filtered.filter(
@@ -125,119 +126,24 @@ const Dashboard: React.FC = () => {
           asset.basic_info?.model?.toLowerCase().includes(query)
       );
     }
-
-    // Advanced filters
-    if (filters.assetName) {
-      filtered = filtered.filter((a) =>
-        a.basic_info?.display_name?.toLowerCase().includes(filters.assetName!.toLowerCase())
-      );
-    }
-
-    if (filters.manufacturer) {
-      filtered = filtered.filter((a) =>
-        a.basic_info?.manufacturer?.toLowerCase().includes(filters.manufacturer!.toLowerCase())
-      );
-    }
-
-    if (filters.model) {
-      filtered = filtered.filter((a) =>
-        a.basic_info?.model?.toLowerCase().includes(filters.model!.toLowerCase())
-      );
-    }
-
-    if (filters.serialNumber) {
-      filtered = filtered.filter((a) =>
-        a.basic_info?.serial_number?.toLowerCase().includes(filters.serialNumber!.toLowerCase())
-      );
-    }
-
-    if (filters.assetTag) {
-      filtered = filtered.filter((a) =>
-        a.basic_info?.asset_tag?.toLowerCase().includes(filters.assetTag!.toLowerCase())
-      );
-    }
-
-    if (filters.assignedPerson) {
-      filtered = filtered.filter((a) =>
-        a.assigned_person?.full_name?.toLowerCase().includes(filters.assignedPerson!.toLowerCase())
-      );
-    }
-
-    if (filters.status) {
-      filtered = filtered.filter((a) =>
-        a.basic_info?.status?.toLowerCase().includes(filters.status!.toLowerCase())
-      );
-    }
-
-    if (filters.itsmManaged && filters.itsmManaged !== 'all') {
-      filtered = filtered.filter((a) =>
-        filters.itsmManaged === 'itsm' ? a.itsm?.is_managed : !a.itsm?.is_managed
-      );
-    }
-
-    if (filters.buildingId) {
-      filtered = filtered.filter((a) => a.hierarchy.building_id === filters.buildingId);
-    }
-
-    if (filters.floorId) {
-      filtered = filtered.filter((a) => a.hierarchy.floor_id === filters.floorId);
-    }
-
-    if (filters.workareaId) {
-      filtered = filtered.filter((a) => a.hierarchy.workarea_id === filters.workareaId);
-    }
-
-    if (maintenanceFilter === 'overdue') {
-      filtered = filtered.filter(a =>
-        a.maintenance?.next_date && new Date(a.maintenance.next_date).getTime() < now
-      );
-    } else if (maintenanceFilter === 'upcoming') {
-      filtered = filtered.filter(a => {
-        if (!a.maintenance?.next_date) return false;
-        const t = new Date(a.maintenance.next_date).getTime();
-        return t >= now && t - now < thirtyDays;
-      });
-    }
-
-    if (conflictFilter) {
-      filtered = filtered.filter(a =>
-        a.itsm?.source_of_truth === 'local' && !!(a as any).itsm_snapshot?.display_name
-      );
-    }
-
-    setFilteredAssets(filtered);
-    setPage(1);
+    if (filters.assetName) filtered = filtered.filter((a) => a.basic_info?.display_name?.toLowerCase().includes(filters.assetName!.toLowerCase()));
+    if (filters.manufacturer) filtered = filtered.filter((a) => a.basic_info?.manufacturer?.toLowerCase().includes(filters.manufacturer!.toLowerCase()));
+    if (filters.model) filtered = filtered.filter((a) => a.basic_info?.model?.toLowerCase().includes(filters.model!.toLowerCase()));
+    if (filters.serialNumber) filtered = filtered.filter((a) => a.basic_info?.serial_number?.toLowerCase().includes(filters.serialNumber!.toLowerCase()));
+    if (filters.assetTag) filtered = filtered.filter((a) => a.basic_info?.asset_tag?.toLowerCase().includes(filters.assetTag!.toLowerCase()));
+    if (filters.assignedPerson) filtered = filtered.filter((a) => a.assigned_person?.full_name?.toLowerCase().includes(filters.assignedPerson!.toLowerCase()));
+    if (filters.status) filtered = filtered.filter((a) => a.basic_info?.status?.toLowerCase().includes(filters.status!.toLowerCase()));
+    if (filters.itsmManaged && filters.itsmManaged !== 'all') filtered = filtered.filter((a) => filters.itsmManaged === 'itsm' ? a.itsm?.is_managed : !a.itsm?.is_managed);
+    if (filters.buildingId) filtered = filtered.filter((a) => a.hierarchy.building_id === filters.buildingId);
+    if (filters.floorId) filtered = filtered.filter((a) => a.hierarchy.floor_id === filters.floorId);
+    if (filters.workareaId) filtered = filtered.filter((a) => a.hierarchy.workarea_id === filters.workareaId);
+    if (maintenanceFilter === 'overdue') filtered = filtered.filter(a => a.maintenance?.next_date && new Date(a.maintenance.next_date).getTime() < t);
+    else if (maintenanceFilter === 'upcoming') filtered = filtered.filter(a => { if (!a.maintenance?.next_date) return false; const ts = new Date(a.maintenance.next_date).getTime(); return ts >= t && ts - t < td; });
+    if (conflictFilter) filtered = filtered.filter(a => a.itsm?.source_of_truth === 'local' && !!(a as any).itsm_snapshot?.display_name);
+    return filtered;
   }, [assets, searchQuery, filters, maintenanceFilter, conflictFilter]);
 
-  useEffect(() => {
-    loadData();
-  }, []);
-
-  useEffect(() => {
-    applyFilters();
-  }, [applyFilters]);
-
-  const loadData = async () => {
-    try {
-      setLoading(true);
-      const [assetsData, buildingsData, floorsData, workareasData] = await Promise.all([
-        assetService.getAssets(),
-        hierarchyService.getBuildings(),
-        floorService.getFloors(),
-        workareaService.getWorkAreas(),
-      ]);
-
-      setAssets(assetsData.filter((a: Asset) => a.basic_info && a.itsm));
-      setBuildings(buildingsData);
-      setFloors(floorsData);
-      setWorkareas(workareasData);
-    } catch (err) {
-      console.error('Error loading data:', err);
-      setError('Failed to load dashboard data. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  };
+  useEffect(() => { setPage(1); }, [searchQuery, filters, maintenanceFilter, conflictFilter]);
 
   const handleApplyFilters = (newFilters: FilterCriteria) => {
     setFilters(newFilters);
@@ -255,7 +161,7 @@ const Dashboard: React.FC = () => {
         errors: result.errors.length,
       });
       toast.success(`Sync complete: ${result.created} new, ${result.updated} updated, ${result.snapshotted} conflicts detected`);
-      await loadData();
+      qc.invalidateQueries({ queryKey: assetKeys.all });
     } catch {
       toast.error('ITSM sync failed. Check server logs.');
     } finally {
@@ -390,9 +296,9 @@ const Dashboard: React.FC = () => {
           assetService.updateAsset(id, { 'basic_info.status': status } as any)
         )
       );
-      setAssets(prev => prev.map(a =>
-        selectedAssetIds.has(a._id) ? { ...a, basic_info: { ...a.basic_info, status: status as any } } : a
-      ));
+      qc.setQueryData(assetKeys.all, (prev: Asset[] | undefined) =>
+        prev ? prev.map(a => selectedAssetIds.has(a._id) ? { ...a, basic_info: { ...a.basic_info, status: status as any } } : a) : prev
+      );
       toast.success(`${selectedAssetIds.size} asset${selectedAssetIds.size !== 1 ? 's' : ''} set to ${status}`);
       setSelectedAssetIds(new Set());
     } catch {
@@ -407,7 +313,9 @@ const Dashboard: React.FC = () => {
     setBulkUpdating(true);
     try {
       await Promise.all(Array.from(selectedAssetIds).map(id => assetService.deleteAsset(id)));
-      setAssets(prev => prev.filter(a => !selectedAssetIds.has(a._id)));
+      qc.setQueryData(assetKeys.all, (prev: Asset[] | undefined) =>
+        prev ? prev.filter(a => !selectedAssetIds.has(a._id)) : prev
+      );
       toast.success(`${selectedAssetIds.size} asset${selectedAssetIds.size !== 1 ? 's' : ''} deleted`);
       setSelectedAssetIds(new Set());
     } catch {
@@ -434,7 +342,7 @@ const Dashboard: React.FC = () => {
           } as any)
         )
       );
-      await loadData();
+      qc.invalidateQueries({ queryKey: assetKeys.all });
       toast.success(`${selectedAssetIds.size} asset${selectedAssetIds.size !== 1 ? 's' : ''} moved to ${targetFloor?.name ?? 'floor'}`);
       setSelectedAssetIds(new Set());
     } catch {
@@ -503,9 +411,9 @@ const Dashboard: React.FC = () => {
   const handleInlineStatusChange = async (assetId: string, status: string) => {
     try {
       await assetService.updateAsset(assetId, { 'basic_info.status': status } as any);
-      setAssets(prev => prev.map(a =>
-        a._id === assetId ? { ...a, basic_info: { ...a.basic_info, status: status as any } } : a
-      ));
+      qc.setQueryData(assetKeys.all, (prev: Asset[] | undefined) =>
+        prev ? prev.map(a => a._id === assetId ? { ...a, basic_info: { ...a.basic_info, status: status as any } } : a) : prev
+      );
     } catch {
       toast.error('Failed to update status');
     }
@@ -558,7 +466,7 @@ const Dashboard: React.FC = () => {
     .slice(0, 5);
 
   // Loading state with skeletons
-  if (loading) {
+  if (isLoading) {
     return (
       <div className={styles.dashboard}>
         <div className={styles.header}>
@@ -584,15 +492,15 @@ const Dashboard: React.FC = () => {
     );
   }
 
-  if (error) {
+  if (isError) {
     return (
       <div className={styles.dashboard}>
         <div className={styles.header}><div><h1>Dashboard</h1></div></div>
         <Card padding="lg">
           <div className={styles.emptyState}>
             <AlertTriangle size={32} style={{ color: 'var(--color-danger)' }} />
-            <p>{error}</p>
-            <Button variant="outline" onClick={loadData}>Retry</Button>
+            <p>Failed to load dashboard data. Please try again.</p>
+            <Button variant="outline" onClick={() => qc.invalidateQueries({ queryKey: assetKeys.all })}>Retry</Button>
           </div>
         </Card>
       </div>
@@ -1175,7 +1083,7 @@ const Dashboard: React.FC = () => {
       <AssetImportModal
         isOpen={importOpen}
         onClose={() => setImportOpen(false)}
-        onSuccess={loadData}
+        onSuccess={() => qc.invalidateQueries({ queryKey: assetKeys.all })}
       />
 
       <AssetDetailsModal
@@ -1190,7 +1098,7 @@ const Dashboard: React.FC = () => {
         onClose={() => setCreateOpen(false)}
         onSuccess={() => {
           setCreateOpen(false);
-          loadData();
+          qc.invalidateQueries({ queryKey: assetKeys.all });
           toast.success('Asset created successfully');
         }}
       />
