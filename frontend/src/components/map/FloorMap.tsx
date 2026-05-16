@@ -30,9 +30,12 @@
  *   onAssetEdit / Clone / StatusChange — asset quick actions from context menu.
  *   onConnectionDelete — remove a specific connection between two assets.
  */
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import { createPortal } from 'react-dom';
+import jsPDF from 'jspdf';
 import { WorkArea } from '../../services/workarea.service';
 import { Asset } from '../../services/asset.service';
+import { WallPort } from '../../services/network.service';
 import Tooltip from '../common/Tooltip';
 import ConfirmDialog from '../common/ConfirmDialog';
 import { getAssetIcon, ASSET_TYPE_MAP } from '../../utils/assetTypes';
@@ -56,6 +59,7 @@ interface FloorMapProps {
     assets: boolean;
     connections: boolean;
     grid: boolean;
+    wallports: boolean;
   };
   onLayerToggle?: (layer: keyof NonNullable<FloorMapProps['layers']>) => void;
   connectionMode?: boolean;
@@ -73,6 +77,10 @@ interface FloorMapProps {
   activeConnectionTypes?: Set<string>;
   unplacedAssets?: Asset[];
   onPlaceUnplaced?: (assetId: string, x: number, y: number) => void;
+  allAssets?: Asset[];
+  onNavigateToAsset?: (assetId: string, floorId: string) => void;
+  wallPorts?: WallPort[];
+  floorName?: string;
 }
 
 const GRID_SIZE = 50; // Grid snap size
@@ -90,7 +98,7 @@ const FloorMap: React.FC<FloorMapProps> = ({
   backgroundImage,
   deployMode = false,
   deployPosition,
-  layers = { workareas: true, assets: true, connections: false, grid: true },
+  layers = { workareas: true, assets: true, connections: false, grid: true, wallports: true },
   onLayerToggle,
   connectionMode = false,
   selectedAssetsForConnection = [],
@@ -107,6 +115,10 @@ const FloorMap: React.FC<FloorMapProps> = ({
   activeConnectionTypes,
   unplacedAssets = [],
   onPlaceUnplaced,
+  allAssets = [],
+  onNavigateToAsset,
+  wallPorts = [],
+  floorName,
 }) => {
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -126,13 +138,13 @@ const FloorMap: React.FC<FloorMapProps> = ({
   const [zoom, setZoom] = useState(1);
   const [backgroundOpacity, setBackgroundOpacity] = useState(0.5);
   const [snapToGrid, setSnapToGrid] = useState(true);
-  const [showGrid, setShowGrid] = useState(true);
   const [showMinimap, setShowMinimap] = useState(true);
   const [bgFitMode, setBgFitMode] = useState<'meet' | 'slice'>('meet');
   const [drawStart, setDrawStart] = useState<{ x: number; y: number } | null>(null);
   const [drawRect, setDrawRect] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const [popover, setPopover] = useState<{ asset: Asset; screenX: number; screenY: number } | null>(null);
   const [connPopover, setConnPopover] = useState<{ assetId: string; connectedAssetId: string; label: string; screenX: number; screenY: number } | null>(null);
+  const [wallPortPopover, setWallPortPopover] = useState<{ port: WallPort; screenX: number; screenY: number } | null>(null);
   const [pendingDeleteWorkareaId, setPendingDeleteWorkareaId] = useState<string | null>(null);
   const [showLabels, setShowLabels] = useState(true);
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -175,6 +187,23 @@ const FloorMap: React.FC<FloorMapProps> = ({
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusAsset]);
+
+  // Cross-floor connection detection — keyed by asset ID
+  const crossFloorMap = useMemo(() => {
+    const assetIds = new Set(assets.map(a => a._id));
+    const result = new Map<string, Array<{ connectedAssetId: string; connectionType: string; connectedAsset: Asset | undefined }>>();
+    assets.forEach(asset => {
+      const offFloor = (asset.connections ?? []).filter(c => !assetIds.has(c.connected_asset_id));
+      if (offFloor.length > 0) {
+        result.set(asset._id, offFloor.map(c => ({
+          connectedAssetId: c.connected_asset_id,
+          connectionType: c.connection_type,
+          connectedAsset: allAssets.find(a => a._id === c.connected_asset_id),
+        })));
+      }
+    });
+    return result;
+  }, [assets, allAssets]);
 
   // Snap to grid helper
   const snapToGridHelper = (value: number): number => {
@@ -463,6 +492,47 @@ const FloorMap: React.FC<FloorMapProps> = ({
     img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)));
   }, []);
 
+  // Export as PDF (A4 landscape, with header)
+  const handleExportPdf = useCallback(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+
+    const W = 1200, H = 900;
+    const svgData = new XMLSerializer().serializeToString(svg);
+    const canvas = document.createElement('canvas');
+    canvas.width = W;
+    canvas.height = H;
+    const ctx = canvas.getContext('2d');
+    const img = new Image();
+
+    img.onload = () => {
+      if (ctx) {
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, W, H);
+        ctx.drawImage(img, 0, 0, W, H);
+      }
+      const dataUrl = canvas.toDataURL('image/png');
+
+      const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+      const pageW = pdf.internal.pageSize.getWidth();
+      const pageH = pdf.internal.pageSize.getHeight();
+      const title = floorName ?? 'Floor Plan';
+
+      pdf.setFont('helvetica', 'bold');
+      pdf.setFontSize(14);
+      pdf.text(title, 14, 13);
+      pdf.setFont('helvetica', 'normal');
+      pdf.setFontSize(8);
+      pdf.text(`Exported ${new Date().toLocaleString()}`, 14, 19);
+
+      const imgY = 24;
+      pdf.addImage(dataUrl, 'PNG', 14, imgY, pageW - 28, pageH - imgY - 8);
+      pdf.save(`${title.replace(/\s+/g, '-').toLowerCase()}.pdf`);
+    };
+
+    img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)));
+  }, [floorName]);
+
   // Print — opens a dedicated print window with just the map SVG
   const handlePrint = useCallback(() => {
     const svg = svgRef.current;
@@ -664,13 +734,6 @@ const FloorMap: React.FC<FloorMapProps> = ({
           🧲
         </button>
         <button
-          onClick={() => setShowGrid(!showGrid)}
-          className={`${styles.controlButton} ${showGrid ? styles.active : ''}`}
-          title="Toggle Grid"
-        >
-          #️⃣
-        </button>
-        <button
           onClick={() => setShowMinimap(!showMinimap)}
           className={`${styles.controlButton} ${showMinimap ? styles.active : ''}`}
           title="Toggle Minimap"
@@ -712,6 +775,9 @@ const FloorMap: React.FC<FloorMapProps> = ({
         <button onClick={handleExportImage} className={styles.controlButton} title="Export as PNG">
           💾
         </button>
+        <button onClick={handleExportPdf} className={styles.controlButton} title="Export as PDF">
+          📄
+        </button>
         <button onClick={handlePrint} className={styles.controlButton} title="Print">
           🖨️
         </button>
@@ -744,6 +810,13 @@ const FloorMap: React.FC<FloorMapProps> = ({
             title="Toggle Grid"
           >
             #️⃣
+          </button>
+          <button
+            onClick={() => onLayerToggle?.('wallports')}
+            className={`${styles.controlButton} ${layers.wallports ? styles.active : ''}`}
+            title="Toggle Wall Ports"
+          >
+            🔌
           </button>
         </div>
         {editable && (
@@ -1018,12 +1091,13 @@ const FloorMap: React.FC<FloorMapProps> = ({
           asset.connections?.map((connection, index) => {
             if (activeConnectionTypes && activeConnectionTypes.size > 0 && !activeConnectionTypes.has(connection.connection_type)) return null;
             const connectedAsset = assets.find(a => a._id === connection.connected_asset_id);
-            if (!connectedAsset) return null;
+            const connectedWallPort = !connectedAsset ? wallPorts.find(wp => wp._id === connection.connected_asset_id) : null;
+            if (!connectedAsset && !connectedWallPort) return null;
 
             const x1 = asset.location.coordinates.x;
             const y1 = asset.location.coordinates.y;
-            const x2 = connectedAsset.location.coordinates.x;
-            const y2 = connectedAsset.location.coordinates.y;
+            const x2 = connectedAsset ? connectedAsset.location.coordinates.x : connectedWallPort!.pos_x;
+            const y2 = connectedAsset ? connectedAsset.location.coordinates.y : connectedWallPort!.pos_y;
 
             const color = getConnectionColor(connection.connection_type);
             const markerId = `arrow-${asset._id}-${connection.connected_asset_id}-${index}`;
@@ -1099,6 +1173,48 @@ const FloorMap: React.FC<FloorMapProps> = ({
             );
           })
         ).flat().filter(Boolean)}
+
+        {/* Wall Ports */}
+        {layers.wallports && wallPorts.map((wp) => {
+          const wx = wp.pos_x;
+          const wy = wp.pos_y;
+          const hasPanel = !!wp.patch_panel_id;
+          const fill = hasPanel ? '#f59e0b' : '#9ca3af';
+          const stroke = hasPanel ? '#d97706' : '#6b7280';
+          return (
+            <g
+              key={wp._id}
+              style={{ cursor: 'pointer' }}
+              onClick={(e) => {
+                e.stopPropagation();
+                setWallPortPopover({ port: wp, screenX: e.clientX, screenY: e.clientY });
+              }}
+              onMouseEnter={(e) => showTooltip(e as any,
+                <div>
+                  <h4>🔌 {wp.label}</h4>
+                  {wp.patch_panel_name && <p><span className={styles.label}>Panel:</span> {wp.patch_panel_name}</p>}
+                  {wp.patch_port != null && <p><span className={styles.label}>Port:</span> {wp.patch_port}</p>}
+                  {wp.room_name && <p><span className={styles.label}>Room:</span> {wp.room_name} ({wp.room_type?.toUpperCase()})</p>}
+                  {wp.rack_name && <p><span className={styles.label}>Rack:</span> {wp.rack_name}</p>}
+                  {wp.switch_port && <p><span className={styles.label}>Switch port:</span> {wp.switch_port}</p>}
+                  {!hasPanel && <p style={{ color: '#9ca3af', fontStyle: 'italic' }}>Not patched</p>}
+                </div>
+              )}
+              onMouseLeave={hideTooltip}
+            >
+              <rect x={wx - 7} y={wy - 5} width={14} height={10} rx={2} fill={fill} stroke={stroke} strokeWidth={1.5} />
+              <rect x={wx - 4} y={wy - 3} width={2} height={4} rx={0.5} fill={stroke} />
+              <rect x={wx - 1} y={wy - 3} width={2} height={4} rx={0.5} fill={stroke} />
+              <rect x={wx + 2} y={wy - 3} width={2} height={4} rx={0.5} fill={stroke} />
+              {showLabels && (
+                <text x={wx} y={wy + 16} textAnchor="middle" fontSize="9" fontWeight="600"
+                  fill="#374151" stroke="white" strokeWidth="2" paintOrder="stroke" pointerEvents="none">
+                  {wp.label.length > 8 ? wp.label.slice(0, 7) + '…' : wp.label}
+                </text>
+              )}
+            </g>
+          );
+        })}
 
         {/* Assets */}
         {layers.assets && assets.map((asset) => {
@@ -1227,6 +1343,14 @@ const FloorMap: React.FC<FloorMapProps> = ({
               {itsmConflict && (
                 <g pointerEvents="none">
                   <circle cx={x + 12} cy={y - 12} r="5" fill="#f97316" stroke="#fff" strokeWidth="1.5" />
+                </g>
+              )}
+
+              {/* Cross-floor connection badge */}
+              {crossFloorMap.has(asset._id) && (
+                <g pointerEvents="none">
+                  <circle cx={x - 13} cy={y + 13} r="7" fill="#06b6d4" stroke="#fff" strokeWidth="2" />
+                  <text x={x - 13} y={y + 17} textAnchor="middle" fill="#fff" fontSize="8" fontWeight="bold">↕</text>
                 </g>
               )}
 
@@ -1361,6 +1485,16 @@ const FloorMap: React.FC<FloorMapProps> = ({
             <div className={styles.legendBadge} style={{ background: '#f97316', width: 10, height: 10 }}></div>
             <span>ITSM conflict</span>
           </div>
+          <div className={styles.legendItem}>
+            <div className={styles.legendBadge} style={{ background: '#06b6d4' }}>↕</div>
+            <span>Cross-floor link</span>
+          </div>
+          {wallPorts.length > 0 && (
+            <div className={styles.legendItem}>
+              <div className={styles.legendIcon} style={{ background: '#f59e0b', borderRadius: 2 }}></div>
+              <span>Wall port (patched)</span>
+            </div>
+          )}
         </div>
 
         {layers.connections && (
@@ -1407,16 +1541,67 @@ const FloorMap: React.FC<FloorMapProps> = ({
         </div>
       )}
 
-      {/* Connection delete popover */}
-      {connPopover && (
+      {/* Wall port popover */}
+      {wallPortPopover && createPortal(
         <>
-          <div style={{ position: 'fixed', inset: 0, zIndex: 49 }} onClick={() => setConnPopover(null)} />
+          <div style={{ position: 'fixed', inset: 0, zIndex: 199 }} onClick={() => setWallPortPopover(null)} />
           <div
             className={styles.popover}
-            style={{
-              left: connPopover.screenX - (containerRef.current?.getBoundingClientRect().left ?? 0) + 8,
-              top: connPopover.screenY - (containerRef.current?.getBoundingClientRect().top ?? 0) - 8,
-            }}
+            style={{ position: 'fixed', left: wallPortPopover.screenX + 8, top: wallPortPopover.screenY - 8, zIndex: 200 }}
+          >
+            <div className={styles.popoverHeader}>
+              <span>🔌 {wallPortPopover.port.label}</span>
+              <button className={styles.popoverClose} onClick={() => setWallPortPopover(null)}>✕</button>
+            </div>
+            <div className={styles.popoverMeta}>
+              {wallPortPopover.port.patch_panel_name && (
+                <div className={styles.popoverMetaRow}>
+                  <span className={styles.popoverMetaLabel}>Panel</span>
+                  <span className={styles.popoverMetaValue}>{wallPortPopover.port.patch_panel_name}</span>
+                </div>
+              )}
+              {wallPortPopover.port.patch_port != null && (
+                <div className={styles.popoverMetaRow}>
+                  <span className={styles.popoverMetaLabel}>Port #</span>
+                  <span className={`${styles.popoverMetaValue} ${styles.popoverMetaMono}`}>{wallPortPopover.port.patch_port}</span>
+                </div>
+              )}
+              {wallPortPopover.port.room_name && (
+                <div className={styles.popoverMetaRow}>
+                  <span className={styles.popoverMetaLabel}>Room</span>
+                  <span className={styles.popoverMetaValue}>{wallPortPopover.port.room_name}{wallPortPopover.port.room_type ? ` (${wallPortPopover.port.room_type.toUpperCase()})` : ''}</span>
+                </div>
+              )}
+              {wallPortPopover.port.rack_name && (
+                <div className={styles.popoverMetaRow}>
+                  <span className={styles.popoverMetaLabel}>Rack</span>
+                  <span className={styles.popoverMetaValue}>{wallPortPopover.port.rack_name}</span>
+                </div>
+              )}
+              {wallPortPopover.port.switch_port && (
+                <div className={styles.popoverMetaRow}>
+                  <span className={styles.popoverMetaLabel}>Switch port</span>
+                  <span className={`${styles.popoverMetaValue} ${styles.popoverMetaMono}`}>{wallPortPopover.port.switch_port}</span>
+                </div>
+              )}
+              {!wallPortPopover.port.patch_panel_id && (
+                <div className={styles.popoverMetaRow}>
+                  <span className={styles.popoverMetaValue} style={{ color: '#9ca3af', fontStyle: 'italic' }}>Not patched</span>
+                </div>
+              )}
+            </div>
+          </div>
+        </>,
+        document.body
+      )}
+
+      {/* Connection delete popover */}
+      {connPopover && createPortal(
+        <>
+          <div style={{ position: 'fixed', inset: 0, zIndex: 199 }} onClick={() => setConnPopover(null)} />
+          <div
+            className={styles.popover}
+            style={{ position: 'fixed', left: connPopover.screenX + 8, top: connPopover.screenY - 8, zIndex: 200 }}
           >
             <div className={styles.popoverHeader}>
               <span>🔗 {connPopover.label}</span>
@@ -1433,19 +1618,20 @@ const FloorMap: React.FC<FloorMapProps> = ({
               🗑️ Remove Connection
             </button>
           </div>
-        </>
+        </>,
+        document.body
       )}
 
       {/* Quick-action popover */}
-      {popover && (
+      {popover && createPortal(
         <>
           <div
-            style={{ position: 'fixed', inset: 0, zIndex: 49 }}
+            style={{ position: 'fixed', inset: 0, zIndex: 199 }}
             onClick={() => setPopover(null)}
           />
           <div
             className={styles.popover}
-            style={{ left: popover.screenX - (containerRef.current?.getBoundingClientRect().left ?? 0) + 8, top: popover.screenY - (containerRef.current?.getBoundingClientRect().top ?? 0) - 8 }}
+            style={{ position: 'fixed', left: popover.screenX + 8, top: popover.screenY - 8, zIndex: 200 }}
           >
             <div className={styles.popoverHeader}>
               <span>{getAssetIcon(popover.asset.basic_info.type)} {popover.asset.basic_info.display_name}</span>
@@ -1494,6 +1680,30 @@ const FloorMap: React.FC<FloorMapProps> = ({
                   <span className={styles.popoverMetaValue}>{popover.asset.connections!.length}</span>
                 </div>
               )}
+              {crossFloorMap.has(popover.asset._id) && (
+                <div className={styles.popoverCrossFloor}>
+                  <div className={styles.popoverDivider}>Cross-floor connections</div>
+                  {crossFloorMap.get(popover.asset._id)!.map((cf, i) => (
+                    <div key={i} className={styles.popoverMetaRow}>
+                      <span className={styles.popoverMetaLabel} style={{ color: '#06b6d4' }}>↕ {cf.connectionType}</span>
+                      <span className={styles.popoverMetaValue}>
+                        {cf.connectedAsset ? (
+                          onNavigateToAsset ? (
+                            <button
+                              style={{ background: 'none', border: 'none', color: '#06b6d4', cursor: 'pointer', padding: 0, fontSize: 'inherit', textDecoration: 'underline' }}
+                              onClick={() => { onNavigateToAsset(cf.connectedAssetId, cf.connectedAsset!.hierarchy.floor_id ?? ''); setPopover(null); }}
+                            >
+                              {cf.connectedAsset.basic_info.display_name}
+                            </button>
+                          ) : cf.connectedAsset.basic_info.display_name
+                        ) : (
+                          <span style={{ color: 'var(--color-text-secondary)', fontStyle: 'italic' }}>another floor</span>
+                        )}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
             <button className={styles.popoverAction} onClick={() => { onAssetClick?.(popover.asset); setPopover(null); }}>
               🔍 View Details
@@ -1515,7 +1725,8 @@ const FloorMap: React.FC<FloorMapProps> = ({
               </button>
             ))}
           </div>
-        </>
+        </>,
+        document.body
       )}
       {/* Unplaced Assets Tray */}
       {unplacedAssets.length > 0 && !unplacedTrayOpen && (
