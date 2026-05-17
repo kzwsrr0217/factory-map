@@ -57,6 +57,10 @@
   --color-text-secondary: #6b7280;
   --color-border: #e5e7eb;
 
+  /* Aliases used throughout CSS modules */
+  --color-bg-primary: #ffffff;
+  --color-bg-secondary: #f9fafb;
+
   /* Spacing */
   --spacing-xs: 4px;
   --spacing-sm: 8px;
@@ -125,6 +129,10 @@
   --color-text-primary: #f1f5f9;
   --color-text-secondary: #cbd5e1;
   --color-border: #334155;
+
+  /* Aliases */
+  --color-bg-primary: #1e293b;
+  --color-bg-secondary: #0f172a;
   
   /* Gray scale reversed */
   --color-gray-50: #1e293b;

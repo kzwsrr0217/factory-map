@@ -184,6 +184,11 @@ function applyBodyToAsset(asset: Asset, body: Record<string, unknown>): void {
   if (body.predecessor_id !== undefined) asset.predecessor_id = (body.predecessor_id as string) ?? null;
   if (body.successor_id !== undefined) asset.successor_id = (body.successor_id as string) ?? null;
   if (body.is_placed !== undefined) asset.is_placed = body.is_placed as boolean;
+  if (body.wall_port_id !== undefined) {
+    asset.wall_port_id = (body.wall_port_id as string) ?? null;
+    // Also clear the loaded relation so TypeORM doesn't reconstruct the FK from the object
+    if (asset.wall_port_id === null) (asset as any).wall_port = null;
+  }
 }
 
 async function saveRelations(asset: Asset, body: Record<string, unknown>): Promise<void> {
@@ -205,7 +210,10 @@ async function saveRelations(asset: Asset, body: Record<string, unknown>): Promi
 }
 
 async function loadWithRelations(id: string): Promise<Asset | null> {
-  return repo().findOne({ where: { id }, relations: ['software', 'connections'] });
+  return repo().findOne({
+    where: { id },
+    relations: ['software', 'connections', 'wall_port', 'wall_port.patch_panel', 'wall_port.patch_panel.rack', 'wall_port.patch_panel.rack.room'],
+  });
 }
 
 // ── GET /assets/lookups ───────────────────────────────────────────────────────
@@ -255,7 +263,11 @@ export const getAllAssets = async (req: Request, res: Response, next: NextFuncti
     const qb = repo().createQueryBuilder('a');
 
     if (include_connections === 'true') {
-      qb.leftJoinAndSelect('a.connections', 'conn');
+      qb.leftJoinAndSelect('a.connections', 'conn')
+        .leftJoinAndSelect('a.wall_port', 'wp')
+        .leftJoinAndSelect('wp.patch_panel', 'wp_pp')
+        .leftJoinAndSelect('wp_pp.rack', 'wp_rack')
+        .leftJoinAndSelect('wp_rack.room', 'wp_room');
     }
 
     if (floor_id)    qb.andWhere('a.floor_id = :floor_id', { floor_id });

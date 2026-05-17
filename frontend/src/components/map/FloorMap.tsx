@@ -80,6 +80,8 @@ interface FloorMapProps {
   allAssets?: Asset[];
   onNavigateToAsset?: (assetId: string, floorId: string) => void;
   wallPorts?: WallPort[];
+  onWallPortMove?: (portId: string, x: number, y: number) => void;
+  onAssetTrace?: (asset: Asset) => void;
   floorName?: string;
 }
 
@@ -98,7 +100,7 @@ const FloorMap: React.FC<FloorMapProps> = ({
   backgroundImage,
   deployMode = false,
   deployPosition,
-  layers = { workareas: true, assets: true, connections: false, grid: true, wallports: true },
+  layers = { workareas: true, assets: true, connections: false, grid: true, wallports: false },
   onLayerToggle,
   connectionMode = false,
   selectedAssetsForConnection = [],
@@ -118,6 +120,8 @@ const FloorMap: React.FC<FloorMapProps> = ({
   allAssets = [],
   onNavigateToAsset,
   wallPorts = [],
+  onWallPortMove,
+  onAssetTrace,
   floorName,
 }) => {
   const svgRef = useRef<SVGSVGElement>(null);
@@ -126,7 +130,7 @@ const FloorMap: React.FC<FloorMapProps> = ({
   const pannedRef = useRef(false);
   
   const [dragging, setDragging] = useState<{
-    type: 'workarea' | 'asset' | 'resize' | 'pan';
+    type: 'workarea' | 'asset' | 'resize' | 'pan' | 'wallport';
     id: string;
     offsetX: number;
     offsetY: number;
@@ -191,9 +195,13 @@ const FloorMap: React.FC<FloorMapProps> = ({
   // Cross-floor connection detection — keyed by asset ID
   const crossFloorMap = useMemo(() => {
     const assetIds = new Set(assets.map(a => a._id));
+    const wallPortIds = new Set(wallPorts.map(wp => wp._id));
     const result = new Map<string, Array<{ connectedAssetId: string; connectionType: string; connectedAsset: Asset | undefined }>>();
     assets.forEach(asset => {
-      const offFloor = (asset.connections ?? []).filter(c => !assetIds.has(c.connected_asset_id));
+      // Exclude wall port connections — they are on this floor, not cross-floor
+      const offFloor = (asset.connections ?? []).filter(c =>
+        !assetIds.has(c.connected_asset_id) && !wallPortIds.has(c.connected_asset_id)
+      );
       if (offFloor.length > 0) {
         result.set(asset._id, offFloor.map(c => ({
           connectedAssetId: c.connected_asset_id,
@@ -203,7 +211,7 @@ const FloorMap: React.FC<FloorMapProps> = ({
       }
     });
     return result;
-  }, [assets, allAssets]);
+  }, [assets, allAssets, wallPorts]);
 
   // Snap to grid helper
   const snapToGridHelper = (value: number): number => {
@@ -376,6 +384,10 @@ const FloorMap: React.FC<FloorMapProps> = ({
       const newX = snapToGridHelper(svgPoint.x - dragging.offsetX);
       const newY = snapToGridHelper(svgPoint.y - dragging.offsetY);
       onAssetMove(dragging.id, Math.round(newX), Math.round(newY));
+    } else if (dragging.type === 'wallport' && onWallPortMove && editable) {
+      const newX = snapToGridHelper(svgPoint.x - dragging.offsetX);
+      const newY = snapToGridHelper(svgPoint.y - dragging.offsetY);
+      onWallPortMove(dragging.id, Math.round(newX), Math.round(newY));
     } else if (dragging.type === 'resize' && onWorkareaResize && editable) {
       const workarea = workareas.find((w) => w._id === dragging.id);
       if (!workarea) return;
@@ -658,6 +670,19 @@ const FloorMap: React.FC<FloorMapProps> = ({
       offsetX: svgPoint.x - asset.location.coordinates.x,
       offsetY: svgPoint.y - asset.location.coordinates.y,
     });
+  };
+
+  const startDraggingWallPort = (wp: WallPort, e: React.MouseEvent) => {
+    if (!editable) return;
+    e.stopPropagation();
+    hideTooltip();
+    const svg = svgRef.current;
+    if (!svg) return;
+    const point = svg.createSVGPoint();
+    point.x = e.clientX;
+    point.y = e.clientY;
+    const svgPoint = point.matrixTransform(svg.getScreenCTM()?.inverse());
+    setDragging({ type: 'wallport', id: wp._id, offsetX: svgPoint.x - wp.pos_x, offsetY: svgPoint.y - wp.pos_y });
   };
 
   // Handle workarea click
@@ -1094,6 +1119,7 @@ const FloorMap: React.FC<FloorMapProps> = ({
             const connectedWallPort = !connectedAsset ? wallPorts.find(wp => wp._id === connection.connected_asset_id) : null;
             if (!connectedAsset && !connectedWallPort) return null;
 
+            const isWallPortConn = !!connectedWallPort;
             const x1 = asset.location.coordinates.x;
             const y1 = asset.location.coordinates.y;
             const x2 = connectedAsset ? connectedAsset.location.coordinates.x : connectedWallPort!.pos_x;
@@ -1101,8 +1127,8 @@ const FloorMap: React.FC<FloorMapProps> = ({
 
             const color = getConnectionColor(connection.connection_type);
             const markerId = `arrow-${asset._id}-${connection.connected_asset_id}-${index}`;
-            const arrowSize = 8;
-            const strokeWidth = connection.strength === 'strong' ? 3 : connection.strength === 'weak' ? 1 : 2;
+            const arrowSize = isWallPortConn ? 6 : 8;
+            const strokeWidth = isWallPortConn ? 1.5 : (connection.strength === 'strong' ? 3 : connection.strength === 'weak' ? 1 : 2);
 
             return (
               <g key={`${asset._id}-${connection.connected_asset_id}-${index}`}>
@@ -1129,8 +1155,8 @@ const FloorMap: React.FC<FloorMapProps> = ({
                   y2={y2}
                   stroke={color}
                   strokeWidth={strokeWidth}
-                  strokeDasharray={connection.bidirectional ? undefined : '6,3'}
-                  opacity="0.75"
+                  strokeDasharray={isWallPortConn ? '4,5' : (connection.bidirectional ? undefined : '6,3')}
+                  opacity={isWallPortConn ? 0.5 : 0.75}
                   markerEnd={`url(#${markerId})`}
                 />
                 {/* Transparent hit area for clicking */}
@@ -1181,14 +1207,17 @@ const FloorMap: React.FC<FloorMapProps> = ({
           const hasPanel = !!wp.patch_panel_id;
           const fill = hasPanel ? '#f59e0b' : '#9ca3af';
           const stroke = hasPanel ? '#d97706' : '#6b7280';
+          const isDraggingWp = dragging?.type === 'wallport' && dragging.id === wp._id;
           return (
             <g
               key={wp._id}
-              style={{ cursor: 'pointer' }}
-              onClick={(e) => {
+              style={{ cursor: editable ? 'move' : 'pointer' }}
+              onMouseDown={editable ? (e) => startDraggingWallPort(wp, e) : undefined}
+              onClick={editable ? undefined : (e) => {
                 e.stopPropagation();
                 setWallPortPopover({ port: wp, screenX: e.clientX, screenY: e.clientY });
               }}
+              opacity={isDraggingWp ? 0.6 : 1}
               onMouseEnter={(e) => showTooltip(e as any,
                 <div>
                   <h4>🔌 {wp.label}</h4>
@@ -1705,6 +1734,11 @@ const FloorMap: React.FC<FloorMapProps> = ({
                 </div>
               )}
             </div>
+            {onAssetTrace && (
+              <button className={styles.popoverAction} onClick={() => { onAssetTrace(popover.asset); setPopover(null); }}>
+                🔗 Trace Network
+              </button>
+            )}
             <button className={styles.popoverAction} onClick={() => { onAssetClick?.(popover.asset); setPopover(null); }}>
               🔍 View Details
             </button>

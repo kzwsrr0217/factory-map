@@ -9,13 +9,14 @@
  * Uses an inline BuildingSkeleton (3 animated placeholder cards) while loading
  * to avoid layout shift. Navigates to BuildingDetails on card click.
  */
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Building2, MapPin, SquareStack, Calendar, AlertTriangle, RefreshCw } from 'lucide-react';
 import Card from '../components/common/Card';
 import Button from '../components/common/Button';
 import BuildingFormModal from '../components/building/BuildingFormModal';
-import { hierarchyService, Building } from '../services/hierarchy.service';
+import { Building } from '../services/hierarchy.service';
+import { useBuildings } from '../hooks/queries/useBuildings';
 import styles from '../styles/pages/Buildings.module.css';
 
 const BuildingSkeleton: React.FC = () => (
@@ -33,37 +34,13 @@ const BuildingSkeleton: React.FC = () => (
 
 const Buildings: React.FC = () => {
   const navigate = useNavigate();
-  const [buildings, setBuildings] = useState<Building[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { data: buildings = [], isLoading, isError, refetch } = useBuildings();
   const [formOpen, setFormOpen] = useState(false);
   const [editingBuilding, setEditingBuilding] = useState<Building | null>(null);
-
-  useEffect(() => {
-    loadBuildings();
-  }, []);
-
-  const loadBuildings = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await hierarchyService.getBuildings();
-      setBuildings(data);
-    } catch (err) {
-      console.error('Error loading buildings:', err);
-      setError('Failed to load buildings. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleAddClick = () => {
     setEditingBuilding(null);
     setFormOpen(true);
-  };
-
-  const handleFormSuccess = () => {
-    loadBuildings();
   };
 
   return (
@@ -73,29 +50,29 @@ const Buildings: React.FC = () => {
           <h1>Buildings</h1>
           <p className={styles.subtitle}>Manage your factory buildings and locations</p>
         </div>
-        <Button variant="primary" onClick={handleAddClick} disabled={loading}>
+        <Button variant="primary" onClick={handleAddClick} disabled={isLoading}>
           + Add Building
         </Button>
       </div>
 
-      {error && (
+      {isError && (
         <div className={styles.errorState}>
           <AlertTriangle size={20} />
-          <span>{error}</span>
-          <Button variant="outline" size="sm" onClick={loadBuildings}>
+          <span>Failed to load buildings. Please try again.</span>
+          <Button variant="outline" size="sm" onClick={() => refetch()}>
             <RefreshCw size={14} style={{ marginRight: 4 }} />
             Retry
           </Button>
         </div>
       )}
 
-      {loading ? (
+      {isLoading ? (
         <div className={styles.grid}>
           {[1, 2, 3, 4].map((i) => (
             <BuildingSkeleton key={i} />
           ))}
         </div>
-      ) : !error && buildings.length === 0 ? (
+      ) : !isError && buildings.length === 0 ? (
         <Card padding="lg">
           <div className={styles.empty}>
             <Building2 size={56} className={styles.emptyIcon} />
@@ -149,7 +126,7 @@ const Buildings: React.FC = () => {
       <BuildingFormModal
         isOpen={formOpen}
         onClose={() => setFormOpen(false)}
-        onSuccess={handleFormSuccess}
+        onSuccess={() => refetch()}
         building={editingBuilding}
       />
     </div>

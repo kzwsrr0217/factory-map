@@ -27,10 +27,13 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   OneToMany,
+  ManyToOne,
+  JoinColumn,
   Index,
 } from 'typeorm';
 import { AssetSoftware } from './AssetSoftware.entity';
 import { AssetConnection } from './AssetConnection.entity';
+import { WallPort } from './WallPort.entity';
 
 interface LocationHistoryEntry {
   moved_at: Date;
@@ -92,6 +95,9 @@ export class Asset {
 
   @Column({ name: 'workstation_id', type: 'nvarchar', length: 36, nullable: true })
   workstation_id!: string | null;
+
+  @Column({ name: 'rack_id', type: 'nvarchar', length: 36, nullable: true })
+  rack_id!: string | null;
 
   // ── basic_info (flattened) ────────────────────────────────────────────────
   @Column({ name: 'display_name', type: 'nvarchar', length: 200 })
@@ -309,6 +315,14 @@ export class Asset {
   @Column({ name: 'updated_by', type: 'nvarchar', length: 100, nullable: true })
   updated_by!: string | null;
 
+  // ── Physical network port ─────────────────────────────────────────────────
+  @Column({ name: 'wall_port_id', type: 'nvarchar', nullable: true })
+  wall_port_id!: string | null;
+
+  @ManyToOne(() => WallPort, { nullable: true, onDelete: 'SET NULL', eager: false })
+  @JoinColumn({ name: 'wall_port_id' })
+  wall_port?: WallPort | null;
+
   // ── Relations ─────────────────────────────────────────────────────────────
   @OneToMany(() => AssetSoftware, (s) => s.asset, { cascade: true })
   software!: AssetSoftware[];
@@ -329,6 +343,7 @@ export class Asset {
         workarea_id: this.workarea_id,
         section_id: this.section_id,
         workstation_id: this.workstation_id,
+        rack_id: this.rack_id,
       },
       basic_info: {
         display_name: this.display_name,
@@ -407,6 +422,21 @@ export class Asset {
         interval_days: this.maint_interval_days,
         notes: this.maint_notes,
       } : undefined,
+      wall_port_id: this.wall_port_id,
+      wall_port: this.wall_port ? {
+        _id: this.wall_port.id,
+        label: this.wall_port.label,
+        floor_id: this.wall_port.floor_id,
+        patch_panel_id: this.wall_port.patch_panel_id,
+        patch_panel_name: (this.wall_port as any).patch_panel?.name ?? null,
+        patch_port: this.wall_port.patch_port,
+        rack_name: (this.wall_port as any).patch_panel?.rack?.name ?? null,
+        room_name: (this.wall_port as any).patch_panel?.rack?.room?.name ?? null,
+        room_type: (this.wall_port as any).patch_panel?.rack?.room?.type ?? null,
+        switch_asset_id: this.wall_port.switch_asset_id,
+        switch_port: this.wall_port.switch_port,
+        description: this.wall_port.description,
+      } : null,
       software: (this.software ?? []).map((s) => ({
         software_id: s.software_id,
         display_name: s.display_name,

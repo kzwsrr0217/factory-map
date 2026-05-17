@@ -27,6 +27,10 @@ import { AlertConfig } from '../entities/AlertConfig.entity';
 import { AlertLog } from '../entities/AlertLog.entity';
 import { ScheduledAlert } from '../entities/ScheduledAlert.entity';
 import { ActiveSession } from '../entities/ActiveSession.entity';
+import { NetworkRoom } from '../entities/NetworkRoom.entity';
+import { NetworkRack } from '../entities/NetworkRack.entity';
+import { PatchPanel } from '../entities/PatchPanel.entity';
+import { WallPort } from '../entities/WallPort.entity';
 
 export const AppDataSource = new DataSource({
   type: 'mssql',
@@ -37,7 +41,7 @@ export const AppDataSource = new DataSource({
   database: config.mssql.database,
   synchronize: config.env !== 'production',
   logging: config.env === 'development' ? ['error', 'warn'] : false,
-  entities: [Building, Floor, WorkArea, Section, Workstation, Asset, AssetSoftware, AssetConnection, User, AuditLog, AlertConfig, AlertLog, ScheduledAlert, ActiveSession],
+  entities: [Building, Floor, WorkArea, Section, Workstation, Asset, AssetSoftware, AssetConnection, User, AuditLog, AlertConfig, AlertLog, ScheduledAlert, ActiveSession, NetworkRoom, NetworkRack, PatchPanel, WallPort],
   migrations: ['dist/migrations/*.js'],
   migrationsTableName: 'typeorm_migrations',
   options: {

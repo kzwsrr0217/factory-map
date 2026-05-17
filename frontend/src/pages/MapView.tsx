@@ -31,6 +31,7 @@ import { hierarchyService, Building } from '../services/hierarchy.service';
 import { floorService, Floor } from '../services/floor.service';
 import { workareaService, WorkArea } from '../services/workarea.service';
 import { assetService, Asset } from '../services/asset.service';
+import { networkService, WallPort } from '../services/network.service';
 import { getAssetIcon } from '../utils/assetTypes';
 import styles from '../styles/pages/MapView.module.css';
 
@@ -43,6 +44,8 @@ const MapView: React.FC = () => {
   const [selectedFloor, setSelectedFloor] = useState<Floor | null>(null);
   const [workareas, setWorkareas] = useState<WorkArea[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
+  const [allAssets, setAllAssets] = useState<Asset[]>([]);
+  const [wallPorts, setWallPorts] = useState<WallPort[]>([]);
   const [loading, setLoading] = useState(true);
   const [metaLoading, setMetaLoading] = useState(true);
   const [editMode, setEditMode] = useState(false);
@@ -75,10 +78,13 @@ const MapView: React.FC = () => {
     assets: true,
     connections: true,
     grid: true,
+    wallports: true,
   });
+  const [tracingAsset, setTracingAsset] = useState<Asset | null>(null);
   const assetUpdateTimer = useRef<NodeJS.Timeout | null>(null);
   const workareaUpdateTimer = useRef<NodeJS.Timeout | null>(null);
   const workareaResizeTimer = useRef<NodeJS.Timeout | null>(null);
+  const wallPortUpdateTimer = useRef<NodeJS.Timeout | null>(null);
 
   const buildingOptions = useMemo(
     () => buildings.map((building) => ({ value: building._id, label: building.name })),
@@ -176,12 +182,14 @@ const MapView: React.FC = () => {
     try {
       setMetaLoading(true);
       setError(null);
-      const [buildingsData, floorsData] = await Promise.all([
+      const [buildingsData, floorsData, allAssetsData] = await Promise.all([
         hierarchyService.getBuildings(),
         floorService.getFloors(),
+        assetService.getAssetsWithConnections(),
       ]);
       setBuildings(buildingsData);
       setFloors(floorsData);
+      setAllAssets(allAssetsData);
 
       const firstBuilding = buildingsData[0];
       const firstFloor = floorsData.find((floor) => floor.building_id === firstBuilding?._id);
@@ -245,15 +253,17 @@ const MapView: React.FC = () => {
     try {
       setLoading(true);
       setError(null);
-      const [floorData, workareasData, floorAssets] = await Promise.all([
+      const [floorData, workareasData, floorAssets, floorWallPorts] = await Promise.all([
         floorService.getFloor(floorId),
         workareaService.getWorkAreas(floorId),
         assetService.getAssetsByFloor(floorId),
+        networkService.getWallPorts({ floor_id: floorId }),
       ]);
 
       setSelectedFloor(floorData);
       setWorkareas(workareasData);
       setAssets(floorAssets);
+      setWallPorts(floorWallPorts);
     } catch (error) {
       console.error('Error loading map data:', error);
       setError('Failed to load floor data. Please try selecting a different floor.');
@@ -264,6 +274,7 @@ const MapView: React.FC = () => {
 
   useEffect(() => {
     loadMapData(selectedFloorId);
+    setTracingAsset(null);
   }, [selectedFloorId, loadMapData]);
 
   const handleBuildingChange = (value: string) => {
@@ -317,6 +328,15 @@ const MapView: React.FC = () => {
   const handleLayerToggle = useCallback((layer: keyof typeof layers) => {
     setLayers(prev => ({ ...prev, [layer]: !prev[layer] }));
   }, []);
+
+  const handleNavigateToAsset = useCallback((assetId: string, floorId: string) => {
+    const targetFloor = floors.find(f => f._id === floorId);
+    if (targetFloor) {
+      setSelectedBuildingId(targetFloor.building_id);
+      setSelectedFloorId(floorId);
+      setTimeout(() => setFocusAsset({ id: assetId, tick: Date.now() }), 300);
+    }
+  }, [floors]);
 
   const handleAssetSelectForConnection = useCallback((assetId: string) => {
     setSelectedAssetsForConnection(prev => {
@@ -517,6 +537,30 @@ const MapView: React.FC = () => {
     }
   }, []);
 
+  const handleWallPortMove = useCallback((portId: string, x: number, y: number) => {
+    setWallPorts(prev => prev.map(wp => wp._id === portId ? { ...wp, pos_x: x, pos_y: y } : wp));
+    if (wallPortUpdateTimer.current) clearTimeout(wallPortUpdateTimer.current);
+    wallPortUpdateTimer.current = setTimeout(async () => {
+      try {
+        await networkService.updateWallPort(portId, { pos_x: x, pos_y: y } as any);
+      } catch (error) {
+        console.error('Error updating wall port position:', error);
+      }
+    }, 500);
+  }, []);
+
+  const handleAssetTrace = useCallback((asset: Asset) => {
+    setTracingAsset(asset);
+    setSidePanelOpen(true);
+  }, []);
+
+  const CONN_COLORS: Record<string, string> = {
+    power: '#ef4444', network: '#3b82f6', ethernet: '#3b82f6',
+    fiber: '#8b5cf6', wifi: '#06b6d4', bluetooth: '#6366f1',
+    usb: '#f59e0b', serial: '#78716c', parallel: '#78716c',
+    dependency: '#f97316', 'parent-child': '#84cc16', peer: '#14b8a6',
+  };
+
   const handleConnectionTypeToggle = useCallback((type: string) => {
     setActiveConnectionTypes(prev => {
       const next = new Set(prev);
@@ -682,6 +726,9 @@ const MapView: React.FC = () => {
               <span className={styles.utilizationLabel}>
                 Floor {selectedFloor.floor_number} — {assets.length} asset{assets.length !== 1 ? 's' : ''}
                 {workareas.length > 0 && `, ${workareas.length} zone${workareas.length !== 1 ? 's' : ''}`}
+                {wallPorts.length > 0
+                  ? `, ${wallPorts.length} wall port${wallPorts.length !== 1 ? 's' : ''}`
+                  : ' · no wall ports'}
               </span>
               <div className={styles.utilizationStatuses}>
                 {(['active','maintenance','offline','retired'] as const).map(s => {
@@ -832,16 +879,206 @@ const MapView: React.FC = () => {
               onWorkareaRename={editMode ? handleWorkareaRename : undefined}
               onAssetStatusChange={handleAssetStatusChange}
               onAssetClick={(asset) => navigate(`/assets/${asset._id}`)}
+              onAssetTrace={handleAssetTrace}
               onAssetEdit={(asset) => setEditAsset(asset)}
               onAssetClone={handleAssetClone}
               onWorkareaClick={handleWorkareaClick}
               onConnectionDelete={handleConnectionDelete}
               activeConnectionTypes={activeConnectionTypes.size > 0 ? activeConnectionTypes : undefined}
+              allAssets={allAssets}
+              onNavigateToAsset={handleNavigateToAsset}
+              wallPorts={wallPorts}
+              onWallPortMove={editMode ? handleWallPortMove : undefined}
+              floorName={selectedFloor.name}
             />
 
             {sidePanelOpen && (
               <div className={styles.sidePanel}>
-                {selectedZoneId ? (() => {
+                {tracingAsset ? (
+                  /* ── Network Trace panel ── */
+                  <>
+                    <div className={styles.sidePanelHeader}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+                        <button className={styles.traceBack} onClick={() => setTracingAsset(null)}>← Back to list</button>
+                        <h4 style={{ margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          🔗 {tracingAsset.basic_info.display_name}
+                        </h4>
+                        <span style={{ fontSize: 11, color: 'var(--color-text-secondary)' }}>
+                          {tracingAsset.basic_info.type} · {tracingAsset.basic_info.status}
+                        </span>
+                      </div>
+                      <button className={styles.sidePanelClose} onClick={() => setTracingAsset(null)}>✕</button>
+                    </div>
+                    <div className={styles.sidePanelList}>
+                      {/* ── Physical connection ─────────────────────────── */}
+                      <div style={{ padding: '6px 12px 4px', fontSize: 10, fontWeight: 600, color: 'var(--color-text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px', borderBottom: '1px solid var(--color-gray-100)' }}>
+                        Physical Connection
+                      </div>
+                      {tracingAsset.wall_port ? (
+                        <div className={styles.traceConnection}>
+                          <div className={styles.traceEndpoint}>
+                            <div className={styles.traceEndpointName}>🔌 {tracingAsset.wall_port.label}
+                              {tracingAsset.wall_port.description && (
+                                <span style={{ fontWeight: 400, color: 'var(--color-text-secondary)', fontSize: 11 }}> — {tracingAsset.wall_port.description}</span>
+                              )}
+                            </div>
+                            {tracingAsset.wall_port.patch_panel_name && (
+                              <div className={styles.traceStep}>
+                                📋 {tracingAsset.wall_port.patch_panel_name}
+                                {tracingAsset.wall_port.patch_port != null && <span className={styles.traceStepBadge}>port {tracingAsset.wall_port.patch_port}</span>}
+                              </div>
+                            )}
+                            {tracingAsset.wall_port.rack_name && (
+                              <div className={styles.traceStep}>🗄️ {tracingAsset.wall_port.rack_name}</div>
+                            )}
+                            {tracingAsset.wall_port.room_name && (
+                              <div className={styles.traceStep}>
+                                🏠 {tracingAsset.wall_port.room_name}
+                                {tracingAsset.wall_port.room_type && <span className={styles.traceStepBadge}>{tracingAsset.wall_port.room_type.toUpperCase()}</span>}
+                              </div>
+                            )}
+                            {tracingAsset.wall_port.switch_port && (
+                              <div className={styles.traceStep}>🔀 switch port <span className={styles.traceStepMono}>{tracingAsset.wall_port.switch_port}</span></div>
+                            )}
+                            {tracingAsset.wall_port.switch_asset_id && (() => {
+                              const sw = allAssets.find(a => a._id === tracingAsset.wall_port!.switch_asset_id);
+                              return sw ? (
+                                <div className={styles.traceStep}>🖧 <span className={styles.traceStepMono}>{sw.basic_info.display_name}</span> <span className={styles.traceStepBadge}>{sw.basic_info.type}</span></div>
+                              ) : null;
+                            })()}
+                            {!tracingAsset.wall_port.patch_panel_id && (
+                              <div className={styles.traceUnpatched}>Not patched to a panel</div>
+                            )}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className={styles.traceUnpatched} style={{ padding: '8px 12px' }}>
+                          No wall port assigned — edit asset to set one
+                        </div>
+                      )}
+
+                      {/* ── Logical connections ─────────────────────────── */}
+                      <div style={{ padding: '6px 12px 4px', fontSize: 10, fontWeight: 600, color: 'var(--color-text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px', borderBottom: '1px solid var(--color-gray-100)', borderTop: '1px solid var(--color-gray-100)', marginTop: 4 }}>
+                        Logical Connections
+                      </div>
+                      {(() => {
+                        type TraceEdge = {
+                          peer_id: string;
+                          connection_type: string;
+                          bidirectional: boolean | undefined;
+                          label: string | undefined;
+                          direction: 'out' | 'in';
+                          patch_panel?: { panel_name?: string; panel_port?: string; switch_name?: string; switch_port?: string } | null;
+                        };
+                        const outgoing: TraceEdge[] = (tracingAsset.connections ?? []).map(c => ({
+                          peer_id: c.connected_asset_id,
+                          connection_type: c.connection_type,
+                          bidirectional: c.bidirectional,
+                          label: c.label,
+                          direction: 'out',
+                          patch_panel: c.patch_panel,
+                        }));
+                        const incoming: TraceEdge[] = [];
+                        for (const a of allAssets) {
+                          if (a._id === tracingAsset._id) continue;
+                          for (const c of a.connections ?? []) {
+                            if (c.connected_asset_id !== tracingAsset._id) continue;
+                            if (outgoing.some(o => o.peer_id === a._id && o.connection_type === c.connection_type)) continue;
+                            incoming.push({
+                              peer_id: a._id,
+                              connection_type: c.connection_type,
+                              bidirectional: c.bidirectional,
+                              label: c.label,
+                              direction: 'in',
+                              patch_panel: c.patch_panel,
+                            });
+                          }
+                        }
+                        const allEdges = [...outgoing, ...incoming];
+                        if (allEdges.length === 0) {
+                          return <div className={styles.traceEmpty}>No logical connections.</div>;
+                        }
+                        return allEdges.map((edge, i) => {
+                          const connectedPort = wallPorts.find(wp => wp._id === edge.peer_id);
+                          const connectedAsset = allAssets.find(a => a._id === edge.peer_id);
+                          const isOnFloor = filteredAssets.some(a => a._id === edge.peer_id);
+                          const lineColor = CONN_COLORS[edge.connection_type] ?? '#9ca3af';
+                          const dirLabel = edge.direction === 'in' ? ' ←' : edge.bidirectional ? ' ↔' : ' →';
+                          return (
+                            <div key={i} className={styles.traceConnection}>
+                              <div className={styles.traceConnType}>
+                                <span className={styles.traceConnDot} style={{ background: lineColor }} />
+                                <span>{edge.connection_type}{dirLabel}{edge.label ? ` · ${edge.label}` : ''}</span>
+                              </div>
+                              {connectedPort ? (
+                                <div className={styles.traceEndpoint}>
+                                  <div className={styles.traceEndpointName}>🔌 {connectedPort.label}</div>
+                                  {connectedPort.patch_panel_name && (
+                                    <div className={styles.traceStep}>
+                                      📋 {connectedPort.patch_panel_name}
+                                      {connectedPort.patch_port != null ? <span className={styles.traceStepBadge}>port {connectedPort.patch_port}</span> : null}
+                                    </div>
+                                  )}
+                                  {connectedPort.rack_name && (
+                                    <div className={styles.traceStep}>🗄️ {connectedPort.rack_name}</div>
+                                  )}
+                                  {connectedPort.room_name && (
+                                    <div className={styles.traceStep}>
+                                      🏠 {connectedPort.room_name}
+                                      {connectedPort.room_type && <span className={styles.traceStepBadge}>{connectedPort.room_type.toUpperCase()}</span>}
+                                    </div>
+                                  )}
+                                  {connectedPort.switch_port && (
+                                    <div className={styles.traceStep}>🔀 switch port <span className={styles.traceStepMono}>{connectedPort.switch_port}</span></div>
+                                  )}
+                                  {connectedPort.switch_asset_id && (() => {
+                                    const sw = allAssets.find(a => a._id === connectedPort.switch_asset_id);
+                                    return sw ? (
+                                      <div className={styles.traceStep}>🖧 <span className={styles.traceStepMono}>{sw.basic_info.display_name}</span> <span className={styles.traceStepBadge}>{sw.basic_info.type}</span></div>
+                                    ) : null;
+                                  })()}
+                                  {!connectedPort.patch_panel_id && (
+                                    <div className={styles.traceUnpatched}>Not patched to a panel</div>
+                                  )}
+                                </div>
+                              ) : connectedAsset ? (
+                                <div className={styles.traceEndpoint}>
+                                  <div className={styles.traceEndpointName}>
+                                    💻 {connectedAsset.basic_info.display_name}
+                                    {!isOnFloor && <span className={styles.traceFloorBadge}>↕ diff. floor</span>}
+                                  </div>
+                                  <div className={styles.traceEndpointSub}>
+                                    {connectedAsset.basic_info.type}
+                                    {connectedAsset.basic_info.status && ` · ${connectedAsset.basic_info.status}`}
+                                  </div>
+                                  {edge.patch_panel && (edge.patch_panel.panel_name || edge.patch_panel.switch_port) && (
+                                    <>
+                                      {edge.patch_panel.panel_name && (
+                                        <div className={styles.traceStep}>
+                                          📋 {edge.patch_panel.panel_name}
+                                          {edge.patch_panel.panel_port ? <span className={styles.traceStepBadge}>port {edge.patch_panel.panel_port}</span> : null}
+                                        </div>
+                                      )}
+                                      {edge.patch_panel.switch_name && (
+                                        <div className={styles.traceStep}>🖧 <span className={styles.traceStepMono}>{edge.patch_panel.switch_name}</span></div>
+                                      )}
+                                      {edge.patch_panel.switch_port && (
+                                        <div className={styles.traceStep}>🔀 switch port <span className={styles.traceStepMono}>{edge.patch_panel.switch_port}</span></div>
+                                      )}
+                                    </>
+                                  )}
+                                </div>
+                              ) : (
+                                <div className={styles.traceUnknown}>Unknown · {edge.peer_id.slice(0, 8)}…</div>
+                              )}
+                            </div>
+                          );
+                        });
+                      })()}
+                    </div>
+                  </>
+                ) : selectedZoneId ? (() => {
+                  /* ── Zone detail panel ── */
                   const zone = workareas.find(w => w._id === selectedZoneId);
                   const zoneAssets = zone ? filteredAssets.filter(a => {
                     if (a.hierarchy.workarea_id === zone._id) return true;
@@ -894,6 +1131,7 @@ const MapView: React.FC = () => {
                     </>
                   );
                 })() : (
+                  /* ── Default asset list panel ── */
                   <>
                     <div className={styles.sidePanelHeader}>
                       <h4>Assets ({filteredAssets.length})</h4>

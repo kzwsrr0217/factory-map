@@ -132,6 +132,21 @@ export interface Asset {
     alert_sent: boolean;
     created_at: string;
   }>;
+  wall_port_id?: string | null;
+  wall_port?: {
+    _id: string;
+    label: string;
+    floor_id: string;
+    patch_panel_id: string | null;
+    patch_panel_name: string | null;
+    patch_port: number | null;
+    rack_name: string | null;
+    room_name: string | null;
+    room_type: string | null;
+    switch_asset_id: string | null;
+    switch_port: string | null;
+    description: string | null;
+  } | null;
   connections?: Array<{
     connected_asset_id: string;
     connection_type: 'network' | 'power' | 'usb' | 'serial' | 'parallel' | 'bluetooth' | 'wifi' | 'ethernet' | 'fiber' | 'dependency' | 'parent-child' | 'peer' | 'other';
@@ -196,10 +211,10 @@ export const assetService = {
     return (response.data.data as Asset[]).map(normalizeAsset);
   },
 
-  // Get assets filtered by floor ID
+  // Get assets filtered by floor ID (includes connections for map rendering)
   getAssetsByFloor: async (floorId: string): Promise<Asset[]> => {
     const response = await api.get('/assets', {
-      params: { floor_id: floorId },
+      params: { floor_id: floorId, include_connections: 'true' },
     });
     return (response.data.data as Asset[]).map(normalizeAsset);
   },

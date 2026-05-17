@@ -15,7 +15,7 @@
  *     refresh. Links the user to /settings; dismissed via `clearPasswordExpired`.
  */
 import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { AlertTriangle, WifiOff, X } from 'lucide-react';
 import Header from './Header';
 import Sidebar from './Sidebar';
@@ -27,11 +27,28 @@ interface MainLayoutProps {
   children: React.ReactNode;
 }
 
+const MOBILE_BREAKPOINT = 768;
+
 const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const isMobile = () => window.innerWidth < MOBILE_BREAKPOINT;
+  const [sidebarOpen, setSidebarOpen] = useState(() => !isMobile());
   const [networkError, setNetworkError] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const { passwordExpired, clearPasswordExpired } = useAuth();
+  const location = useLocation();
+
+  // Auto-close sidebar on mobile when navigating
+  useEffect(() => {
+    if (isMobile()) setSidebarOpen(false);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname]);
+
+  // Close sidebar on mobile when window resizes to mobile
+  useEffect(() => {
+    const onResize = () => { if (isMobile()) setSidebarOpen(false); };
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
 
   useEffect(() => {
     const handleNetworkError = () => setNetworkError(true);
@@ -74,6 +91,7 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
         </div>
       )}
       <div className={styles.container}>
+        {sidebarOpen && <div className={styles.overlay} onClick={() => setSidebarOpen(false)} aria-hidden="true" />}
         <Sidebar isOpen={sidebarOpen} onShortcuts={() => setShortcutsOpen(true)} />
         <main className={styles.main}>
           {children}

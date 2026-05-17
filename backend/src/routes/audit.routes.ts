@@ -7,6 +7,60 @@
  *
  * This route is defined inline here rather than in a separate controller file
  * because it is the only audit route and the query logic is straightforward.
+ *
+ * @openapi
+ * tags:
+ *   - name: Audit
+ *     description: Read-only audit log
+ *
+ * /audit:
+ *   get:
+ *     tags: [Audit]
+ *     summary: Query audit log entries
+ *     parameters:
+ *       - in: query
+ *         name: username
+ *         schema: { type: string }
+ *         description: Partial match on username
+ *       - in: query
+ *         name: action
+ *         schema: { type: string }
+ *         description: Exact action name (e.g. create, update, delete, login)
+ *       - in: query
+ *         name: entity_type
+ *         schema: { type: string }
+ *         description: Entity type (e.g. Asset, Building, User)
+ *       - in: query
+ *         name: document_id
+ *         schema: { type: string }
+ *         description: Exact document/entity ID
+ *       - in: query
+ *         name: from
+ *         schema: { type: string, format: date-time }
+ *         description: Start of date range (ISO 8601)
+ *       - in: query
+ *         name: to
+ *         schema: { type: string, format: date-time }
+ *         description: End of date range (ISO 8601)
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 200, maximum: 1000 }
+ *       - in: query
+ *         name: offset
+ *         schema: { type: integer, default: 0 }
+ *     responses:
+ *       200:
+ *         description: Audit log entries with total count
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean }
+ *                 data: { type: array, items: { type: object } }
+ *                 total: { type: integer }
+ *                 limit: { type: integer }
+ *                 offset: { type: integer }
  */
 import { Router, Request, Response, NextFunction } from 'express';
 import { AppDataSource } from '../config/database';

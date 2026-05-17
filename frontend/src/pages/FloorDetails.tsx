@@ -557,6 +557,7 @@ const FloorDetails: React.FC = () => {
           connectionMode={wireMode}
           selectedAssetsForConnection={selectedForConnection}
           onAssetSelectForConnection={handleAssetSelectForConnection}
+          floorName={floor.name}
         />
       </Card>
 

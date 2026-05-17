@@ -74,4 +74,70 @@ export const handlers = [
   rest.get(`${API}/alerts/scheduled`, (_req, res, ctx) =>
     res(ctx.json({ success: true, data: [] })),
   ),
+
+  // Network infrastructure
+  rest.get(`${API}/network/rooms`, (_req, res, ctx) =>
+    res(ctx.json({
+      success: true,
+      data: [
+        {
+          _id: 'room-1', name: 'MDF-W1', type: 'mdf',
+          building_id: 'bld-1', floor_id: null, description: null,
+          redundant_pair_id: null, racks: [],
+          created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+        },
+        {
+          _id: 'room-2', name: 'IDF-W1-GF', type: 'idf',
+          building_id: 'bld-1', floor_id: 'floor-1', description: null,
+          redundant_pair_id: null, racks: [],
+          created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+        },
+      ],
+    })),
+  ),
+
+  rest.get(`${API}/network/rooms/:id`, (req, res, ctx) =>
+    res(ctx.json({
+      success: true,
+      data: {
+        _id: req.params.id, name: 'MDF-W1', type: 'mdf',
+        building_id: 'bld-1', floor_id: null, description: null,
+        redundant_pair_id: null, racks: [],
+        created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+      },
+    })),
+  ),
+
+  rest.post(`${API}/network/rooms`, (_req, res, ctx) =>
+    res(ctx.status(201), ctx.json({
+      success: true,
+      data: {
+        _id: 'room-new', name: 'New Room', type: 'idf',
+        building_id: 'bld-1', floor_id: null, description: null,
+        redundant_pair_id: null,
+        created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+      },
+    })),
+  ),
+
+  rest.get(`${API}/network/wall-ports`, (_req, res, ctx) =>
+    res(ctx.json({ success: true, data: [] })),
+  ),
+
+  // Buildings + Floors (for network infra building selector)
+  rest.get(`${API}/buildings`, (_req, res, ctx) =>
+    res(ctx.json({
+      success: true,
+      data: [{ _id: 'bld-1', name: 'WERK1 — Main Production', created_at: '', updated_at: '' }],
+    })),
+  ),
+
+  rest.get(`${API}/floors`, (_req, res, ctx) =>
+    res(ctx.json({
+      success: true,
+      data: [
+        { _id: 'floor-1', name: 'Ground Floor', floor_number: 0, building_id: 'bld-1', created_at: '', updated_at: '' },
+      ],
+    })),
+  ),
 ];

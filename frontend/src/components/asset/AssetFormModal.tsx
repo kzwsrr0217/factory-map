@@ -38,6 +38,7 @@ import Select from '../common/Select';
 import ConfirmDialog from '../common/ConfirmDialog';
 import { assetService, Asset, AssetStatus } from '../../services/asset.service';
 import { hierarchyService, Building } from '../../services/hierarchy.service';
+import { networkService, WallPort } from '../../services/network.service';
 import { ASSET_TYPE_OPTIONS } from '../../utils/assetTypes';
 import { ASSET_TEMPLATES } from '../../utils/assetTemplates';
 import { usePersonSuggestions } from '../../hooks/usePersonSuggestions';
@@ -71,6 +72,8 @@ const AssetFormModal: React.FC<AssetFormModalProps> = ({
 }) => {
   const [buildings, setBuildings] = useState<Building[]>([]);
   const [allAssets, setAllAssets] = useState<AssetOption[]>([]);
+  const [wallPorts, setWallPorts] = useState<WallPort[]>([]);
+  const [wallPortId, setWallPortId] = useState<string>('');
   const [predecessorSearch, setPredecessorSearch] = useState('');
   const [successorSearch, setSuccessorSearch] = useState('');
 
@@ -224,6 +227,12 @@ const AssetFormModal: React.FC<AssetFormModalProps> = ({
   }, [isOpen, asset]);
 
   useEffect(() => {
+    const floorId = formData.floor_id;
+    if (!floorId) { setWallPorts([]); return; }
+    networkService.getWallPorts({ floor_id: floorId }).then(setWallPorts).catch(() => {});
+  }, [formData.floor_id]);
+
+  useEffect(() => {
     if (asset) {
       setFormData({
         display_name: asset.basic_info.display_name || '',
@@ -335,6 +344,7 @@ const AssetFormModal: React.FC<AssetFormModalProps> = ({
         successor_id: '',
       });
     }
+    setWallPortId(asset?.wall_port_id || '');
     setPredecessorSearch('');
     setSuccessorSearch('');
     setErrors({});
@@ -510,6 +520,7 @@ const AssetFormModal: React.FC<AssetFormModalProps> = ({
 
       payload.predecessor_id = formData.predecessor_id || null;
       payload.successor_id = formData.successor_id || null;
+      payload.wall_port_id = wallPortId || null;
 
       if (asset) {
         await assetService.updateAsset(asset._id, payload);
@@ -950,6 +961,35 @@ const AssetFormModal: React.FC<AssetFormModalProps> = ({
             value={formData.mac_address}
             onChange={(e) => setField({ mac_address: e.target.value })}
           />
+
+          <div className={styles.inputWrapper}>
+            <label className={styles.inputLabel}>Physical Wall Port</label>
+            <select
+              className={styles.input}
+              value={wallPortId}
+              onChange={(e) => { setWallPortId(e.target.value); setIsDirty(true); }}
+            >
+              <option value="">— No wall port assigned —</option>
+              {wallPorts.map(wp => (
+                <option key={wp._id} value={wp._id}>
+                  {wp.label}
+                  {wp.patch_panel_name ? ` → ${wp.patch_panel_name}` : ''}
+                  {wp.patch_port != null ? ` port ${wp.patch_port}` : ''}
+                  {wp.switch_port ? ` (${wp.switch_port})` : ''}
+                </option>
+              ))}
+            </select>
+            {wallPortId && wallPorts.length === 0 && (
+              <span style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)' }}>
+                Select a floor first to see available wall ports
+              </span>
+            )}
+            {!wallPortId && formData.floor_id && wallPorts.length === 0 && (
+              <span style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)' }}>
+                No wall ports on this floor
+              </span>
+            )}
+          </div>
 
           <div className={styles.row}>
             <div className={styles.inputWrapper}>

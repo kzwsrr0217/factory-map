@@ -21,8 +21,10 @@
  *   /audit         → Audit log
  *   /unplaced      → Assets not yet on any floor map
  *   /alerts        → Maintenance alert configuration (admin)
+ *   /infrastructure→ Network infrastructure (IDF/MDF rooms, racks, patch panels)
  */
 import React from 'react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { AuthProvider } from './contexts/AuthContext';
@@ -44,10 +46,21 @@ import AuditLog from './pages/AuditLog';
 import UnplacedAssets from './pages/UnplacedAssets';
 import Alerts from './pages/Alerts';
 import NetworkGraph from './pages/NetworkGraph';
+import NetworkInfrastructure from './pages/NetworkInfrastructure';
 import Maintenance from './pages/Maintenance';
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 30_000,
+      retry: 1,
+    },
+  },
+});
 
 function App() {
   return (
+    <QueryClientProvider client={queryClient}>
     <ErrorBoundary>
       <ThemeProvider>
         <AuthProvider>
@@ -74,6 +87,7 @@ function App() {
                         <Route path="/unplaced" element={<UnplacedAssets />} />
                         <Route path="/alerts" element={<Alerts />} />
                         <Route path="/network" element={<NetworkGraph />} />
+                        <Route path="/infrastructure" element={<NetworkInfrastructure />} />
                         <Route path="/maintenance" element={<Maintenance />} />
                         <Route path="*" element={<Navigate to="/" replace />} />
                       </Routes>
@@ -87,6 +101,7 @@ function App() {
         </AuthProvider>
       </ThemeProvider>
     </ErrorBoundary>
+    </QueryClientProvider>
   );
 }
 

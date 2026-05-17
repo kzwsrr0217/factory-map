@@ -15,14 +15,17 @@
  * The "Create User" form at the top creates local (username + password)
  * accounts only. LDAP and Azure AD users are auto-provisioned on first login.
  */
-import React, { useEffect, useState } from 'react';
-import api from '../services/api';
+import React, { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import Button from '../components/common/Button';
 import Badge from '../components/common/Badge';
 import Card from '../components/common/Card';
 import ConfirmDialog from '../components/common/ConfirmDialog';
+import {
+  useUsers, useCreateUser, useUpdateUserRole,
+  useDeactivateUser, useActivateUser, useResetUserPassword,
+} from '../hooks/queries/useUsers';
 import styles from '../styles/pages/UserManagement.module.css';
 
 interface User {
@@ -58,150 +61,91 @@ const UserManagement: React.FC = () => {
   const { user: currentUser, isAdmin } = useAuth();
   const toast = useToast();
 
-  const [users, setUsers] = useState<User[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { data: users = [], isLoading: loading } = useUsers(!!isAdmin);
+  const createUser = useCreateUser();
+  const updateRole = useUpdateUserRole();
+  const deactivateUser = useDeactivateUser();
+  const activateUser = useActivateUser();
+  const resetPassword = useResetUserPassword();
 
-  // Create-form state
   const [newUsername, setNewUsername] = useState('');
   const [newEmail, setNewEmail] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [newRole, setNewRole] = useState<'admin' | 'operator' | 'viewer'>('viewer');
-  const [creating, setCreating] = useState(false);
 
-  // Reset password modal
   const [resetTarget, setResetTarget] = useState<User | null>(null);
   const [resetPw, setResetPw] = useState('');
-  const [resetting, setResetting] = useState(false);
 
-  // Action loading states
   const [actionLoading, setActionLoading] = useState<string | null>(null);
-
-  // Deactivate confirm
   const [deactivateTarget, setDeactivateTarget] = useState<User | null>(null);
 
-  const fetchUsers = async () => {
-    try {
-      const res = await api.get('/users');
-      setUsers(res.data.data ?? res.data);
-    } catch {
-      toast.error('Failed to load users.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    if (isAdmin) {
-      fetchUsers();
-    } else {
-      setLoading(false);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAdmin]);
-
-  const handleCreate = async (e: React.FormEvent) => {
+  const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newUsername.trim() || !newPassword.trim()) {
-      toast.error('Username and password are required.');
-      return;
-    }
-    if (getStrength(newPassword) < 5) {
-      toast.error('Password does not meet complexity requirements.');
-      return;
-    }
-    setCreating(true);
-    try {
-      const res = await api.post('/users', {
-        username: newUsername.trim(),
-        password: newPassword,
-        role: newRole,
-        email: newEmail.trim() || undefined,
-      });
-      const created: User = res.data.data ?? res.data;
-      setUsers((prev) => [created, ...prev]);
-      setNewUsername('');
-      setNewEmail('');
-      setNewPassword('');
-      setNewRole('viewer');
-      toast.success(`User "${created.username}" created.`);
-    } catch (err: any) {
-      const details = err?.response?.data?.details;
-      const msg = err?.response?.data?.error ?? 'Failed to create user.';
-      toast.error(details ? `${msg}: ${details.join(', ')}` : msg);
-    } finally {
-      setCreating(false);
-    }
+    if (!newUsername.trim() || !newPassword.trim()) { toast.error('Username and password are required.'); return; }
+    if (getStrength(newPassword) < 5) { toast.error('Password does not meet complexity requirements.'); return; }
+    createUser.mutate(
+      { username: newUsername.trim(), password: newPassword, role: newRole, email: newEmail.trim() || undefined },
+      {
+        onSuccess: created => {
+          setNewUsername(''); setNewEmail(''); setNewPassword(''); setNewRole('viewer');
+          toast.success(`User "${created.username}" created.`);
+        },
+        onError: (err: any) => {
+          const details = err?.response?.data?.details;
+          const msg = err?.response?.data?.error ?? 'Failed to create user.';
+          toast.error(details ? `${msg}: ${details.join(', ')}` : msg);
+        },
+      }
+    );
   };
 
-  const handleRoleChange = async (target: User, role: 'admin' | 'operator' | 'viewer') => {
+  const handleRoleChange = (target: User, role: 'admin' | 'operator' | 'viewer') => {
     setActionLoading(target._id + '-role');
-    try {
-      const res = await api.patch(`/users/${target._id}/role`, { role });
-      const updated: User = res.data.data;
-      setUsers((prev) => prev.map((u) => u._id === target._id ? { ...u, ...updated } : u));
-      toast.success(`"${target.username}" role updated to ${role}.`);
-    } catch (err: any) {
-      toast.error(err?.response?.data?.error ?? 'Failed to change role.');
-    } finally {
-      setActionLoading(null);
-    }
+    updateRole.mutate(
+      { id: target._id, role },
+      {
+        onSuccess: () => { toast.success(`"${target.username}" role updated to ${role}.`); setActionLoading(null); },
+        onError: (err: any) => { toast.error(err?.response?.data?.error ?? 'Failed to change role.'); setActionLoading(null); },
+      }
+    );
   };
 
-  const handleDeactivate = (target: User) => {
-    setDeactivateTarget(target);
-  };
+  const handleDeactivate = (target: User) => { setDeactivateTarget(target); };
 
-  const confirmDeactivate = async () => {
+  const confirmDeactivate = () => {
     if (!deactivateTarget) return;
     const target = deactivateTarget;
     setDeactivateTarget(null);
     setActionLoading(target._id + '-deactivate');
-    try {
-      await api.post(`/users/${target._id}/deactivate`);
-      setUsers((prev) => prev.map((u) => u._id === target._id ? { ...u, active: false } : u));
-      toast.success(`"${target.username}" deactivated.`);
-    } catch (err: any) {
-      toast.error(err?.response?.data?.error ?? 'Failed to deactivate user.');
-    } finally {
-      setActionLoading(null);
-    }
+    deactivateUser.mutate(target._id, {
+      onSuccess: () => { toast.success(`"${target.username}" deactivated.`); setActionLoading(null); },
+      onError: (err: any) => { toast.error(err?.response?.data?.error ?? 'Failed to deactivate user.'); setActionLoading(null); },
+    });
   };
 
-  const handleActivate = async (target: User) => {
+  const handleActivate = (target: User) => {
     setActionLoading(target._id + '-activate');
-    try {
-      await api.post(`/users/${target._id}/activate`);
-      setUsers((prev) =>
-        prev.map((u) => u._id === target._id ? { ...u, active: true, locked_until: null, failed_login_attempts: 0 } : u)
-      );
-      toast.success(`"${target.username}" activated.`);
-    } catch (err: any) {
-      toast.error(err?.response?.data?.error ?? 'Failed to activate user.');
-    } finally {
-      setActionLoading(null);
-    }
+    activateUser.mutate(target._id, {
+      onSuccess: () => { toast.success(`"${target.username}" activated.`); setActionLoading(null); },
+      onError: (err: any) => { toast.error(err?.response?.data?.error ?? 'Failed to activate user.'); setActionLoading(null); },
+    });
   };
 
-  const handleResetPassword = async (e: React.FormEvent) => {
+  const handleResetPassword = (e: React.FormEvent) => {
     e.preventDefault();
     if (!resetTarget || !resetPw) return;
-    if (getStrength(resetPw) < 5) {
-      toast.error('Password does not meet complexity requirements.');
-      return;
-    }
-    setResetting(true);
-    try {
-      await api.post(`/users/${resetTarget._id}/reset-password`, { newPassword: resetPw });
-      toast.success(`Password reset for "${resetTarget.username}".`);
-      setResetTarget(null);
-      setResetPw('');
-    } catch (err: any) {
-      const details = err?.response?.data?.details;
-      const msg = err?.response?.data?.error ?? 'Failed to reset password.';
-      toast.error(details ? `${msg}: ${details.join(', ')}` : msg);
-    } finally {
-      setResetting(false);
-    }
+    if (getStrength(resetPw) < 5) { toast.error('Password does not meet complexity requirements.'); return; }
+    resetPassword.mutate(
+      { id: resetTarget._id, password: resetPw },
+      {
+        onSuccess: () => { toast.success(`Password reset for "${resetTarget!.username}".`); setResetTarget(null); setResetPw(''); },
+        onError: (err: any) => {
+          const details = err?.response?.data?.details;
+          const msg = err?.response?.data?.error ?? 'Failed to reset password.';
+          toast.error(details ? `${msg}: ${details.join(', ')}` : msg);
+        },
+      }
+    );
   };
 
   const newPwStrength = getStrength(newPassword);
@@ -307,7 +251,7 @@ const UserManagement: React.FC = () => {
           </div>
 
           <div className={styles.field} style={{ justifyContent: 'flex-end' }}>
-            <Button type="submit" variant="primary" size="sm" loading={creating} disabled={creating}>
+            <Button type="submit" variant="primary" size="sm" loading={createUser.isPending} disabled={createUser.isPending}>
               Create User
             </Button>
           </div>
@@ -453,7 +397,7 @@ const UserManagement: React.FC = () => {
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             zIndex: 1000,
           }}
-          onClick={() => !resetting && setResetTarget(null)}
+          onClick={() => !resetPassword.isPending && setResetTarget(null)}
         >
           <div
             style={{
@@ -479,7 +423,7 @@ const UserManagement: React.FC = () => {
                   autoFocus
                   value={resetPw}
                   onChange={(e) => setResetPw(e.target.value)}
-                  disabled={resetting}
+                  disabled={resetPassword.isPending}
                 />
                 {resetPw && (
                   <>
@@ -499,10 +443,10 @@ const UserManagement: React.FC = () => {
                 )}
               </div>
               <div style={{ display: 'flex', gap: 'var(--spacing-sm)', justifyContent: 'flex-end' }}>
-                <Button variant="outline" size="sm" onClick={() => setResetTarget(null)} disabled={resetting}>
+                <Button variant="outline" size="sm" onClick={() => setResetTarget(null)} disabled={resetPassword.isPending}>
                   Cancel
                 </Button>
-                <Button variant="primary" size="sm" type="submit" loading={resetting} disabled={resetting || resetPwStrength < 5}>
+                <Button variant="primary" size="sm" type="submit" loading={resetPassword.isPending} disabled={resetPassword.isPending || resetPwStrength < 5}>
                   Reset Password
                 </Button>
               </div>

@@ -13,17 +13,16 @@
  * Only admins can save config or run Test Now (enforced by the backend on PUT /alerts/config
  * and POST /alerts/test). Scheduled alert management requires operator role or above.
  */
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useState } from 'react';
 import { Bell, Mail, MessageSquare, PlayCircle, Save, X, Clock, Trash2, Plus } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
+import { AlertConfig, AlertTestResult } from '../services/alert.service';
 import {
-  alertService,
-  AlertConfig,
-  AlertLog,
-  AlertTestResult,
-  ScheduledAlert,
-} from '../services/alert.service';
+  useAlertConfig, useAlertLogs, useScheduledAlerts,
+  useSaveAlertConfig, useTestAlert,
+  useCreateScheduledAlert, useDeleteScheduledAlert,
+} from '../hooks/queries/useAlerts';
 import styles from '../styles/pages/Alerts.module.css';
 
 const Alerts: React.FC = () => {
@@ -31,139 +30,102 @@ const Alerts: React.FC = () => {
   const toast = useToast();
   const isAdmin = user?.role === 'admin';
 
+  const { data: remoteConfig } = useAlertConfig();
+  const { data: logsData, refetch: refetchLogs } = useAlertLogs(1);
+  const { data: scheduledAlerts = [] } = useScheduledAlerts();
+  const logs = logsData?.logs ?? [];
+
+  const saveConfig = useSaveAlertConfig();
+  const testAlert = useTestAlert();
+  const createScheduled = useCreateScheduledAlert();
+  const deleteScheduled = useDeleteScheduledAlert();
+
+  // Local draft of config (editable before save)
   const [config, setConfig] = useState<AlertConfig | null>(null);
-  const [logs, setLogs] = useState<AlertLog[]>([]);
-  const [saving, setSaving] = useState(false);
-  const [testing, setTesting] = useState(false);
+  const effectiveConfig = config ?? remoteConfig ?? null;
+
   const [testResult, setTestResult] = useState<AlertTestResult | null>(null);
-
-  // Recipient chip input state
   const [recipientDraft, setRecipientDraft] = useState('');
-
-  // Scheduled alerts state
-  const [scheduledAlerts, setScheduledAlerts] = useState<ScheduledAlert[]>([]);
   const [newAlertTitle, setNewAlertTitle] = useState('');
   const [newAlertDesc, setNewAlertDesc] = useState('');
   const [newAlertDate, setNewAlertDate] = useState('');
   const [newAlertChannels, setNewAlertChannels] = useState<'email' | 'teams' | 'both'>('both');
   const [newAlertFilter, setNewAlertFilter] = useState('');
-  const [addingAlert, setAddingAlert] = useState(false);
-
-  const load = useCallback(async () => {
-    try {
-      const [cfg, { logs: l }, scheduled] = await Promise.all([
-        alertService.getConfig(),
-        alertService.getLogs(1, 50),
-        alertService.getScheduledAlerts(),
-      ]);
-      setConfig(cfg);
-      setLogs(l);
-      setScheduledAlerts(scheduled);
-    } catch {
-      toast.error('Failed to load alert settings');
-    }
-  }, [toast]);
-
-  useEffect(() => { load(); }, [load]);
 
   const handleToggle = (field: keyof AlertConfig) => {
-    if (!config) return;
-    setConfig({ ...config, [field]: !config[field as keyof AlertConfig] });
+    if (!effectiveConfig) return;
+    setConfig({ ...effectiveConfig, [field]: !effectiveConfig[field as keyof AlertConfig] });
   };
 
   const handleChange = (field: keyof AlertConfig, value: unknown) => {
-    if (!config) return;
-    setConfig({ ...config, [field]: value });
+    if (!effectiveConfig) return;
+    setConfig({ ...effectiveConfig, [field]: value });
   };
 
   const addRecipient = () => {
-    if (!config) return;
+    if (!effectiveConfig) return;
     const email = recipientDraft.trim().toLowerCase();
     if (!email || !email.includes('@')) return;
-    const current = config.email_recipients ?? [];
-    if (current.includes(email)) {
-      setRecipientDraft('');
-      return;
-    }
-    setConfig({ ...config, email_recipients: [...current, email] });
+    const current = effectiveConfig.email_recipients ?? [];
+    if (current.includes(email)) { setRecipientDraft(''); return; }
+    setConfig({ ...effectiveConfig, email_recipients: [...current, email] });
     setRecipientDraft('');
   };
 
   const removeRecipient = (email: string) => {
-    if (!config) return;
+    if (!effectiveConfig) return;
     setConfig({
-      ...config,
-      email_recipients: (config.email_recipients ?? []).filter(e => e !== email),
+      ...effectiveConfig,
+      email_recipients: (effectiveConfig.email_recipients ?? []).filter(e => e !== email),
     });
   };
 
-  const handleSave = async () => {
-    if (!config) return;
-    setSaving(true);
-    try {
-      const updated = await alertService.saveConfig(config);
-      setConfig(updated);
-      toast.success('Alert settings saved');
-    } catch {
-      toast.error('Failed to save alert settings');
-    } finally {
-      setSaving(false);
-    }
+  const handleSave = () => {
+    if (!effectiveConfig) return;
+    saveConfig.mutate(effectiveConfig, {
+      onSuccess: updated => { setConfig(updated); toast.success('Alert settings saved'); },
+      onError: () => toast.error('Failed to save alert settings'),
+    });
   };
 
-  const handleTest = async () => {
-    setTesting(true);
+  const handleTest = () => {
     setTestResult(null);
-    try {
-      const result = await alertService.testNow();
-      setTestResult(result);
-      toast.success(`Alert check complete — ${result.upcoming} upcoming, ${result.overdue} overdue`);
-      // Reload logs to show new entries
-      const { logs: newLogs } = await alertService.getLogs(1, 50);
-      setLogs(newLogs);
-    } catch {
-      toast.error('Alert test failed');
-    } finally {
-      setTesting(false);
-    }
+    testAlert.mutate(undefined, {
+      onSuccess: result => {
+        setTestResult(result);
+        toast.success(`Alert check complete — ${result.upcoming} upcoming, ${result.overdue} overdue`);
+        refetchLogs();
+      },
+      onError: () => toast.error('Alert test failed'),
+    });
   };
 
-  const handleCreateScheduledAlert = async () => {
+  const handleCreateScheduledAlert = () => {
     if (!newAlertTitle.trim() || !newAlertDate) return;
-    setAddingAlert(true);
-    try {
-      const created = await alertService.createScheduledAlert({
-        title: newAlertTitle.trim(),
-        description: newAlertDesc.trim() || undefined,
-        scheduled_for: new Date(newAlertDate).toISOString(),
-        channels: newAlertChannels,
-        asset_filter: newAlertFilter.trim() || undefined,
-      });
-      setScheduledAlerts(prev => [created, ...prev]);
-      setNewAlertTitle('');
-      setNewAlertDesc('');
-      setNewAlertDate('');
-      setNewAlertFilter('');
-      setNewAlertChannels('both');
-      toast.success('Scheduled alert created');
-    } catch {
-      toast.error('Failed to create scheduled alert');
-    } finally {
-      setAddingAlert(false);
-    }
+    createScheduled.mutate({
+      title: newAlertTitle.trim(),
+      description: newAlertDesc.trim() || undefined,
+      scheduled_for: new Date(newAlertDate).toISOString(),
+      channels: newAlertChannels,
+      asset_filter: newAlertFilter.trim() || undefined,
+    }, {
+      onSuccess: () => {
+        setNewAlertTitle(''); setNewAlertDesc(''); setNewAlertDate('');
+        setNewAlertFilter(''); setNewAlertChannels('both');
+        toast.success('Scheduled alert created');
+      },
+      onError: () => toast.error('Failed to create scheduled alert'),
+    });
   };
 
-  const handleDeleteScheduledAlert = async (id: string) => {
-    try {
-      await alertService.deleteScheduledAlert(id);
-      setScheduledAlerts(prev => prev.filter(a => a.id !== id));
-      toast.success('Scheduled alert removed');
-    } catch {
-      toast.error('Failed to delete scheduled alert');
-    }
+  const handleDeleteScheduledAlert = (id: string) => {
+    deleteScheduled.mutate(id, {
+      onSuccess: () => toast.success('Scheduled alert deleted'),
+      onError: () => toast.error('Failed to delete scheduled alert'),
+    });
   };
 
-  if (!config) {
+  if (!effectiveConfig) {
     return (
       <div className={styles.page}>
         <p className={styles.empty}>Loading…</p>
@@ -171,7 +133,7 @@ const Alerts: React.FC = () => {
     );
   }
 
-  const recipients = config.email_recipients ?? [];
+  const recipients = effectiveConfig.email_recipients ?? [];
 
   return (
     <div className={styles.page}>
@@ -199,7 +161,7 @@ const Alerts: React.FC = () => {
             <label className={styles.toggle}>
               <input
                 type="checkbox"
-                checked={config.alert_on_maintenance}
+                checked={effectiveConfig.alert_on_maintenance}
                 onChange={() => handleToggle('alert_on_maintenance')}
                 disabled={!isAdmin}
               />
@@ -215,7 +177,7 @@ const Alerts: React.FC = () => {
             <label className={styles.toggle}>
               <input
                 type="checkbox"
-                checked={config.alert_on_overdue}
+                checked={effectiveConfig.alert_on_overdue}
                 onChange={() => handleToggle('alert_on_overdue')}
                 disabled={!isAdmin}
               />
@@ -232,7 +194,7 @@ const Alerts: React.FC = () => {
               type="number"
               min={1}
               max={365}
-              value={config.days_before_alert}
+              value={effectiveConfig.days_before_alert}
               onChange={e => handleChange('days_before_alert', parseInt(e.target.value, 10) || 7)}
               disabled={!isAdmin}
               style={{ width: 80, textAlign: 'center', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', padding: '4px 8px', background: 'var(--color-bg-primary)', color: 'var(--color-text-primary)' }}
@@ -255,7 +217,7 @@ const Alerts: React.FC = () => {
             <label className={styles.toggle}>
               <input
                 type="checkbox"
-                checked={config.email_enabled}
+                checked={effectiveConfig.email_enabled}
                 onChange={() => handleToggle('email_enabled')}
                 disabled={!isAdmin}
               />
@@ -263,7 +225,7 @@ const Alerts: React.FC = () => {
             </label>
           </div>
 
-          {config.email_enabled && (
+          {effectiveConfig.email_enabled && (
             <div className={styles.field}>
               <span className={styles.label}>Recipients</span>
               {recipients.length > 0 && (
@@ -321,7 +283,7 @@ const Alerts: React.FC = () => {
             <label className={styles.toggle}>
               <input
                 type="checkbox"
-                checked={config.teams_enabled}
+                checked={effectiveConfig.teams_enabled}
                 onChange={() => handleToggle('teams_enabled')}
                 disabled={!isAdmin}
               />
@@ -329,7 +291,7 @@ const Alerts: React.FC = () => {
             </label>
           </div>
 
-          {config.teams_enabled && (
+          {effectiveConfig.teams_enabled && (
             <div className={styles.field}>
               <span className={styles.label}>Incoming Webhook URL</span>
               <span className={styles.hint}>
@@ -338,7 +300,7 @@ const Alerts: React.FC = () => {
               <input
                 type="url"
                 placeholder="https://yourcompany.webhook.office.com/..."
-                value={config.teams_webhook_url ?? ''}
+                value={effectiveConfig.teams_webhook_url ?? ''}
                 onChange={e => handleChange('teams_webhook_url', e.target.value || null)}
                 disabled={!isAdmin}
               />
@@ -403,12 +365,12 @@ const Alerts: React.FC = () => {
               <button
                 className="btn btn-primary"
                 onClick={handleCreateScheduledAlert}
-                disabled={addingAlert || !newAlertTitle.trim() || !newAlertDate}
+                disabled={createScheduled.isPending || !newAlertTitle.trim() || !newAlertDate}
                 type="button"
                 style={{ whiteSpace: 'nowrap' }}
               >
                 <Plus size={14} style={{ marginRight: 4 }} />
-                {addingAlert ? 'Adding…' : 'Add Alert'}
+                {createScheduled.isPending ? 'Adding…' : 'Add Alert'}
               </button>
             </div>
           </div>
@@ -487,19 +449,19 @@ const Alerts: React.FC = () => {
             <button
               className="btn btn-primary"
               onClick={handleSave}
-              disabled={saving}
+              disabled={saveConfig.isPending}
             >
               <Save size={16} style={{ marginRight: 6 }} />
-              {saving ? 'Saving…' : 'Save Settings'}
+              {saveConfig.isPending ? 'Saving…' : 'Save Settings'}
             </button>
             <button
               className="btn btn-secondary"
               onClick={handleTest}
-              disabled={testing}
+              disabled={testAlert.isPending}
               title="Run a maintenance check now and send notifications if assets are overdue or upcoming"
             >
               <PlayCircle size={16} style={{ marginRight: 6 }} />
-              {testing ? 'Running…' : 'Test Now'}
+              {testAlert.isPending ? 'Running…' : 'Test Now'}
             </button>
           </div>
         )}

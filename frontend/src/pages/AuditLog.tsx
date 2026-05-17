@@ -15,12 +15,13 @@
  *   CSV export   — downloads the full filtered log (up to server limit).
  *   Action icons — each AuditAction maps to a Lucide icon in ACTION_ICON.
  */
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useState } from 'react';
 import {
   Download, AlertTriangle, RefreshCw, LogIn, LogOut, Lock, KeyRound,
   Plus, Pencil, Trash2, ShieldAlert, ClipboardList, SearchX,
 } from 'lucide-react';
-import { auditService, AuditEntry, AuditAction, AuditQuery } from '../services/audit.service';
+import { AuditEntry, AuditAction, AuditQuery } from '../services/audit.service';
+import { useAuditLog } from '../hooks/queries/useAuditLog';
 import styles from '../styles/pages/AuditLog.module.css';
 
 const ACTION_ICON: Record<AuditAction, React.ReactNode> = {
@@ -64,10 +65,6 @@ const EntrySkeleton: React.FC = () => (
 );
 
 const AuditLog: React.FC = () => {
-  const [entries, setEntries] = useState<AuditEntry[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [fetchError, setFetchError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
 
   const [draftUsername, setDraftUsername] = useState('');
@@ -78,23 +75,10 @@ const AuditLog: React.FC = () => {
 
   const [query, setQuery] = useState<AuditQuery>({ limit: PAGE_SIZE, offset: 0 });
 
-  const fetchEntries = useCallback(async (q: AuditQuery) => {
-    setLoading(true);
-    setFetchError(null);
-    try {
-      const res = await auditService.getEntries(q);
-      setEntries(res.data);
-      setTotal(res.total);
-    } catch (err: any) {
-      setFetchError(err?.response?.data?.message ?? 'Could not load audit log.');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchEntries(query);
-  }, [query, fetchEntries]);
+  const { data, isLoading: loading, isError, refetch } = useAuditLog(query);
+  const entries: AuditEntry[] = data?.data ?? [];
+  const total = data?.total ?? 0;
+  const fetchError = isError ? 'Could not load audit log.' : null;
 
   const handleApply = () => {
     const newQuery: AuditQuery = {
@@ -239,7 +223,7 @@ const AuditLog: React.FC = () => {
         <div className={styles.errorState}>
           <AlertTriangle size={18} />
           <span>{fetchError}</span>
-          <button className={styles.retryBtn} onClick={() => fetchEntries(query)}>
+          <button className={styles.retryBtn} onClick={() => refetch()}>
             <RefreshCw size={13} style={{ marginRight: 4 }} />
             Retry
           </button>

@@ -81,6 +81,10 @@
  *                 properties:
  *                   building_id: { type: string }
  *                   floor_id: { type: string }
+ *               wall_port_id:
+ *                 type: string
+ *                 nullable: true
+ *                 description: FK to wall_ports — physical network drop this asset plugs into
  *     responses:
  *       201:
  *         description: Created asset
@@ -121,7 +125,7 @@
  *         application/json:
  *           schema:
  *             type: object
- *             description: Nested asset body (same shape as POST)
+ *             description: Nested asset body (same shape as POST). Set wall_port_id to assign/clear the physical port.
  *     responses:
  *       200:
  *         description: Updated asset

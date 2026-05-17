@@ -13,7 +13,7 @@
  *   Quick stats      — total assets, placed/unplaced counts derived from
  *                      assets fetched for this building.
  */
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Building2, Package, CheckCircle, Users, FileText, LayoutGrid, Monitor, MapPin, AlertTriangle } from 'lucide-react';
 import Card from '../components/common/Card';
@@ -24,71 +24,36 @@ import ConfirmDialog from '../components/common/ConfirmDialog';
 import BuildingFormModal from '../components/building/BuildingFormModal';
 import AssetFormModal from '../components/asset/AssetFormModal';
 import FloorFormModal from '../components/floor/FloorFormModal';
-import { hierarchyService, Building } from '../services/hierarchy.service';
-import { assetService, Asset } from '../services/asset.service';
-import { floorService, Floor } from '../services/floor.service';
+import { Floor } from '../services/floor.service';
 import { useToast } from '../contexts/ToastContext';
+import { useBuilding, useDeleteBuilding } from '../hooks/queries/useBuildings';
+import { useFloors, useDeleteFloor } from '../hooks/queries/useFloors';
+import { useAssets } from '../hooks/queries/useAssets';
 import styles from '../styles/pages/BuildingDetails.module.css';
 
 const BuildingDetails: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-
-  const [building, setBuilding] = useState<Building | null>(null);
-  const [assets, setAssets] = useState<Asset[]>([]);
-  const [floors, setFloors] = useState<Floor[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [formOpen, setFormOpen] = useState(false);
   const toast = useToast();
+
+  const { data: building, isLoading: loadingBuilding, isError } = useBuilding(id);
+  const { data: floors = [], refetch: refetchFloors } = useFloors(id);
+  const { data: allAssets = [] } = useAssets();
+
+  const assets = allAssets.filter(
+    a => a.hierarchy.building_id === id && a.basic_info && a.itsm
+  );
+
+  const deleteBuilding = useDeleteBuilding();
+  const deleteFloor = useDeleteFloor();
+
+  const [formOpen, setFormOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [deleting, setDeleting] = useState(false);
   const [assetFormOpen, setAssetFormOpen] = useState(false);
   const [floorFormOpen, setFloorFormOpen] = useState(false);
   const [editingFloor, setEditingFloor] = useState<Floor | null>(null);
   const [deletingFloor, setDeletingFloor] = useState<Floor | null>(null);
   const [deleteFloorDialogOpen, setDeleteFloorDialogOpen] = useState(false);
-
-  useEffect(() => {
-    if (id) {
-      loadBuildingDetails(id);
-    }
-  }, [id]);
-
-  const loadBuildingDetails = async (buildingId: string) => {
-    try {
-      setLoading(true);
-      const [buildingData, allAssets, floorsData] = await Promise.all([
-        hierarchyService.getBuilding(buildingId),
-        assetService.getAssets(),
-        floorService.getFloors(buildingId),
-      ]);
-
-      setBuilding(buildingData);
-      setFloors(floorsData);
-
-      // Filter assets for this building
-      const buildingAssets = allAssets.filter(
-        (asset) => asset.hierarchy.building_id === buildingId
-      );
-      setAssets(buildingAssets.filter((a) => a.basic_info && a.itsm));
-    } catch (err) {
-      console.error('Error loading building details:', err);
-      setError('Failed to load building details. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleEdit = () => {
-    setFormOpen(true);
-  };
-
-  const handleFormSuccess = () => {
-    if (id) {
-      loadBuildingDetails(id);
-    }
-  };
 
   const handleDelete = () => {
     if (assets.length > 0) {
@@ -98,35 +63,12 @@ const BuildingDetails: React.FC = () => {
     setDeleteDialogOpen(true);
   };
 
-  const confirmDelete = async () => {
+  const confirmDelete = () => {
     if (!building) return;
-
-    setDeleting(true);
-    try {
-      await hierarchyService.deleteBuilding(building._id);
-      navigate('/buildings');
-    } catch (err) {
-      console.error('Error deleting building:', err);
-      toast.error('Failed to delete building. Please try again.');
-    } finally {
-      setDeleting(false);
-      setDeleteDialogOpen(false);
-    }
-  };
-
-  const handleAddAsset = () => {
-    setAssetFormOpen(true);
-  };
-
-  const handleAssetFormSuccess = () => {
-    if (id) {
-      loadBuildingDetails(id);
-    }
-  };
-
-  const handleAddFloor = () => {
-    setEditingFloor(null);
-    setFloorFormOpen(true);
+    deleteBuilding.mutate(building._id, {
+      onSuccess: () => navigate('/buildings'),
+      onError: () => toast.error('Failed to delete building. Please try again.'),
+    });
   };
 
   const handleEditFloor = (floor: Floor, e: React.MouseEvent) => {
@@ -141,32 +83,19 @@ const BuildingDetails: React.FC = () => {
     setDeleteFloorDialogOpen(true);
   };
 
-  const confirmDeleteFloor = async () => {
+  const confirmDeleteFloor = () => {
     if (!deletingFloor) return;
-
-    setDeleting(true);
-    try {
-      await floorService.deleteFloor(deletingFloor._id);
-      if (id) {
-        loadBuildingDetails(id);
-      }
-    } catch (err) {
-      console.error('Error deleting floor:', err);
-      toast.error('Failed to delete floor. Please try again.');
-    } finally {
-      setDeleting(false);
-      setDeleteFloorDialogOpen(false);
-      setDeletingFloor(null);
-    }
+    deleteFloor.mutate(deletingFloor._id, {
+      onSuccess: () => {
+        refetchFloors();
+        setDeleteFloorDialogOpen(false);
+        setDeletingFloor(null);
+      },
+      onError: () => toast.error('Failed to delete floor. Please try again.'),
+    });
   };
 
-  const handleFloorFormSuccess = () => {
-    if (id) {
-      loadBuildingDetails(id);
-    }
-  };
-
-  if (loading) {
+  if (loadingBuilding) {
     return (
       <div className={styles.loading}>
         <div className={styles.spinner}></div>
@@ -175,15 +104,13 @@ const BuildingDetails: React.FC = () => {
     );
   }
 
-  if (error) {
+  if (isError) {
     return (
       <Card padding="lg">
         <div className={styles.empty}>
           <AlertTriangle size={32} style={{ color: 'var(--color-danger)', marginBottom: 8 }} />
-          <h3>{error}</h3>
-          <Button variant="outline" onClick={() => id && loadBuildingDetails(id)}>
-            Retry
-          </Button>
+          <h3>Failed to load building details.</h3>
+          <Button variant="outline" onClick={() => navigate('/buildings')}>Back to Buildings</Button>
         </div>
       </Card>
     );
@@ -194,16 +121,14 @@ const BuildingDetails: React.FC = () => {
       <Card padding="lg">
         <div className={styles.empty}>
           <h3>Building not found</h3>
-          <Button variant="outline" onClick={() => navigate('/buildings')}>
-            Back to Buildings
-          </Button>
+          <Button variant="outline" onClick={() => navigate('/buildings')}>Back to Buildings</Button>
         </div>
       </Card>
     );
   }
 
-  const itsmManagedCount = assets.filter((a) => a.itsm?.is_managed).length;
-  const assignedCount = assets.filter((a) => a.assigned_person).length;
+  const itsmManagedCount = assets.filter(a => a.itsm?.is_managed).length;
+  const assignedCount = assets.filter(a => a.assigned_person).length;
 
   return (
     <div className={styles.buildingDetails}>
@@ -212,14 +137,10 @@ const BuildingDetails: React.FC = () => {
         { label: building.name },
       ]} />
 
-      {/* Header */}
       <div className={styles.header}>
-        <Button variant="outline" onClick={() => navigate('/buildings')}>
-          ← Back
-        </Button>
+        <Button variant="outline" onClick={() => navigate('/buildings')}>← Back</Button>
       </div>
 
-      {/* Building Info Card */}
       <Card padding="lg" className={styles.infoCard}>
         <div className={styles.buildingHeader}>
           <div className={styles.buildingIcon}><Building2 size={28} /></div>
@@ -230,32 +151,23 @@ const BuildingDetails: React.FC = () => {
             )}
           </div>
           <div className={styles.buildingActions}>
-            <Button variant="outline" onClick={handleEdit}>
-              Edit
-            </Button>
-            <Button variant="danger" onClick={handleDelete} loading={deleting}>
-              Delete
-            </Button>
+            <Button variant="outline" onClick={() => setFormOpen(true)}>Edit</Button>
+            <Button variant="danger" onClick={handleDelete} loading={deleteBuilding.isPending}>Delete</Button>
           </div>
         </div>
 
-        {/* Metadata */}
         {building.metadata && (
           <div className={styles.metadata}>
             {building.metadata.total_area && (
               <div className={styles.metadataItem}>
                 <span className={styles.metadataLabel}>Total Area</span>
-                <span className={styles.metadataValue}>
-                  {building.metadata.total_area} m²
-                </span>
+                <span className={styles.metadataValue}>{building.metadata.total_area} m²</span>
               </div>
             )}
             {building.metadata.construction_year && (
               <div className={styles.metadataItem}>
                 <span className={styles.metadataLabel}>Construction Year</span>
-                <span className={styles.metadataValue}>
-                  {building.metadata.construction_year}
-                </span>
+                <span className={styles.metadataValue}>{building.metadata.construction_year}</span>
               </div>
             )}
             <div className={styles.metadataItem}>
@@ -266,7 +178,6 @@ const BuildingDetails: React.FC = () => {
         )}
       </Card>
 
-      {/* Stats Grid */}
       <div className={styles.statsGrid}>
         <Card padding="lg">
           <div className={styles.stat}>
@@ -277,7 +188,6 @@ const BuildingDetails: React.FC = () => {
             </div>
           </div>
         </Card>
-
         <Card padding="lg">
           <div className={styles.stat}>
             <div className={styles.statIcon}><CheckCircle size={22} /></div>
@@ -287,7 +197,6 @@ const BuildingDetails: React.FC = () => {
             </div>
           </div>
         </Card>
-
         <Card padding="lg">
           <div className={styles.stat}>
             <div className={styles.statIcon}><Users size={22} /></div>
@@ -297,7 +206,6 @@ const BuildingDetails: React.FC = () => {
             </div>
           </div>
         </Card>
-
         <Card padding="lg">
           <div className={styles.stat}>
             <div className={styles.statIcon}><FileText size={22} /></div>
@@ -309,48 +217,27 @@ const BuildingDetails: React.FC = () => {
         </Card>
       </div>
 
-      {/* Floors Section */}
       <Card padding="lg">
         <div className={styles.sectionHeader}>
           <h2>Floors</h2>
-          <Button variant="outline" onClick={handleAddFloor}>
-            + Add Floor
-          </Button>
+          <Button variant="outline" onClick={() => { setEditingFloor(null); setFloorFormOpen(true); }}>+ Add Floor</Button>
         </div>
-
         {floors.length > 0 ? (
           <div className={styles.floorsList}>
-            {floors.map((floor) => (
-              <div
-                key={floor._id}
-                className={styles.floorItem}
-                onClick={() => navigate(`/floors/${floor._id}`)}
-              >
+            {floors.map(floor => (
+              <div key={floor._id} className={styles.floorItem} onClick={() => navigate(`/floors/${floor._id}`)}>
                 <div className={styles.floorIcon}><LayoutGrid size={20} /></div>
                 <div className={styles.floorInfo}>
                   <h4 className={styles.floorName}>{floor.name}</h4>
                   <p className={styles.floorDetails}>
                     Level: {floor.floor_number}
                     {floor.metadata?.area && ` • ${floor.metadata.area} m²`}
-                    {floor.metadata?.ceiling_height &&
-                      ` • Height: ${floor.metadata.ceiling_height}m`}
+                    {floor.metadata?.ceiling_height && ` • Height: ${floor.metadata.ceiling_height}m`}
                   </p>
                 </div>
                 <div className={styles.floorActions}>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={(e) => handleEditFloor(floor, e)}
-                  >
-                    Edit
-                  </Button>
-                  <Button
-                    variant="danger"
-                    size="sm"
-                    onClick={(e) => handleDeleteFloor(floor, e)}
-                  >
-                    Delete
-                  </Button>
+                  <Button variant="outline" size="sm" onClick={e => handleEditFloor(floor, e)}>Edit</Button>
+                  <Button variant="danger" size="sm" onClick={e => handleDeleteFloor(floor, e)}>Delete</Button>
                 </div>
               </div>
             ))}
@@ -358,40 +245,26 @@ const BuildingDetails: React.FC = () => {
         ) : (
           <div className={styles.emptyFloors}>
             <p>No floors found in this building</p>
-            <Button variant="outline" onClick={handleAddFloor}>
-              + Add First Floor
-            </Button>
+            <Button variant="outline" onClick={() => { setEditingFloor(null); setFloorFormOpen(true); }}>+ Add First Floor</Button>
           </div>
         )}
       </Card>
 
-      {/* Assets List */}
       <Card padding="lg">
         <div className={styles.sectionHeader}>
           <h2>Assets in this Building</h2>
-          <Button variant="primary" onClick={handleAddAsset}>
-            + Add Asset
-          </Button>
+          <Button variant="primary" onClick={() => setAssetFormOpen(true)}>+ Add Asset</Button>
         </div>
-
         {assets.length > 0 ? (
           <div className={styles.assetsList}>
-            {assets.map((asset) => (
-              <div
-                key={asset._id}
-                className={styles.assetItem}
-                onClick={() => navigate(`/assets/${asset._id}`)}
-              >
+            {assets.map(asset => (
+              <div key={asset._id} className={styles.assetItem} onClick={() => navigate(`/assets/${asset._id}`)}>
                 <div className={styles.assetIcon}><Monitor size={20} /></div>
                 <div className={styles.assetInfo}>
                   <h4 className={styles.assetName}>{asset.basic_info?.display_name}</h4>
-                  <p className={styles.assetDetails}>
-                    {asset.basic_info?.manufacturer} {asset.basic_info?.model}
-                  </p>
+                  <p className={styles.assetDetails}>{asset.basic_info?.manufacturer} {asset.basic_info?.model}</p>
                   {asset.assigned_person && (
-                    <p className={styles.assetPerson}>
-                      {asset.assigned_person.full_name}
-                    </p>
+                    <p className={styles.assetPerson}>{asset.assigned_person.full_name}</p>
                   )}
                 </div>
                 <div className={styles.assetBadge}>
@@ -405,22 +278,18 @@ const BuildingDetails: React.FC = () => {
         ) : (
           <div className={styles.emptyAssets}>
             <p>No assets found in this building</p>
-            <Button variant="primary" onClick={handleAddAsset}>
-              + Add First Asset
-            </Button>
+            <Button variant="primary" onClick={() => setAssetFormOpen(true)}>+ Add First Asset</Button>
           </div>
         )}
       </Card>
 
-      {/* Building Form Modal */}
       <BuildingFormModal
         isOpen={formOpen}
         onClose={() => setFormOpen(false)}
-        onSuccess={handleFormSuccess}
+        onSuccess={() => setFormOpen(false)}
         building={building}
       />
 
-      {/* Delete Building Confirmation */}
       <ConfirmDialog
         isOpen={deleteDialogOpen}
         onClose={() => setDeleteDialogOpen(false)}
@@ -428,28 +297,25 @@ const BuildingDetails: React.FC = () => {
         title="Delete Building"
         message={`Are you sure you want to delete "${building?.name}"? This action cannot be undone.`}
         confirmText="Delete"
-        loading={deleting}
+        loading={deleteBuilding.isPending}
         variant="danger"
       />
 
-      {/* Asset Form Modal */}
       <AssetFormModal
         isOpen={assetFormOpen}
         onClose={() => setAssetFormOpen(false)}
-        onSuccess={handleAssetFormSuccess}
+        onSuccess={() => setAssetFormOpen(false)}
         defaultBuildingId={id}
       />
 
-      {/* Floor Form Modal */}
       <FloorFormModal
         isOpen={floorFormOpen}
         onClose={() => setFloorFormOpen(false)}
-        onSuccess={handleFloorFormSuccess}
+        onSuccess={() => { refetchFloors(); setFloorFormOpen(false); }}
         buildingId={id || ''}
         floor={editingFloor}
       />
 
-      {/* Delete Floor Confirmation */}
       <ConfirmDialog
         isOpen={deleteFloorDialogOpen}
         onClose={() => setDeleteFloorDialogOpen(false)}
@@ -457,7 +323,7 @@ const BuildingDetails: React.FC = () => {
         title="Delete Floor"
         message={`Are you sure you want to delete "${deletingFloor?.name}"? This action cannot be undone.`}
         confirmText="Delete"
-        loading={deleting}
+        loading={deleteFloor.isPending}
         variant="danger"
       />
     </div>

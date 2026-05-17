@@ -25,6 +25,7 @@ import authRoutes from './auth.routes';
 import userRoutes from './user.routes';
 import auditRoutes from './audit.routes';
 import alertRoutes from './alert.routes';
+import networkRoutes from './network.routes';
 import { authenticate } from '../middleware/auth.middleware';
 
 const router = Router();
@@ -45,5 +46,6 @@ router.use('/itsm', itsmRoutes);
 router.use('/users', userRoutes);
 router.use('/audit', auditRoutes);
 router.use('/alerts', alertRoutes);
+router.use('/network', networkRoutes);
 
 export default router;
