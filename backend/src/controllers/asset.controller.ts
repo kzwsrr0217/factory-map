@@ -292,13 +292,16 @@ export const getAllAssets = async (req: Request, res: Response, next: NextFuncti
 
     if (page && limit) {
       const p = Math.max(1, parseInt(page, 10));
-      const l = Math.min(200, Math.max(1, parseInt(limit, 10)));
+      const l = Math.min(500, Math.max(1, parseInt(limit, 10)));
       qb.skip((p - 1) * l).take(l);
       const [assets, total] = await qb.getManyAndCount();
-      res.json({ success: true, data: assets.map((a) => a.toApiResponse()), total, page: p, limit: l, pages: Math.ceil(total / l) });
+      res.json({ success: true, data: assets.map((a) => a.toApiResponse()), meta: { total, page: p, limit: l, totalPages: Math.ceil(total / l) } });
     } else {
-      const assets = await qb.getMany();
-      res.json({ success: true, data: assets.map((a) => a.toApiResponse()) });
+      // No explicit pagination — apply a safety cap so large datasets don't cause full-table reads
+      const CAP = 1000;
+      qb.take(CAP);
+      const [assets, total] = await qb.getManyAndCount();
+      res.json({ success: true, data: assets.map((a) => a.toApiResponse()), meta: { total, limit: CAP, truncated: total > CAP } });
     }
   } catch (error) { next(error); }
 };

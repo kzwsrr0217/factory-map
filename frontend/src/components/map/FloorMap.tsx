@@ -32,7 +32,6 @@
  */
 import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import jsPDF from 'jspdf';
 import { WorkArea } from '../../services/workarea.service';
 import { Asset } from '../../services/asset.service';
 import { WallPort } from '../../services/network.service';
@@ -40,6 +39,186 @@ import Tooltip from '../common/Tooltip';
 import ConfirmDialog from '../common/ConfirmDialog';
 import { getAssetIcon, ASSET_TYPE_MAP } from '../../utils/assetTypes';
 import styles from '../../styles/components/FloorMap.module.css';
+
+// ── Module-level pure helpers (no component state dependency) ─────────────────
+
+function getAssetStatus(asset: Asset): string {
+  return asset.basic_info.status || 'unknown';
+}
+
+function getAssetColor(asset: Asset): string {
+  const status = getAssetStatus(asset);
+  if (status === 'Decommissioned' || status === 'Retired' || status === 'retired') return '#9ca3af';
+  switch (status) {
+    case 'active':      return '#10b981';
+    case 'maintenance': return '#f59e0b';
+    case 'offline':     return '#ef4444';
+    default:            return '#6b7280';
+  }
+}
+
+function isEolOs(asset: Asset): boolean {
+  const ver  = (asset.basic_info.os_version ?? '').toLowerCase();
+  const type = (asset.basic_info.os_type    ?? '').toLowerCase();
+  return /\b(7|xp|vista|2003|2008)\b/.test(ver) || (type === 'windows' && /\b7\b/.test(ver));
+}
+
+function isDecommissioned(asset: Asset): boolean {
+  const s = (asset.basic_info.status ?? '').toLowerCase();
+  return s === 'decommissioned' || s === 'retired';
+}
+
+function hasItsmConflict(asset: Asset): boolean {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return !!(asset as any).itsm_snapshot?.display_name && asset.itsm?.source_of_truth === 'local';
+}
+
+// ── Memoized per-asset SVG marker — only re-renders when its own props change ─
+
+interface AssetMarkerProps {
+  asset: Asset;
+  isDragging: boolean;
+  isHighlighted: boolean;
+  isSelectedForConnection: boolean;
+  isCrossFloor: boolean;
+  showLabels: boolean;
+  editable: boolean;
+  onDragStart: (asset: Asset, e: React.MouseEvent) => void;
+  onClick:     (asset: Asset, e: React.MouseEvent) => void;
+  onHover:     (e: React.MouseEvent, content: React.ReactNode) => void;
+  onHoverEnd:  () => void;
+}
+
+const AssetMarker = React.memo(function AssetMarker({
+  asset, isDragging, isHighlighted, isSelectedForConnection, isCrossFloor,
+  showLabels, editable, onDragStart, onClick, onHover, onHoverEnd,
+}: AssetMarkerProps) {
+  const x = asset.location.coordinates.x;
+  const y = asset.location.coordinates.y;
+  const eolOs        = isEolOs(asset);
+  const decomm       = isDecommissioned(asset);
+  const itsmConflict = hasItsmConflict(asset);
+  const isIsolated   = !asset.assigned_person && (!asset.connections || asset.connections.length === 0);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const cf = (asset as any).custom_fields;
+  const objectId = cf?.object_id as string | undefined;
+
+  const tooltipContent = (
+    <div>
+      <h4>{getAssetIcon(asset.basic_info.type)} {asset.basic_info.display_name}</h4>
+      {objectId && <p><span className={styles.label}>Station ID:</span> {objectId}</p>}
+      {asset.itsm.hardware_asset_id && <p><span className={styles.label}>HWA ID:</span> {asset.itsm.hardware_asset_id}</p>}
+      {asset.basic_info.manufacturer && asset.basic_info.model && (
+        <p><span className={styles.label}>Model:</span> {asset.basic_info.manufacturer} {asset.basic_info.model}</p>
+      )}
+      {asset.basic_info.serial_number && (
+        <p><span className={styles.label}>S/N:</span> {asset.basic_info.serial_number}</p>
+      )}
+      {(asset.basic_info.os_type || asset.basic_info.os_version) && (
+        <p>
+          <span className={styles.label}>OS:</span>{' '}
+          {asset.basic_info.os_type} {asset.basic_info.os_version}
+          {eolOs && <span style={{ color: '#f59e0b', fontWeight: 'bold' }}> ⚠ EOL</span>}
+        </p>
+      )}
+      {asset.assigned_person && (
+        <p><span className={styles.label}>Assigned:</span> {asset.assigned_person.full_name}</p>
+      )}
+      {cf?.remote_access_tool && <p><span className={styles.label}>Remote:</span> {cf.remote_access_tool}</p>}
+      {cf?.backup_tool && <p><span className={styles.label}>Backup:</span> {cf.backup_tool} ({cf.backup_status ?? 'unknown'})</p>}
+      <p>
+        <span className={styles.label}>Status:</span>{' '}
+        {decomm ? '⚫ Decommissioned' :
+         getAssetStatus(asset) === 'active' ? '🟢 Active' :
+         getAssetStatus(asset) === 'maintenance' ? '🟡 Maintenance' :
+         getAssetStatus(asset) === 'offline' ? '🔴 Offline' : '⚪ Unknown'}
+      </p>
+      {itsmConflict && <p style={{ color: '#f59e0b', fontWeight: 'bold' }}>⚠ ITSM changes pending</p>}
+      {asset.maintenance?.next_date && new Date(asset.maintenance.next_date) < new Date() && (
+        <p style={{ color: '#ef4444', fontWeight: 'bold' }}>⚠ Maintenance overdue</p>
+      )}
+      <p style={{ fontSize: '10px', marginTop: '4px', fontStyle: 'italic' }}>Click for full details</p>
+    </div>
+  );
+
+  return (
+    <g opacity={decomm ? 0.45 : 1}>
+      {isHighlighted && (
+        <circle cx={x} cy={y} r="24" fill="none" stroke="#2563eb" strokeWidth="3" opacity="0.9" />
+      )}
+      {isIsolated && !isHighlighted && (
+        <circle cx={x} cy={y} r="20" fill="none" stroke="#9ca3af" strokeWidth="2" strokeDasharray="4,3" opacity="0.7" />
+      )}
+      {isSelectedForConnection && (
+        <circle cx={x} cy={y} r="20" fill="none" stroke="#ff6b35" strokeWidth="3" strokeDasharray="5,5" opacity="0.8" />
+      )}
+      <circle
+        cx={x}
+        cy={y}
+        r="15"
+        fill={getAssetColor(asset)}
+        stroke="#fff"
+        strokeWidth="3"
+        className={`${styles.asset} ${isDragging ? styles.dragging : ''}`}
+        onMouseDown={(e) => onDragStart(asset, e)}
+        onClick={(e) => onClick(asset, e)}
+        onMouseEnter={(e) => onHover(e as any, tooltipContent)}
+        onMouseLeave={onHoverEnd}
+        style={{ cursor: editable ? 'move' : 'pointer' }}
+      />
+      <text x={x} y={y + 5} textAnchor="middle" className={styles.assetIcon} pointerEvents="none" style={{ fontSize: '14px' }}>
+        {getAssetIcon(asset.basic_info.type)}
+      </text>
+      {decomm && (
+        <g pointerEvents="none">
+          <line x1={x - 10} y1={y - 10} x2={x + 10} y2={y + 10} stroke="#6b7280" strokeWidth="2.5" />
+          <line x1={x + 10} y1={y - 10} x2={x - 10} y2={y + 10} stroke="#6b7280" strokeWidth="2.5" />
+        </g>
+      )}
+      {showLabels && (
+        <>
+          <text x={x} y={y + 33} textAnchor="middle" className={styles.assetLabel} pointerEvents="none"
+            stroke="white" strokeWidth="3" paintOrder="stroke"
+            style={{ fontSize: '11px', fontWeight: 'bold', fill: '#1f2937' }}>
+            {asset.basic_info.display_name.length > 16
+              ? asset.basic_info.display_name.slice(0, 14) + '…'
+              : asset.basic_info.display_name}
+          </text>
+          {objectId && (
+            <text x={x} y={y + 45} textAnchor="middle" pointerEvents="none"
+              stroke="white" strokeWidth="2" paintOrder="stroke"
+              style={{ fontSize: '9px', fill: '#6b7280', fontFamily: 'monospace' }}>
+              {objectId}
+            </text>
+          )}
+        </>
+      )}
+      {eolOs && !decomm && (
+        <g pointerEvents="none">
+          <circle cx={x - 12} cy={y - 12} r="7" fill="#f59e0b" stroke="#fff" strokeWidth="2" />
+          <text x={x - 12} y={y - 8} textAnchor="middle" fill="#fff" fontSize="9" fontWeight="bold">!</text>
+        </g>
+      )}
+      {itsmConflict && (
+        <g pointerEvents="none">
+          <circle cx={x + 12} cy={y - 12} r="5" fill="#f97316" stroke="#fff" strokeWidth="1.5" />
+        </g>
+      )}
+      {isCrossFloor && (
+        <g pointerEvents="none">
+          <circle cx={x - 13} cy={y + 13} r="7" fill="#06b6d4" stroke="#fff" strokeWidth="2" />
+          <text x={x - 13} y={y + 17} textAnchor="middle" fill="#fff" fontSize="8" fontWeight="bold">↕</text>
+        </g>
+      )}
+      {!decomm && asset.maintenance?.next_date && new Date(asset.maintenance.next_date) < new Date() && (
+        <g pointerEvents="none">
+          <circle cx={x + 11} cy={y - 11} r="7" fill="#ef4444" stroke="#fff" strokeWidth="2" />
+          <text x={x + 11} y={y - 7} textAnchor="middle" fill="#fff" fontSize="9" fontWeight="bold">!</text>
+        </g>
+      )}
+    </g>
+  );
+});
 
 interface FloorMapProps {
   workareas: WorkArea[];
@@ -170,6 +349,9 @@ const FloorMap: React.FC<FloorMapProps> = ({
   });
 
   const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  // Ref-mirror of dragging so stable callbacks can read current value without being in the dep array
+  const draggingRef = useRef(dragging);
+  useEffect(() => { draggingRef.current = dragging; }, [dragging]);
 
   // Cancel placing mode on Escape
   useEffect(() => {
@@ -505,9 +687,11 @@ const FloorMap: React.FC<FloorMapProps> = ({
   }, []);
 
   // Export as PDF (A4 landscape, with header)
-  const handleExportPdf = useCallback(() => {
+  const handleExportPdf = useCallback(async () => {
     const svg = svgRef.current;
     if (!svg) return;
+
+    const { default: jsPDF } = await import('jspdf');
 
     const W = 1200, H = 900;
     const svgData = new XMLSerializer().serializeToString(svg);
@@ -565,29 +749,18 @@ const FloorMap: React.FC<FloorMapProps> = ({
   }, []);
 
   // Tooltip handlers
-  const showTooltip = (e: React.MouseEvent, content: React.ReactNode) => {
-    if (editable || dragging) return;
-
-    if (hoverTimeoutRef.current) {
-      clearTimeout(hoverTimeoutRef.current);
-    }
-
+  const showTooltip = useCallback((e: React.MouseEvent, content: React.ReactNode) => {
+    if (editable || draggingRef.current) return;
+    if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
     hoverTimeoutRef.current = setTimeout(() => {
-      setTooltip({
-        visible: true,
-        x: e.clientX,
-        y: e.clientY,
-        content,
-      });
+      setTooltip({ visible: true, x: e.clientX, y: e.clientY, content });
     }, 500);
-  };
+  }, [editable]);
 
-  const hideTooltip = () => {
-    if (hoverTimeoutRef.current) {
-      clearTimeout(hoverTimeoutRef.current);
-    }
+  const hideTooltip = useCallback(() => {
+    if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
     setTooltip({ visible: false, x: 0, y: 0, content: null });
-  };
+  }, []);
 
   const handleMapClick = (e: React.MouseEvent<SVGRectElement>) => {
     if (pannedRef.current) { pannedRef.current = false; return; }
@@ -651,26 +824,23 @@ const FloorMap: React.FC<FloorMapProps> = ({
   };
 
   // Start dragging asset
-  const startDraggingAsset = (asset: Asset, e: React.MouseEvent) => {
+  const startDraggingAsset = useCallback((asset: Asset, e: React.MouseEvent) => {
     if (!editable) return;
     e.stopPropagation();
     hideTooltip();
-
     const svg = svgRef.current;
     if (!svg) return;
-
     const point = svg.createSVGPoint();
     point.x = e.clientX;
     point.y = e.clientY;
     const svgPoint = point.matrixTransform(svg.getScreenCTM()?.inverse());
-
     setDragging({
       type: 'asset',
       id: asset._id,
       offsetX: svgPoint.x - asset.location.coordinates.x,
       offsetY: svgPoint.y - asset.location.coordinates.y,
     });
-  };
+  }, [editable, hideTooltip]);
 
   const startDraggingWallPort = (wp: WallPort, e: React.MouseEvent) => {
     if (!editable) return;
@@ -693,7 +863,7 @@ const FloorMap: React.FC<FloorMapProps> = ({
   };
 
   // Handle asset click
-  const handleAssetClickInternal = (asset: Asset, e: React.MouseEvent) => {
+  const handleAssetClickInternal = useCallback((asset: Asset, e: React.MouseEvent) => {
     if (connectionMode) {
       onAssetSelectForConnection?.(asset._id);
       return;
@@ -701,42 +871,9 @@ const FloorMap: React.FC<FloorMapProps> = ({
     if (editable) return;
     hideTooltip();
     setPopover({ asset, screenX: e.clientX, screenY: e.clientY });
-  };
+  }, [connectionMode, editable, hideTooltip, onAssetSelectForConnection]);
 
   // Get asset color based on status
-  const getAssetStatus = (asset: Asset): string => {
-    return asset.basic_info.status || 'unknown';
-  };
-
-  const getAssetColor = (asset: Asset): string => {
-    const status = getAssetStatus(asset);
-    if (status === 'Decommissioned' || status === 'Retired' || status === 'retired') return '#9ca3af';
-    switch (status) {
-      case 'active': return '#10b981';
-      case 'maintenance': return '#f59e0b';
-      case 'offline': return '#ef4444';
-      default: return '#6b7280';
-    }
-  };
-
-  const isEolOs = (asset: Asset): boolean => {
-    const ver = (asset.basic_info.os_version ?? '').toLowerCase();
-    const type = (asset.basic_info.os_type ?? '').toLowerCase();
-    return (
-      /\b(7|xp|vista|2003|2008)\b/.test(ver) ||
-      (type === 'windows' && /\b7\b/.test(ver))
-    );
-  };
-
-  const isDecommissioned = (asset: Asset): boolean => {
-    const s = (asset.basic_info.status ?? '').toLowerCase();
-    return s === 'decommissioned' || s === 'retired';
-  };
-
-  const hasItsmConflict = (asset: Asset): boolean => {
-    return !!(asset as any).itsm_snapshot?.display_name && asset.itsm?.source_of_truth === 'local';
-  };
-
   return (
     <>
     <div ref={containerRef} className={styles.mapContainer}>
@@ -1245,154 +1382,25 @@ const FloorMap: React.FC<FloorMapProps> = ({
           );
         })}
 
-        {/* Assets */}
-        {layers.assets && assets.map((asset) => {
-          const x = asset.location.coordinates.x;
-          const y = asset.location.coordinates.y;
-          const isDragging = dragging?.type === 'asset' && dragging.id === asset._id;
-          const isSelectedForConnection = selectedAssetsForConnection.includes(asset._id);
-          const isHighlighted = highlightedAssetId === asset._id;
-          const isIsolated = !asset.assigned_person && (!asset.connections || asset.connections.length === 0);
-          const eolOs = isEolOs(asset);
-          const decomm = isDecommissioned(asset);
-          const itsmConflict = hasItsmConflict(asset);
-          const objectId = asset.custom_fields?.object_id;
+        {/* Assets — each rendered by a memoized AssetMarker so unrelated assets
+              skip re-rendering during drags, highlights, and layer toggles */}
+        {layers.assets && assets.map((asset) => (
+          <AssetMarker
+            key={asset._id}
+            asset={asset}
+            isDragging={dragging?.type === 'asset' && dragging.id === asset._id}
+            isHighlighted={highlightedAssetId === asset._id}
+            isSelectedForConnection={selectedAssetsForConnection.includes(asset._id)}
+            isCrossFloor={crossFloorMap.has(asset._id)}
+            showLabels={showLabels}
+            editable={editable}
+            onDragStart={startDraggingAsset}
+            onClick={handleAssetClickInternal}
+            onHover={showTooltip}
+            onHoverEnd={hideTooltip}
+          />
+        ))}
 
-          return (
-            <g key={asset._id} opacity={decomm ? 0.45 : 1}>
-              {isHighlighted && (
-                <circle cx={x} cy={y} r="24" fill="none" stroke="#2563eb" strokeWidth="3" opacity="0.9" />
-              )}
-              {isIsolated && !isHighlighted && (
-                <circle cx={x} cy={y} r="20" fill="none" stroke="#9ca3af" strokeWidth="2" strokeDasharray="4,3" opacity="0.7" />
-              )}
-              {isSelectedForConnection && (
-                <circle cx={x} cy={y} r="20" fill="none" stroke="#ff6b35" strokeWidth="3" strokeDasharray="5,5" opacity="0.8" />
-              )}
-              <circle
-                cx={x}
-                cy={y}
-                r="15"
-                fill={getAssetColor(asset)}
-                stroke="#fff"
-                strokeWidth="3"
-                className={`${styles.asset} ${isDragging ? styles.dragging : ''}`}
-                onMouseDown={(e) => startDraggingAsset(asset, e)}
-                onClick={(e) => handleAssetClickInternal(asset, e)}
-                onMouseEnter={(e) =>
-                  showTooltip(
-                    e as any,
-                    <div>
-                      <h4>{getAssetIcon(asset.basic_info.type)} {asset.basic_info.display_name}</h4>
-                      {objectId && <p><span className={styles.label}>Station ID:</span> {objectId}</p>}
-                      {asset.itsm.hardware_asset_id && <p><span className={styles.label}>HWA ID:</span> {asset.itsm.hardware_asset_id}</p>}
-                      {asset.basic_info.manufacturer && asset.basic_info.model && (
-                        <p><span className={styles.label}>Model:</span> {asset.basic_info.manufacturer} {asset.basic_info.model}</p>
-                      )}
-                      {asset.basic_info.serial_number && (
-                        <p><span className={styles.label}>S/N:</span> {asset.basic_info.serial_number}</p>
-                      )}
-                      {(asset.basic_info.os_type || asset.basic_info.os_version) && (
-                        <p>
-                          <span className={styles.label}>OS:</span>{' '}
-                          {asset.basic_info.os_type} {asset.basic_info.os_version}
-                          {eolOs && <span style={{ color: '#f59e0b', fontWeight: 'bold' }}> ⚠ EOL</span>}
-                        </p>
-                      )}
-                      {asset.assigned_person && (
-                        <p><span className={styles.label}>Assigned:</span> {asset.assigned_person.full_name}</p>
-                      )}
-                      {asset.custom_fields?.remote_access_tool && (
-                        <p><span className={styles.label}>Remote:</span> {asset.custom_fields.remote_access_tool}</p>
-                      )}
-                      {asset.custom_fields?.backup_tool && (
-                        <p><span className={styles.label}>Backup:</span> {asset.custom_fields.backup_tool} ({asset.custom_fields.backup_status ?? 'unknown'})</p>
-                      )}
-                      <p>
-                        <span className={styles.label}>Status:</span>{' '}
-                        {decomm ? '⚫ Decommissioned' :
-                         getAssetStatus(asset) === 'active' ? '🟢 Active' :
-                         getAssetStatus(asset) === 'maintenance' ? '🟡 Maintenance' :
-                         getAssetStatus(asset) === 'offline' ? '🔴 Offline' : '⚪ Unknown'}
-                      </p>
-                      {itsmConflict && <p style={{ color: '#f59e0b', fontWeight: 'bold' }}>⚠ ITSM changes pending</p>}
-                      {asset.maintenance?.next_date && new Date(asset.maintenance.next_date) < new Date() && (
-                        <p style={{ color: '#ef4444', fontWeight: 'bold' }}>⚠ Maintenance overdue</p>
-                      )}
-                      <p style={{ fontSize: '10px', marginTop: '4px', fontStyle: 'italic' }}>Click for full details</p>
-                    </div>
-                  )
-                }
-                onMouseLeave={hideTooltip}
-                style={{ cursor: editable ? 'move' : 'pointer' }}
-              />
-
-              {/* Asset icon */}
-              <text x={x} y={y + 5} textAnchor="middle" className={styles.assetIcon} pointerEvents="none" style={{ fontSize: '14px' }}>
-                {getAssetIcon(asset.basic_info.type)}
-              </text>
-
-              {/* Decommissioned cross-out */}
-              {decomm && (
-                <g pointerEvents="none">
-                  <line x1={x - 10} y1={y - 10} x2={x + 10} y2={y + 10} stroke="#6b7280" strokeWidth="2.5" />
-                  <line x1={x + 10} y1={y - 10} x2={x - 10} y2={y + 10} stroke="#6b7280" strokeWidth="2.5" />
-                </g>
-              )}
-
-              {/* Labels */}
-              {showLabels && (
-                <>
-                  <text x={x} y={y + 33} textAnchor="middle" className={styles.assetLabel} pointerEvents="none"
-                    stroke="white" strokeWidth="3" paintOrder="stroke"
-                    style={{ fontSize: '11px', fontWeight: 'bold', fill: '#1f2937' }}>
-                    {asset.basic_info.display_name.length > 16
-                      ? asset.basic_info.display_name.slice(0, 14) + '…'
-                      : asset.basic_info.display_name}
-                  </text>
-                  {objectId && (
-                    <text x={x} y={y + 45} textAnchor="middle" pointerEvents="none"
-                      stroke="white" strokeWidth="2" paintOrder="stroke"
-                      style={{ fontSize: '9px', fill: '#6b7280', fontFamily: 'monospace' }}>
-                      {objectId}
-                    </text>
-                  )}
-                </>
-              )}
-
-              {/* Win7/EOL OS warning badge */}
-              {eolOs && !decomm && (
-                <g pointerEvents="none">
-                  <circle cx={x - 12} cy={y - 12} r="7" fill="#f59e0b" stroke="#fff" strokeWidth="2" />
-                  <text x={x - 12} y={y - 8} textAnchor="middle" fill="#fff" fontSize="9" fontWeight="bold">!</text>
-                </g>
-              )}
-
-              {/* ITSM conflict badge */}
-              {itsmConflict && (
-                <g pointerEvents="none">
-                  <circle cx={x + 12} cy={y - 12} r="5" fill="#f97316" stroke="#fff" strokeWidth="1.5" />
-                </g>
-              )}
-
-              {/* Cross-floor connection badge */}
-              {crossFloorMap.has(asset._id) && (
-                <g pointerEvents="none">
-                  <circle cx={x - 13} cy={y + 13} r="7" fill="#06b6d4" stroke="#fff" strokeWidth="2" />
-                  <text x={x - 13} y={y + 17} textAnchor="middle" fill="#fff" fontSize="8" fontWeight="bold">↕</text>
-                </g>
-              )}
-
-              {/* Maintenance overdue badge */}
-              {!decomm && asset.maintenance?.next_date && new Date(asset.maintenance.next_date) < new Date() && (
-                <g pointerEvents="none">
-                  <circle cx={x + 11} cy={y - 11} r="7" fill="#ef4444" stroke="#fff" strokeWidth="2" />
-                  <text x={x + 11} y={y - 7} textAnchor="middle" fill="#fff" fontSize="9" fontWeight="bold">!</text>
-                </g>
-              )}
-            </g>
-          );
-        })}
 
       {deployMode && deployPosition && (
         <g pointerEvents="none">

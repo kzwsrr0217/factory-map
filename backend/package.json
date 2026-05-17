@@ -21,6 +21,8 @@
   "jest": {
     "preset": "ts-jest",
     "testEnvironment": "node",
+    "runInBand": true,
+    "forceExit": true,
     "testMatch": [
       "**/src/__tests__/**/*.test.ts"
     ],

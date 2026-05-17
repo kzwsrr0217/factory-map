@@ -132,12 +132,32 @@ export const handlers = [
     })),
   ),
 
+  rest.get(`${API}/buildings/:id`, (req, res, ctx) =>
+    res(ctx.json({
+      success: true,
+      data: {
+        _id: req.params.id,
+        name: 'WERK1 — Main Production',
+        address: 'Test Street 1',
+        created_at: '', updated_at: '',
+      },
+    })),
+  ),
+
   rest.get(`${API}/floors`, (_req, res, ctx) =>
     res(ctx.json({
       success: true,
       data: [
         { _id: 'floor-1', name: 'Ground Floor', floor_number: 0, building_id: 'bld-1', created_at: '', updated_at: '' },
+        { _id: 'floor-2', name: 'First Floor', floor_number: 1, building_id: 'bld-1', created_at: '', updated_at: '' },
       ],
+    })),
+  ),
+
+  rest.get(`${API}/floors/:id`, (req, res, ctx) =>
+    res(ctx.json({
+      success: true,
+      data: { _id: req.params.id, name: 'Ground Floor', floor_number: 0, building_id: 'bld-1', created_at: '', updated_at: '' },
     })),
   ),
 

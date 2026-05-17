@@ -72,7 +72,27 @@ app.use('/api', (_req, res, next) => {
   next();
 });
 
-// Rate limiting — auth routes only (prevent brute-force)
+// Rate limiting
+// General API: 500 requests / 15 min per IP — protects against scraping / enumeration
+app.use('/api', rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 500,
+  message: { success: false, error: 'Too many requests — try again later' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => req.path === '/health',
+}));
+
+// Auth routes: tighter window on all /api/auth/* to slow credential stuffing
+app.use('/api/auth', rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 40,
+  message: { success: false, error: 'Too many auth requests — try again in 15 minutes' },
+  standardHeaders: true,
+  legacyHeaders: false,
+}));
+
+// Login endpoint: strictest limit to prevent brute-force
 app.use('/api/auth/login', rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 20,

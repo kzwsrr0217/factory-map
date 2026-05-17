@@ -23,7 +23,7 @@
  *   /alerts        → Maintenance alert configuration (admin)
  *   /infrastructure→ Network infrastructure (IDF/MDF rooms, racks, patch panels)
  */
-import React from 'react';
+import React, { Suspense, lazy } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { ThemeProvider } from './contexts/ThemeContext';
@@ -39,7 +39,6 @@ import BuildingDetails from './pages/BuildingDetails';
 import FloorDetails from './pages/FloorDetails';
 import MapView from './pages/MapView';
 import AssetDetails from './pages/AssetDetails';
-import Reports from './pages/Reports';
 import Settings from './pages/Settings';
 import UserManagement from './pages/UserManagement';
 import AuditLog from './pages/AuditLog';
@@ -48,6 +47,9 @@ import Alerts from './pages/Alerts';
 import NetworkGraph from './pages/NetworkGraph';
 import NetworkInfrastructure from './pages/NetworkInfrastructure';
 import Maintenance from './pages/Maintenance';
+
+// Lazy-load recharts-heavy page — deferred until the user first navigates to /reports
+const Reports = lazy(() => import('./pages/Reports'));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -73,24 +75,29 @@ function App() {
                 element={
                   <ProtectedRoute>
                     <MainLayout>
-                      <Routes>
-                        <Route path="/" element={<Dashboard />} />
-                        <Route path="/buildings" element={<Buildings />} />
-                        <Route path="/buildings/:id" element={<BuildingDetails />} />
-                        <Route path="/floors/:id" element={<FloorDetails />} />
-                        <Route path="/assets/:id" element={<AssetDetails />} />
-                        <Route path="/map" element={<MapView />} />
-                        <Route path="/reports" element={<Reports />} />
-                        <Route path="/settings" element={<Settings />} />
-                        <Route path="/settings/users" element={<UserManagement />} />
-                        <Route path="/audit" element={<AuditLog />} />
-                        <Route path="/unplaced" element={<UnplacedAssets />} />
-                        <Route path="/alerts" element={<Alerts />} />
-                        <Route path="/network" element={<NetworkGraph />} />
-                        <Route path="/infrastructure" element={<NetworkInfrastructure />} />
-                        <Route path="/maintenance" element={<Maintenance />} />
-                        <Route path="*" element={<Navigate to="/" replace />} />
-                      </Routes>
+                      {/* Per-page boundary: a crash in one page keeps the sidebar alive */}
+                      <ErrorBoundary>
+                        <Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center' }}>Loading…</div>}>
+                        <Routes>
+                          <Route path="/" element={<Dashboard />} />
+                          <Route path="/buildings" element={<Buildings />} />
+                          <Route path="/buildings/:id" element={<BuildingDetails />} />
+                          <Route path="/floors/:id" element={<FloorDetails />} />
+                          <Route path="/assets/:id" element={<AssetDetails />} />
+                          <Route path="/map" element={<MapView />} />
+                          <Route path="/reports" element={<Reports />} />
+                          <Route path="/settings" element={<Settings />} />
+                          <Route path="/settings/users" element={<UserManagement />} />
+                          <Route path="/audit" element={<AuditLog />} />
+                          <Route path="/unplaced" element={<UnplacedAssets />} />
+                          <Route path="/alerts" element={<Alerts />} />
+                          <Route path="/network" element={<NetworkGraph />} />
+                          <Route path="/infrastructure" element={<NetworkInfrastructure />} />
+                          <Route path="/maintenance" element={<Maintenance />} />
+                          <Route path="*" element={<Navigate to="/" replace />} />
+                        </Routes>
+                        </Suspense>
+                      </ErrorBoundary>
                     </MainLayout>
                   </ProtectedRoute>
                 }
