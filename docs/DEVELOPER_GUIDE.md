@@ -43,7 +43,8 @@ Factory Map is a full-stack IT asset management application designed for industr
 │                                                              │
 │  Pages: Dashboard | Buildings | FloorDetails | MapView       │
 │         Maintenance | Alerts | Network | UnplacedAssets      │
-│         Reports | Settings | UserManagement | AuditLog       │
+│         NetworkInfrastructure | Reports | Settings           │
+│         UserManagement | AuditLog                            │
 │                                                              │
 │  Socket.io client → live asset:created/updated/deleted       │
 └────────────────────────┬─────────────────────────────────────┘
@@ -60,6 +61,7 @@ Factory Map is a full-stack IT asset management application designed for industr
 │                                                              │
 │  ITSMService (adapter pattern: Mock | Real)                  │
 │  LdapAuthService (optional Active Directory login)           │
+│  AlertService (email + Teams, daily cron 07:00)              │
 │                                                              │
 │  Socket.io server → emits asset:created/updated/deleted      │
 └────────────────────────┬─────────────────────────────────────┘
@@ -73,6 +75,8 @@ Factory Map is a full-stack IT asset management application designed for industr
 │          workstations | assets | asset_software              │
 │          asset_connections | users | audit_logs              │
 │          alert_config | alert_logs | scheduled_alerts        │
+│          network_rooms | network_racks | patch_panels        │
+│          wall_ports                                          │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -124,6 +128,7 @@ factory-map/
 │       │   ├── building.controller.ts     # Building CRUD
 │       │   ├── floor.controller.ts        # Floor CRUD + floor plan upload
 │       │   ├── itsm.controller.ts         # ITSM search, sync, accept-snapshot
+│       │   ├── network.controller.ts      # Rooms / racks / patch panels / wall ports CRUD
 │       │   ├── section.controller.ts      # Section CRUD
 │       │   ├── user.controller.ts         # User management (admin only)
 │       │   ├── workarea.controller.ts     # WorkArea CRUD
@@ -132,14 +137,18 @@ factory-map/
 │       │   ├── AlertConfig.entity.ts      # Single-row global alert configuration
 │       │   ├── AlertLog.entity.ts         # Append-only alert send history
 │       │   ├── ScheduledAlert.entity.ts   # User-created one-off timed alerts
-│       │   ├── Asset.entity.ts            # Main asset with toApiResponse()
+│       │   ├── Asset.entity.ts            # Main asset with toApiResponse(); includes wall_port_id FK
 │       │   ├── AssetConnection.entity.ts  # Asset-to-asset connections
 │       │   ├── AssetSoftware.entity.ts    # Software installed on an asset
 │       │   ├── AuditLog.entity.ts         # Immutable audit trail
 │       │   ├── Building.entity.ts         # Top-level location
 │       │   ├── Floor.entity.ts            # Floor within a building
+│       │   ├── NetworkRack.entity.ts      # Equipment rack within a network room
+│       │   ├── NetworkRoom.entity.ts      # IDF / MDF room within a building
+│       │   ├── PatchPanel.entity.ts       # Patch panel within a rack (cable_type: copper|fiber|mixed)
 │       │   ├── Section.entity.ts          # Section within a work area
 │       │   ├── User.entity.ts             # App user with bcrypt password
+│       │   ├── WallPort.entity.ts         # Physical wall port (face plate) on a floor
 │       │   ├── WorkArea.entity.ts         # Zone on a floor
 │       │   └── Workstation.entity.ts      # Individual workstation slot
 │       ├── middleware/
@@ -154,6 +163,7 @@ factory-map/
 │       │   ├── buildings.routes.ts
 │       │   ├── floors.routes.ts
 │       │   ├── itsm.routes.ts
+│       │   ├── network.routes.ts          # /api/network — rooms, racks, patch panels, wall ports
 │       │   ├── sections.routes.ts
 │       │   ├── user.routes.ts
 │       │   ├── workareas.routes.ts
@@ -235,6 +245,7 @@ Asset (N) — has FK columns pointing at any level of the hierarchy
 | Basic info | `display_name`, `asset_tag`, `serial_number`, `model`, `manufacturer`, `status`, `asset_type`, `os_type`, `os_version`, `mac_address` | |
 | Technical | `cpu`, `ram`, `storage`, `gpu` | |
 | Network | `ip_address`, `hostname`, `vlan`, `switch_port`, `dhcp_static` | `dhcp_static` = "dhcp" / "static" / "unknown" |
+| Physical port | `wall_port_id` (FK → `wall_ports.id`) | Physical network drop the asset plugs into; eager-joined as `wall_port` (→ patch panel → rack → room) |
 | Person | `person_id`, `person_itsm_id`, `person_full_name` | The responsible IT person |
 | Org | `org_itsm_id`, `org_display_name` | Department/team from ITSM |
 | Catalog | `catalog_itsm_id`, `catalog_display_name` | Hardware catalog item from ITSM |
@@ -243,6 +254,24 @@ Asset (N) — has FK columns pointing at any level of the hierarchy
 | Custom | `environment`, `notes`, `tags` (JSON), `object_id`, `serial_object`, `remote_access_tool`, `remote_access_version`, `backup_tool`, `backup_status`, `winupdate_date`, `fortiedr_active` | |
 | Work items | `work_items` (simple-json) | `[{id, description, done, status, priority, due_date, assigned_to, alert_sent, created_at}]` — `id` auto-generated (UUID) if omitted |
 | Maintenance | `maint_last_date`, `maint_next_date`, `maint_interval_days`, `maint_notes` | |
+
+### Network infrastructure entities
+
+```
+NetworkRoom (IDF / MDF)
+  └── NetworkRack (N)
+        └── PatchPanel (N)
+
+WallPort — FK to Floor (for position) and FK to PatchPanel (optional; the cable path)
+Asset.wall_port_id → WallPort  (the physical jack the device is plugged into)
+```
+
+| Entity | Table | Key columns |
+|--------|-------|-------------|
+| `NetworkRoom` | `network_rooms` | `name`, `type` (idf\|mdf), `building_id`, `floor_id?`, `redundant_pair_id?` |
+| `NetworkRack` | `network_racks` | `name`, `network_room_id`, `u_count` (default 42) |
+| `PatchPanel` | `patch_panels` | `name`, `rack_id`, `u_position?`, `port_count` (default 24), `cable_type` (copper\|fiber\|mixed) |
+| `WallPort` | `wall_ports` | `label` (e.g. A-04), `floor_id`, `pos_x?`, `pos_y?`, `patch_panel_id?`, `patch_port?`, `switch_asset_id?`, `switch_port?` |
 
 ### toApiResponse() pattern
 All entities expose a `toApiResponse()` method that maps the flat SQL columns to the nested JSON shape expected by the frontend. **Never read raw SQL column names in the frontend** — always use the API shape.
@@ -353,6 +382,50 @@ Similar CRUD, filtered by `section_id`.
 | POST | `/scheduled` | admin | Create a scheduled alert (title, scheduled_for, channels, asset_filter?) |
 | DELETE | `/scheduled/:id` | admin | Delete a scheduled alert |
 
+### Network Infrastructure `/api/network`
+
+All write operations require operator or admin role.
+
+#### Rooms
+
+| Method | Path | Query | Description |
+|--------|------|-------|-------------|
+| GET | `/rooms` | `building_id?`, `floor_id?`, `type?` | List rooms (nested with racks) |
+| GET | `/rooms/:id` | — | Single room with full rack/panel tree |
+| POST | `/rooms` | — | Create room (`name`, `building_id` required; `type` = idf\|mdf) |
+| PATCH | `/rooms/:id` | — | Update |
+| DELETE | `/rooms/:id` | — | Delete (cascades racks → patch panels → wall port links) |
+
+#### Racks
+
+| Method | Path | Query | Description |
+|--------|------|-------|-------------|
+| GET | `/racks` | `network_room_id?` | List racks |
+| GET | `/racks/:id` | — | Single rack |
+| POST | `/racks` | — | Create (`name`, `network_room_id`, `u_count?`) |
+| PATCH | `/racks/:id` | — | Update |
+| DELETE | `/racks/:id` | — | Delete (cascades patch panels) |
+
+#### Patch Panels
+
+| Method | Path | Query | Description |
+|--------|------|-------|-------------|
+| GET | `/patch-panels` | `rack_id?` | List patch panels |
+| GET | `/patch-panels/:id` | — | Single patch panel |
+| POST | `/patch-panels` | — | Create (`name`, `rack_id`, `cable_type?` = copper\|fiber\|mixed) |
+| PATCH | `/patch-panels/:id` | — | Update |
+| DELETE | `/patch-panels/:id` | — | Delete |
+
+#### Wall Ports
+
+| Method | Path | Query | Description |
+|--------|------|-------|-------------|
+| GET | `/wall-ports` | `floor_id?`, `patch_panel_id?` | List wall ports with resolved path info |
+| GET | `/wall-ports/:id` | — | Single wall port with full path |
+| POST | `/wall-ports` | — | Create (`label`, `floor_id` required; `pos_x/y`, `patch_panel_id`, `patch_port`, `switch_asset_id`, `switch_port` optional) |
+| PATCH | `/wall-ports/:id` | — | Update (reposition or re-cable) |
+| DELETE | `/wall-ports/:id` | — | Delete |
+
 ### Users `/api/users` (admin only)
 
 | Method | Path | Description |
@@ -408,6 +481,8 @@ Use `useAuth()` and check `isAdmin` / `isOperator` to gate UI actions.
 
 ### Custom Hooks
 
+**Direct hooks** (`src/hooks/`):
+
 | Hook | Purpose |
 |------|---------|
 | `useAssets({ floorId? })` | Load assets, optional floor filter, reload trigger |
@@ -415,6 +490,19 @@ Use `useAuth()` and check `isAdmin` / `isOperator` to gate UI actions.
 | `useAssetLookups()` | Fetch + cache distinct field values for `<datalist>` autocomplete |
 | `usePersonSuggestions()` | Extract person list from loaded assets |
 | `useSocket(event, handler)` | Bind to a Socket.io event with a stable handler reference |
+
+**React Query hooks** (`src/hooks/queries/`) — wrap `@tanstack/react-query` and return `{ data, isLoading, error, refetch }`:
+
+| Hook | Endpoint |
+|------|---------|
+| `useBuildings()` | `GET /api/buildings` |
+| `useFloors(buildingId?)` | `GET /api/floors?building_id=` |
+| `useWorkareas(floorId?)` | `GET /api/workareas?floor_id=` |
+| `useAssets(params)` | `GET /api/assets` (paginated) |
+| `useAuditLog(params)` | `GET /api/audit` |
+| `useAlerts()` | `GET /api/alerts/config` + `/logs` + `/scheduled` |
+| `useNetwork(buildingId?)` | `GET /api/network/rooms?building_id=` + `/wall-ports` |
+| `useUsers()` | `GET /api/users` |
 
 ### Service pattern
 All API calls go through service objects (plain objects, not classes) in `src/services/`:
@@ -490,9 +578,10 @@ cd backend && npm test
 
 Test suites:
 - `src/__tests__/auth.test.ts` — register, login, invalid credentials, token refresh
-- `src/__tests__/assets.test.ts` — CRUD, bulk-create, connections
+- `src/__tests__/assets.test.ts` — CRUD, bulk-create, connections, `wall_port_id` assign/clear
 - `src/__tests__/buildings.test.ts` — CRUD, cascade checks
 - `src/__tests__/itsm.test.ts` — hardware search, sync (mock mode)
+- `src/__tests__/network.test.ts` — rooms/racks/patch panels/wall ports CRUD; `cable_type` copper/fiber/mixed round-trip; asset `wall_port_id` FK assign + null-clear
 
 ### Frontend
 
@@ -503,9 +592,8 @@ cd frontend && npm test -- --watchAll=false
 MSW (`src/mocks/server.ts` + `src/mocks/handlers.ts`) intercepts all `/api/*` requests so tests run without a live backend.
 
 Test files:
-- `src/__tests__/GlobalSearch.test.tsx` — search index, debounce, result click
-- `src/__tests__/AssetFormModal.test.tsx` — required-field validation, tab switching
 - `src/__tests__/Login.test.tsx` — form render, submit dispatches auth
+- `src/__tests__/NetworkInfrastructure.test.tsx` — building selector, MDF/IDF room cards, Add Room modal, cable_type badge labels
 
 ---
 

@@ -352,6 +352,17 @@ docker exec -it factory-map-mssql /opt/mssql-tools18/bin/sqlcmd \
   -S localhost -U sa -P "YourPassword" -d factorymap
 ```
 
+### Application tables
+
+| Table | Purpose |
+|-------|---------|
+| `buildings`, `floors`, `work_areas`, `sections`, `workstations` | Physical location hierarchy |
+| `assets`, `asset_software`, `asset_connections` | Asset inventory and relationships |
+| `network_rooms`, `network_racks`, `patch_panels`, `wall_ports` | Physical network infrastructure (IDF/MDF rooms, racks, cabling) |
+| `users` | Application users |
+| `audit_logs` | Immutable change history |
+| `alert_config`, `alert_logs`, `scheduled_alerts` | Maintenance alert system |
+
 ### Common SQL operations
 ```sql
 -- List all tables
@@ -366,11 +377,46 @@ SELECT display_name, work_items FROM assets WHERE work_items IS NOT NULL;
 -- List users
 SELECT username, role, active, last_login FROM users;
 
+-- List network rooms with rack count
+SELECT r.name, r.type, COUNT(k.id) AS rack_count
+FROM network_rooms r
+LEFT JOIN network_racks k ON k.network_room_id = r.id
+GROUP BY r.id, r.name, r.type;
+
+-- Find assets assigned to a wall port (full cable path)
+SELECT a.display_name, wp.label AS wall_port, pp.name AS patch_panel,
+       nr.name AS rack, room.name AS room
+FROM assets a
+JOIN wall_ports wp ON wp.id = a.wall_port_id
+LEFT JOIN patch_panels pp ON pp.id = wp.patch_panel_id
+LEFT JOIN network_racks nr ON nr.id = pp.rack_id
+LEFT JOIN network_rooms room ON room.id = nr.network_room_id;
+
 -- Clear all assets (preserve users)
 SET QUOTED_IDENTIFIER ON;
 DELETE FROM asset_connections;
 DELETE FROM asset_software;
 DELETE FROM assets;
+```
+
+### Seed scripts
+
+The `uploads/` directory contains Python helper scripts for populating data:
+
+| Script | Purpose |
+|--------|---------|
+| `seed_test_data.py` | Creates 2 buildings, 4 floors, 5 work areas, 4 sections, and 14 sample assets |
+| `seed_network.py` | Creates sample network rooms, racks, patch panels, and wall ports |
+| `seed_asset_ports.py` | Assigns physical wall ports to existing assets and adds logical connections |
+| `import_ipc.py` | Imports IPC assets from the Excel spreadsheet (`uploads/IPC_data.xlsx`) |
+
+Run scripts from the project root (requires Python 3 and the `requests` package):
+
+```bash
+# Windows PowerShell — set UTF-8 mode first if scripts use non-ASCII chars
+$env:PYTHONUTF8 = '1'
+python uploads/seed_network.py
+python uploads/seed_asset_ports.py
 ```
 
 ### Clearing test data

@@ -18,14 +18,15 @@
    - [Importing Assets from CSV/Excel](#importing-assets)
 9. [Global Search](#global-search)
 10. [Network Graph](#network-graph)
-11. [Maintenance Calendar](#maintenance-calendar)
-12. [Alerts (Admins only)](#alerts)
-13. [Reports](#reports)
-14. [Audit Log](#audit-log)
-15. [Settings](#settings)
-16. [User Management (Admins only)](#user-management)
-17. [Keyboard Shortcuts](#keyboard-shortcuts)
-18. [Tips & Best Practices](#tips--best-practices)
+11. [Network Infrastructure](#network-infrastructure)
+12. [Maintenance Calendar](#maintenance-calendar)
+13. [Alerts (Admins only)](#alerts)
+14. [Reports](#reports)
+15. [Audit Log](#audit-log)
+16. [Settings](#settings)
+17. [User Management (Admins only)](#user-management)
+18. [Keyboard Shortcuts](#keyboard-shortcuts)
+19. [Tips & Best Practices](#tips--best-practices)
 
 ---
 
@@ -76,6 +77,7 @@ The left **sidebar** is the main navigation menu:
 | Unplaced | Assets not yet positioned on any floor plan |
 | Reports | Asset statistics and ITSM sync |
 | Network | Force-directed graph of all asset connections |
+| Infra | Physical network infrastructure — rooms, racks, patch panels, wall ports |
 | Maintenance | Monthly calendar of scheduled maintenance |
 | Audit Log | Immutable history of all changes |
 | Alerts | Maintenance alert configuration *(admin only)* |
@@ -184,6 +186,26 @@ The floor map shows all assets positioned on the floor plan.
 5. Click **Add** to save the connection
 6. The two assets are now linked; click **Wire Mode** again (or press **W**) to exit
 
+### Layer toggles
+The map toolbar has layer toggles that show or hide categories of items:
+- **Work Areas** — coloured zone rectangles
+- **Workstations** — numbered slot markers
+- **Assets** — device icons with status rings
+- **Wall Ports** — amber rectangles marking physical network jacks (visible by default)
+- **Connections** — grey lines linking connected assets
+
+Click any toggle to hide or show that layer.
+
+### Wall ports on the map
+Amber rectangles on the floor plan represent physical **wall ports** (network face plates). They show the port label (e.g., `A-04`). Click a wall port to see its full path: patch panel → rack → network room.
+
+### Network trace
+Click any asset to open its detail popover, then click **View Details**. In the side panel:
+- **Physical path** — shows the wall port the device is plugged into, the patch panel and port number, the rack, and the network room (IDF/MDF)
+- **Logical connections** — shows all configured asset-to-asset connections
+
+This lets you trace the full cable path from the device to the distribution room without leaving the map.
+
 ### Map controls
 - **Grid snap**: toggle grid snapping in **Settings → Map Grid Snap**
 - **Export map**: click the Export button to download the map as a PNG image
@@ -255,7 +277,7 @@ The panel shows all information organized in sections:
 |---------|-----------------|
 | **Work Items** | IT task checklist for this device |
 | **Basic Information** | Name, type, serial number, asset tag, manufacturer, model, OS |
-| **Network** | IP address, DHCP/static, hostname, VLAN, switch port |
+| **Network** | IP address, DHCP/static, hostname, VLAN, switch port; **Physical Wall Port** — the jack label and full cable path (patch panel → rack → room) |
 | **Operational** | Remote access tool + version, backup tool/status, Windows update date, FortiEDR |
 | **Custom Fields** | Object ID, serial object (IFS), environment, physical condition, notes, tags |
 | **Technical Specs** | CPU, RAM, storage, GPU |
@@ -411,6 +433,71 @@ The **Network** page (`/network`) displays all asset connections as an interacti
 - Use the filter controls to show only specific asset types or connection types
 
 The graph gives a topology view of your entire network — useful for impact analysis before maintenance or when troubleshooting connectivity.
+
+---
+
+## Network Infrastructure
+
+The **Infra** page (`/infrastructure`) is the physical network documentation tool. It lets you map out your cabling infrastructure from the distribution room all the way to the wall jack.
+
+### Structure overview
+
+```
+Network Room (IDF / MDF)
+  └── Rack (equipment cabinet in that room)
+        └── Patch Panel (cabling termination block)
+
+Wall Port (face plate jack on a floor)
+  └── connected to a Patch Panel port
+        └── which sits in a Rack
+              └── which sits in a Room
+```
+
+An **Asset's physical port** (`wall_port_id`) links the device to this hierarchy, giving you the complete cable path.
+
+### Network rooms
+
+**IDF** (Intermediate Distribution Frame) — a floor-level distribution room.  
+**MDF** (Main Distribution Frame) — the building-level core room.
+
+Each room card shows:
+- Room name and type badge (IDF / MDF)
+- Building and optional floor assignment
+- Racks with their patch panels listed inside
+
+### Adding a network room (operator/admin)
+1. Click **Add Room**
+2. Enter the name (e.g., `IDF-W1-GF`), select type (IDF or MDF), and choose the building
+3. Optionally select a floor if the room is on a specific floor
+4. Click **Save**
+
+### Adding a rack (operator/admin)
+1. Open a room card and click **Add Rack**
+2. Enter the rack name and U-count (default 42U)
+3. Click **Save**
+
+### Adding a patch panel (operator/admin)
+1. Click **Add Panel** on a rack
+2. Enter the panel name, U-position, port count, and cable type:
+   - **Copper** — standard Cat5e/Cat6 copper ports
+   - **Fiber** — all fiber-optic ports
+   - **Mixed** — panel contains both copper and fiber ports
+3. Click **Save**
+
+### Wall ports
+
+Wall ports represent the physical face plates mounted on walls or desks. They appear on the floor map as amber rectangles.
+
+#### Adding a wall port (operator/admin)
+1. On the Infra page, click **Add Wall Port**
+2. Enter the label (e.g., `A-04`), select the floor, and optionally link it to a patch panel and port number
+3. Click **Save**
+4. You can then drag the wall port to its correct position on the floor map
+
+#### Linking an asset to a wall port
+1. Open the asset's edit form
+2. In the **Network** section, choose the **Wall Port** from the dropdown
+3. Save — the asset now shows its complete physical cable path in its details panel and on the floor map trace
 
 ---
 
@@ -649,6 +736,11 @@ Press **?** anywhere in the app to see the full interactive shortcut reference.
 ### Floor maps
 - Place assets on the floor map as soon as they are physically installed
 - Keep coordinates updated when devices are moved — the location history is recorded automatically
+
+### Physical network documentation
+- Assign a **wall port** to every networked device as soon as it's cabled — the full physical path (port → panel → rack → room) then appears in one click on the floor map
+- Use **Mixed** cable type on patch panels that serve both copper and fiber runs rather than creating separate panels
+- Keep the patch panel **port number** filled in on wall ports — this links the face plate to a specific row on the panel for faster cable tracing
 
 ### Searching
 - Use the Global Search (Ctrl+K) to quickly find any asset — it searches name, serial, IP, and person simultaneously
