@@ -402,6 +402,17 @@ export const updateAsset = async (req: Request, res: Response, next: NextFunctio
     }
 
     applyBodyToAsset(asset, body);
+
+    // When wall_port_id is being explicitly cleared, issue a direct SQL UPDATE
+    // to bypass TypeORM identity-map / dirty-checking that can swallow null FKs
+    if (body.wall_port_id === null) {
+      await AppDataSource.createQueryBuilder()
+        .update(Asset)
+        .set({ wall_port_id: () => 'NULL' })
+        .where('id = :id', { id: assetId })
+        .execute();
+    }
+
     await repo().save(asset);
     await saveRelations(asset, body);
 

@@ -631,14 +631,14 @@ const AssetReports: React.FC<AssetReportsProps> = ({ isOpen, onClose, inline = f
                 cx="50%"
                 cy="50%"
                 outerRadius={70}
-                label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                label={({ name, percent }: { name?: string; percent?: number }) => `${name ?? ''} ${((percent ?? 0) * 100).toFixed(0)}%`}
                 labelLine={false}
               >
                 {Object.keys(reportData.assetsByStatus).map((status) => (
                   <Cell key={status} fill={STATUS_COLORS[status] ?? '#9ca3af'} />
                 ))}
               </Pie>
-              <Tooltip formatter={(v: number) => [v, 'Assets']} />
+              <Tooltip formatter={(v) => [v ?? 0, 'Assets']} />
               <Legend />
             </PieChart>
           </ResponsiveContainer>
@@ -657,7 +657,7 @@ const AssetReports: React.FC<AssetReportsProps> = ({ isOpen, onClose, inline = f
             >
               <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11 }} />
               <YAxis type="category" dataKey="name" width={110} tick={{ fontSize: 11 }} />
-              <Tooltip formatter={(v: number) => [v, 'Assets']} />
+              <Tooltip formatter={(v) => [v ?? 0, 'Assets']} />
               <Bar dataKey="value" radius={[0, 4, 4, 0]}>
                 {Object.keys(reportData.assetsByType).slice(0, 10).map((_, i) => (
                   <Cell key={i} fill={TYPE_COLORS[i % TYPE_COLORS.length]} />
@@ -797,7 +797,7 @@ const AssetReports: React.FC<AssetReportsProps> = ({ isOpen, onClose, inline = f
               <BarChart data={bEntries.map(b => ({ name: b.name, value: b.count }))} layout="vertical" margin={{ left: 16, right: 16, top: 4, bottom: 4 }}>
                 <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11 }} />
                 <YAxis type="category" dataKey="name" width={130} tick={{ fontSize: 11 }} />
-                <Tooltip formatter={(v: number) => [v, 'Assets']} />
+                <Tooltip formatter={(v) => [v ?? 0, 'Assets']} />
                 <Bar dataKey="value" fill="#3b82f6" radius={[0, 4, 4, 0]} />
               </BarChart>
             </ResponsiveContainer>

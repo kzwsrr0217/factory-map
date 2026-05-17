@@ -140,4 +140,16 @@ export const handlers = [
       ],
     })),
   ),
+
+  rest.get(`${API}/workareas`, (_req, res, ctx) =>
+    res(ctx.json({ success: true, data: [] })),
+  ),
+
+  rest.get(`${API}/sections`, (_req, res, ctx) =>
+    res(ctx.json({ success: true, data: [] })),
+  ),
+
+  rest.get(`${API}/workstations`, (_req, res, ctx) =>
+    res(ctx.json({ success: true, data: [] })),
+  ),
 ];

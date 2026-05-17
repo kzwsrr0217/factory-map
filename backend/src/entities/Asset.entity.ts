@@ -121,6 +121,7 @@ export class Asset {
   status!: string | null;
 
   @Column({ name: 'asset_type', type: 'nvarchar', length: 100, nullable: true })
+  @Index()
   asset_type!: string | null;
 
   @Column({ name: 'os_type', type: 'nvarchar', length: 100, nullable: true })
@@ -294,6 +295,7 @@ export class Asset {
   maint_last_date!: Date | null;
 
   @Column({ name: 'maint_next_date', type: 'date', nullable: true })
+  @Index()
   maint_next_date!: Date | null;
 
   @Column({ name: 'maint_interval_days', type: 'int', nullable: true })
