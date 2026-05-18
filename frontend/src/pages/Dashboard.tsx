@@ -35,7 +35,7 @@ import { getAssetIcon } from '../utils/assetTypes';
 import { loadSettings } from '../utils/settings';
 import { useToast } from '../contexts/ToastContext';
 import { useSocket } from '../hooks/useSocket';
-import AssetFormModal from '../components/asset/AssetFormModal';
+import AssetCreationWizard from '../components/asset/AssetCreationWizard';
 import { useAssets, assetKeys } from '../hooks/queries/useAssets';
 import { useBuildings } from '../hooks/queries/useBuildings';
 import { useFloors } from '../hooks/queries/useFloors';
@@ -1095,7 +1095,7 @@ const Dashboard: React.FC = () => {
         allAssets={assets}
       />
 
-      <AssetFormModal
+      <AssetCreationWizard
         isOpen={createOpen}
         onClose={() => setCreateOpen(false)}
         onSuccess={() => {
