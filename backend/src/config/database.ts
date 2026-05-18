@@ -48,6 +48,12 @@ export const AppDataSource = new DataSource({
     encrypt: config.mssql.encrypt,
     trustServerCertificate: config.mssql.trustServerCertificate,
   },
+  extra: {
+    pool: {
+      min: 2,
+      max: 25,
+    },
+  },
 });
 
 export const connectDatabase = async (): Promise<void> => {

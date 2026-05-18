@@ -60,6 +60,8 @@ interface ItsmSnapshot {
 
 @Entity('assets')
 @Index(['floor_id', 'is_placed'])
+@Index(['floor_id', 'asset_type'])
+@Index(['building_id', 'status'])
 @Index(['itsm_guid'], { where: 'itsm_guid IS NOT NULL' })
 @Index(['hardware_asset_id'], { where: 'hardware_asset_id IS NOT NULL' })
 export class Asset {

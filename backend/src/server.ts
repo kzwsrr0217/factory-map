@@ -18,6 +18,7 @@
 import 'reflect-metadata';
 import http from 'http';
 import express, { Application, Request, Response, NextFunction } from 'express';
+import compression from 'compression';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
@@ -27,6 +28,7 @@ import swaggerUi from 'swagger-ui-express';
 import { Server as SocketServer } from 'socket.io';
 import config from './config/config';
 import { connectDatabase, AppDataSource } from './config/database';
+import { AuditLog } from './entities/AuditLog.entity';
 import { loadRevokedSessions } from './middleware/auth.middleware';
 import { swaggerSpec } from './config/swagger';
 import { checkAndSend, checkScheduledAlerts } from './services/alert/AlertService';
@@ -47,6 +49,9 @@ export const io = new SocketServer(httpServer, {
 // ==========================================
 // MIDDLEWARE
 // ==========================================
+
+// Gzip compression — reduces API response payloads ~70% for JSON
+app.use(compression());
 
 // Security headers
 app.use(helmet());
@@ -196,6 +201,21 @@ const startServer = async () => {
         await checkScheduledAlerts();
       } catch (err) {
         console.error('❌ Scheduled alert check error:', err);
+      }
+    });
+
+    // Weekly Sunday midnight — delete audit log entries older than 90 days
+    cron.schedule('0 0 * * 0', async () => {
+      try {
+        const cutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+        const result = await AppDataSource.getRepository(AuditLog)
+          .createQueryBuilder()
+          .delete()
+          .where('timestamp < :cutoff', { cutoff })
+          .execute();
+        console.log(`🧹 Audit log pruned: ${result.affected ?? 0} entries older than 90 days removed`);
+      } catch (err) {
+        console.error('❌ Audit log prune error:', err);
       }
     });
 

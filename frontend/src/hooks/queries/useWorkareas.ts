@@ -11,6 +11,7 @@ export function useWorkareas(floorId?: string) {
   return useQuery({
     queryKey: floorId ? workareaKeys.byFloor(floorId) : workareaKeys.all,
     queryFn: () => workareaService.getWorkAreas(floorId),
+    staleTime: 2 * 60 * 1000,
   });
 }
 

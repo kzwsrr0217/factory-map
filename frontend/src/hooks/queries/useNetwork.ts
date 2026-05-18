@@ -14,10 +14,13 @@ export const networkKeys = {
     ['network', 'wallports', params ?? {}] as const,
 };
 
+const STALE_5MIN = 5 * 60 * 1000;
+
 export function useNetworkRooms(params?: { building_id?: string; floor_id?: string; type?: string }) {
   return useQuery({
     queryKey: networkKeys.rooms(params),
     queryFn: () => networkService.getRooms(params),
+    staleTime: STALE_5MIN,
   });
 }
 
@@ -26,6 +29,7 @@ export function useNetworkRoom(id: string | undefined) {
     queryKey: networkKeys.room(id!),
     queryFn: () => networkService.getRoom(id!),
     enabled: !!id,
+    staleTime: STALE_5MIN,
   });
 }
 
@@ -33,6 +37,7 @@ export function useNetworkRacks(roomId?: string) {
   return useQuery({
     queryKey: networkKeys.racks(roomId),
     queryFn: () => networkService.getRacks(roomId),
+    staleTime: STALE_5MIN,
   });
 }
 
@@ -40,6 +45,7 @@ export function usePatchPanels(rackId?: string) {
   return useQuery({
     queryKey: networkKeys.panels(rackId),
     queryFn: () => networkService.getPatchPanels(rackId),
+    staleTime: STALE_5MIN,
   });
 }
 
@@ -47,6 +53,7 @@ export function useWallPorts(params?: { floor_id?: string; patch_panel_id?: stri
   return useQuery({
     queryKey: networkKeys.wallports(params),
     queryFn: () => networkService.getWallPorts(params),
+    staleTime: STALE_5MIN,
   });
 }
 

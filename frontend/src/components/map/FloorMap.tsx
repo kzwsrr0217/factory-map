@@ -1383,8 +1383,18 @@ const FloorMap: React.FC<FloorMapProps> = ({
         })}
 
         {/* Assets — each rendered by a memoized AssetMarker so unrelated assets
-              skip re-rendering during drags, highlights, and layer toggles */}
-        {layers.assets && assets.map((asset) => (
+              skip re-rendering during drags, highlights, and layer toggles.
+              Viewport culling: skip assets outside the current viewBox (+100 px
+              margin) so dense floors don't render off-screen SVG elements. */}
+        {layers.assets && assets.filter((asset) => {
+          if (dragging?.type === 'asset' && dragging.id === asset._id) return true;
+          if (highlightedAssetId === asset._id) return true;
+          if (selectedAssetsForConnection.includes(asset._id)) return true;
+          const { x, y } = asset.location.coordinates;
+          const M = 100;
+          return x >= viewBox.x - M && x <= viewBox.x + viewBox.width + M &&
+                 y >= viewBox.y - M && y <= viewBox.y + viewBox.height + M;
+        }).map((asset) => (
           <AssetMarker
             key={asset._id}
             asset={asset}

@@ -6,10 +6,13 @@ export const buildingKeys = {
   detail: (id: string) => ['buildings', id] as const,
 };
 
+const STALE_5MIN = 5 * 60 * 1000;
+
 export function useBuildings() {
   return useQuery({
     queryKey: buildingKeys.all,
     queryFn: hierarchyService.getBuildings,
+    staleTime: STALE_5MIN,
   });
 }
 
@@ -18,6 +21,7 @@ export function useBuilding(id: string | undefined) {
     queryKey: buildingKeys.detail(id!),
     queryFn: () => hierarchyService.getBuilding(id!),
     enabled: !!id,
+    staleTime: STALE_5MIN,
   });
 }
 

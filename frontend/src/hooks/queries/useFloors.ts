@@ -7,10 +7,13 @@ export const floorKeys = {
   detail: (id: string) => ['floors', id] as const,
 };
 
+const STALE_5MIN = 5 * 60 * 1000;
+
 export function useFloors(buildingId?: string) {
   return useQuery({
     queryKey: buildingId ? floorKeys.byBuilding(buildingId) : floorKeys.all,
     queryFn: () => floorService.getFloors(buildingId),
+    staleTime: STALE_5MIN,
   });
 }
 
@@ -19,6 +22,7 @@ export function useFloor(id: string | undefined) {
     queryKey: floorKeys.detail(id!),
     queryFn: () => floorService.getFloor(id!),
     enabled: !!id,
+    staleTime: STALE_5MIN,
   });
 }
 
