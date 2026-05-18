@@ -13,6 +13,9 @@
     "test": "docker exec -e NODE_ENV=test factory-map-backend npx jest --runInBand --testTimeout=30000 --forceExit && docker exec factory-map-frontend sh -c \"CI=true npm test -- --watchAll=false --passWithNoTests\"",
     "test:backend": "docker exec -e NODE_ENV=test factory-map-backend npx jest --runInBand --testTimeout=30000 --forceExit",
     "test:frontend": "docker exec factory-map-frontend sh -c \"CI=true npm test -- --watchAll=false --passWithNoTests\"",
+    "test:e2e": "npx playwright test",
+    "test:e2e:ui": "npx playwright test --ui",
+    "test:e2e:headed": "npx playwright test --headed",
     "build": "docker-compose build",
     "seed": "docker-compose exec backend npm run seed",
     "backend:shell": "docker-compose exec backend sh"
@@ -24,5 +27,8 @@
     "typescript"
   ],
   "author": "",
-  "license": "UNLICENSED"
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "@playwright/test": "^1.60.0"
+  }
 }

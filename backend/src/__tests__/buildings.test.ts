@@ -86,4 +86,74 @@ describe('DELETE /api/buildings/:id', () => {
       .set('Authorization', `Bearer ${token}`);
     expect(res.status).toBe(200);
   });
+
+  it('cascades delete through floors/workareas/sections/workstations', async () => {
+    // Build a full hierarchy inside a dedicated building
+    const bRes = await request(app)
+      .post('/api/buildings')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ name: `cascade_bldg_${Date.now()}` });
+    const bId = bRes.body.data._id;
+
+    const fRes = await request(app)
+      .post('/api/floors')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ building_id: bId, floor_number: 1, name: 'Cascade Floor' });
+    const fId = fRes.body.data._id;
+
+    const waRes = await request(app)
+      .post('/api/workareas')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ floor_id: fId, name: 'Cascade WA' });
+    const waId = waRes.body.data._id;
+
+    await request(app)
+      .post('/api/sections')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ workarea_id: waId, name: 'Cascade Section' });
+
+    // Delete the building — should cascade cleanly (200)
+    const delRes = await request(app)
+      .delete(`/api/buildings/${bId}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(delRes.status).toBe(200);
+
+    // Floor should be gone
+    const floorRes = await request(app)
+      .get(`/api/floors/${fId}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(floorRes.status).toBe(404);
+  });
+
+  it('returns 400 when building has assets assigned', async () => {
+    const bRes = await request(app)
+      .post('/api/buildings')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ name: `blocked_bldg_${Date.now()}` });
+    const bId = bRes.body.data._id;
+
+    // Assign an asset to this building
+    const aRes = await request(app)
+      .post('/api/assets')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ basic_info: { display_name: 'Blocking Asset' }, hierarchy: { building_id: bId } });
+    const aId = aRes.body.data._id ?? aRes.body.data.id;
+
+    const res = await request(app)
+      .delete(`/api/buildings/${bId}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/asset/i);
+
+    // Clean up asset then building
+    await request(app).delete(`/api/assets/${aId}`).set('Authorization', `Bearer ${token}`);
+    await request(app).delete(`/api/buildings/${bId}`).set('Authorization', `Bearer ${token}`);
+  });
+
+  it('returns 404 for unknown id', async () => {
+    const res = await request(app)
+      .delete('/api/buildings/00000000-0000-0000-0000-000000000000')
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(404);
+  });
 });

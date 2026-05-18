@@ -22,14 +22,18 @@ beforeAll(async () => {
   ({ app, getAdminToken } = await setupTests());
   token = await getAdminToken();
 
-  // Resolve an existing building + floor from seed data
-  const bRes = await request(app).get('/api/buildings').set('Authorization', `Bearer ${token}`);
-  const buildings = bRes.body.data as { _id: string }[];
-  buildingId = buildings[0]._id;
+  // Create a dedicated building + floor so the test is isolated from seed data
+  const bRes = await request(app)
+    .post('/api/buildings')
+    .set('Authorization', `Bearer ${token}`)
+    .send({ name: `net_test_bldg_${Date.now()}` });
+  buildingId = bRes.body.data._id;
 
-  const fRes = await request(app).get(`/api/floors?building_id=${buildingId}`).set('Authorization', `Bearer ${token}`);
-  const floors = fRes.body.data as { _id: string }[];
-  floorId = floors[0]._id;
+  const fRes = await request(app)
+    .post('/api/floors')
+    .set('Authorization', `Bearer ${token}`)
+    .send({ building_id: buildingId, floor_number: 1, name: 'Network Test Floor' });
+  floorId = fRes.body.data._id;
 }, 30000);
 
 // ── Network Rooms ──────────────────────────────────────────────────────────────
@@ -312,4 +316,6 @@ afterAll(async () => {
   }
   if (rackId) await request(app).delete(`/api/network/racks/${rackId}`).set('Authorization', `Bearer ${token}`);
   if (roomId) await request(app).delete(`/api/network/rooms/${roomId}`).set('Authorization', `Bearer ${token}`);
+  // Clean up the building created in beforeAll (cascade-deletes the floor)
+  if (buildingId) await request(app).delete(`/api/buildings/${buildingId}`).set('Authorization', `Bearer ${token}`);
 });

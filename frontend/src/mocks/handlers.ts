@@ -21,7 +21,7 @@ export const handlers = [
         success: true,
         data: {
           token: 'mock.jwt.token',
-          user: { _id: '1', username: 'admin', role: 'admin' },
+          user: { id: '1', username: 'admin', role: 'admin' },
         },
       }));
     }
@@ -31,7 +31,7 @@ export const handlers = [
   rest.get(`${API}/auth/me`, (_req, res, ctx) =>
     res(ctx.json({
       success: true,
-      data: { _id: '1', username: 'admin', role: 'admin' },
+      data: { id: '1', username: 'admin', role: 'admin' },
     })),
   ),
 
@@ -171,5 +171,47 @@ export const handlers = [
 
   rest.get(`${API}/workstations`, (_req, res, ctx) =>
     res(ctx.json({ success: true, data: [] })),
+  ),
+
+  // Users (admin endpoints — default to empty list)
+  rest.get(`${API}/users`, (_req, res, ctx) =>
+    res(ctx.json({ success: true, data: [] })),
+  ),
+  rest.post(`${API}/users`, async (_req, res, ctx) =>
+    res(ctx.status(201), ctx.json({ success: true, data: { _id: 'new-user', username: 'newuser', role: 'viewer', active: true } })),
+  ),
+  rest.patch(`${API}/users/:id/role`, (_req, res, ctx) =>
+    res(ctx.json({ success: true, data: {} })),
+  ),
+  rest.post(`${API}/users/:id/deactivate`, (_req, res, ctx) =>
+    res(ctx.json({ success: true })),
+  ),
+  rest.post(`${API}/users/:id/activate`, (_req, res, ctx) =>
+    res(ctx.json({ success: true })),
+  ),
+  rest.post(`${API}/users/:id/reset-password`, (_req, res, ctx) =>
+    res(ctx.json({ success: true })),
+  ),
+
+  // Single asset — placed after /assets/lookups so exact match wins
+  rest.get(`${API}/assets/:id`, (req, res, ctx) =>
+    res(ctx.json({
+      success: true,
+      data: {
+        _id: req.params.id as string,
+        basic_info: { display_name: 'Mock Asset', type: 'IPC', status: 'active', manufacturer: null, model: null, asset_tag: null, serial_number: null, mac_address: null },
+        hierarchy: { building_id: null, floor_id: null, workarea_id: null, section_id: null, workstation_id: null },
+        location: { coordinates: { x: 0, y: 0 }, rotation: 0 },
+        itsm: { is_managed: false, hardware_asset_id: null, last_synced: null, sync_status: 'never', itsm_guid: null },
+        connections: [], work_items: [], maintenance: null, software: [],
+        created_at: '', updated_at: '',
+      },
+    })),
+  ),
+  rest.delete(`${API}/assets/:id`, (_req, res, ctx) =>
+    res(ctx.json({ success: true })),
+  ),
+  rest.post(`${API}/assets/:id/sync`, (_req, res, ctx) =>
+    res(ctx.json({ success: true, message: 'Asset synced successfully' })),
   ),
 ];

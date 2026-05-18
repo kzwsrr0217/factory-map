@@ -45,8 +45,9 @@
 │                                                                    │
 │  buildings | floors | work_areas | sections | workstations        │
 │  assets | asset_software | asset_connections                      │
-│  alert_config | alert_logs                                        │
-│  users | audit_logs                                               │
+│  network_rooms | network_racks | patch_panels | wall_ports        │
+│  alert_config | alert_logs | scheduled_alerts                     │
+│  users | active_sessions | audit_logs                            │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -253,6 +254,19 @@ docker exec factory-map-backend npm test
 cd frontend && npm test -- --watchAll=false
 ```
 
+### E2E (Playwright)
+
+- **Framework**: `@playwright/test`
+- **Config**: `playwright.config.ts` — `baseURL: http://localhost:5174`, `workers: 1`, `retries: 1`
+- **Auth**: `globalSetup` logs in once and saves session to `e2e/.auth/user.json`; test files inherit `storageState` so only auth tests use a fresh session
+- **Test suites**: `auth.spec.ts`, `buildings.spec.ts`, `assets.spec.ts`, `map.spec.ts`, `dashboard.spec.ts`, `alerts.spec.ts`
+
+```bash
+# Requires the full stack running (frontend on 5174, backend on 4000)
+npx playwright test
+npx playwright test --ui     # Interactive Playwright UI
+```
+
 ---
 
 ## Security Headers
@@ -263,4 +277,8 @@ cd frontend && npm test -- --watchAll=false
 - `Strict-Transport-Security` (in production)
 - `Content-Security-Policy`
 
-Login is rate-limited: **20 requests / 15 minutes per IP** via `express-rate-limit`. Account lockout kicks in after **5 failed login attempts** (30-minute lockout).
+Login is rate-limited via `express-rate-limit`:
+- **Production** (`NODE_ENV=production`): **20 requests / 15 minutes per IP**
+- **Development**: **200 requests / 15 minutes per IP** (relaxed to prevent test suite lock-outs)
+
+Account lockout kicks in after **5 failed login attempts** (30-minute lockout, independent of rate limiting).

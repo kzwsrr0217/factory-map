@@ -212,6 +212,15 @@ factory-map/
 │           ├── searchIndex.ts             # Inverted prefix index for instant search
 │           └── settings.ts               # App settings with localStorage persistence
 │
+├── e2e/                                   # Playwright end-to-end tests
+│   ├── auth.spec.ts                       # Login, logout, protected routes
+│   ├── buildings.spec.ts                  # Building CRUD
+│   ├── assets.spec.ts                     # Asset CRUD
+│   ├── map.spec.ts                        # Floor map / SVG rendering + layer controls
+│   ├── dashboard.spec.ts                  # Dashboard stats + sidebar nav
+│   ├── alerts.spec.ts                     # Alert config + scheduled alerts
+│   └── helpers.ts                         # Shared login helpers + token cache
+├── playwright.config.ts                   # Playwright config (baseURL, workers, retries, storageState)
 ├── docs/                                  # Documentation (this directory)
 ├── uploads/                               # Import scripts (Python)
 ├── docker-compose.yml
@@ -289,8 +298,8 @@ All routes require a valid `Authorization: Bearer <JWT>` header except `/api/aut
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/capabilities` | Returns which auth providers are enabled (local, ldap, azure) |
-| POST | `/login` | Local login; returns token + user. Rate-limited: 20 req/15 min |
-| POST | `/login/ldap` | LDAP login. Rate-limited: 20 req/15 min (shared limiter with /login) |
+| POST | `/login` | Local login; returns token + user. Rate-limited: 20 req/15 min (production); 200 req/15 min (development) |
+| POST | `/login/ldap` | LDAP login. Rate-limited: same limiter as `/login` |
 | POST | `/logout` | Invalidates session (audit log entry) |
 | GET | `/me` | Current user profile |
 | PATCH | `/password` | Change own password |
@@ -597,6 +606,38 @@ MSW (`src/mocks/server.ts` + `src/mocks/handlers.ts`) intercepts all `/api/*` re
 Test files:
 - `src/__tests__/Login.test.tsx` — form render, submit dispatches auth
 - `src/__tests__/NetworkInfrastructure.test.tsx` — building selector, MDF/IDF room cards, Add Room modal, cable_type badge labels
+- `src/__tests__/GlobalSearch.test.tsx` — search index, debounce, result click, cache invalidation
+
+### E2E (Playwright)
+
+```bash
+# Requires the full stack running (frontend :5174, backend :4000)
+npx playwright test                 # Headless, CI mode
+npx playwright test --ui            # Interactive Playwright UI
+npx playwright test --headed        # Show browser window
+npx playwright test e2e/auth.spec.ts  # Single suite
+```
+
+**Config** (`playwright.config.ts`):
+- `baseURL: http://localhost:5174`
+- `workers: 1` — serialized to avoid DB/rate-limit conflicts between suites
+- `retries: 1` — one retry on flaky network timing
+- `storageState: e2e/.auth/user.json` — injected by `globalSetup`; auth tests override with an empty state
+
+**Session bootstrap** (`e2e/global-setup.ts`): logs in once via the API, stores the session in `e2e/.auth/user.json` so every test file starts already authenticated. Only `auth.spec.ts` clears the state to test the actual login form.
+
+**Suites**:
+- `auth.spec.ts` — login page renders, wrong password, correct credentials, protected-route redirect, logout
+- `buildings.spec.ts` — list renders, seed buildings present, create dialog, full create/cleanup
+- `assets.spec.ts` — list renders, create asset, card navigates to detail page
+- `map.spec.ts` — floor selector, SVG map container (`[class*="mapContainer"]`), layer controls, wall-ports toggle
+- `dashboard.spec.ts` — stat cards, sidebar links, global search overlay
+- `alerts.spec.ts` — config form, Teams section, scheduled alerts section, alert history table
+
+**Key patterns**:
+- FloorMap renders SVG (not `<canvas>`); check for `[class*="mapContainer"]` or `[class*="controlButton"]`
+- Asset cards contain an inline status `<select>`; click the icon area (`[class*="assetIcon"]`) to navigate without opening the dropdown
+- Rate limits are 200/15 min in development; `helpers.ts` caches the token per worker to minimise login calls
 
 ---
 

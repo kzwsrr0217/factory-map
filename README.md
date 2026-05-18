@@ -82,7 +82,7 @@ http://localhost:4000/api/docs
 | Security | helmet, express-rate-limit |
 | API docs | swagger-jsdoc + swagger-ui-express |
 | Alerts | nodemailer (email) + fetch (Teams webhook) + node-cron |
-| Tests | Jest + Supertest (backend), RTL + MSW (frontend) |
+| Tests | Jest + Supertest (backend), RTL + MSW (frontend), Playwright (E2E) |
 | Containers | Docker Compose |
 
 ---
@@ -91,6 +91,15 @@ http://localhost:4000/api/docs
 
 ```
 factory-map/
+├── e2e/                           # Playwright end-to-end tests
+│   ├── auth.spec.ts               # Login, logout, protected routes
+│   ├── buildings.spec.ts          # Building CRUD
+│   ├── assets.spec.ts             # Asset CRUD
+│   ├── map.spec.ts                # Floor map / SVG rendering
+│   ├── dashboard.spec.ts          # Dashboard stats + sidebar
+│   ├── alerts.spec.ts             # Alert config + scheduled alerts
+│   └── helpers.ts                 # Shared login helpers + token cache
+├── playwright.config.ts           # Playwright config (baseURL, workers, retries, storageState)
 ├── backend/src/
 │   ├── config/
 │   │   ├── config.ts          # All env-var driven configuration
@@ -192,9 +201,14 @@ docker exec factory-map-backend npm test
 
 # Frontend
 cd frontend && npm test -- --watchAll=false
+
+# E2E (Playwright) — requires the full stack to be running on localhost
+npx playwright test
 ```
 
 Backend tests use `--runInBand --forceExit` to avoid parallel DB conflicts. The `NODE_ENV=test` environment variable is set via a `setupFiles` entry before any module is imported, which prevents the server from binding a port during test runs.
+
+E2E tests run against the live app (`http://localhost:5174` frontend + `http://localhost:4000` backend). `playwright.config.ts` sets `workers: 1` and `retries: 1`; a `globalSetup` script logs in once and saves the session cookie so individual tests do not need to repeat the login flow.
 
 ---
 

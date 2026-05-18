@@ -107,7 +107,7 @@ app.use('/api', rateLimit({
 // Auth routes: tighter window on all /api/auth/* to slow credential stuffing
 app.use('/api/auth', rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 40,
+  max: process.env.NODE_ENV === 'production' ? 40 : 400,
   message: { success: false, error: 'Too many auth requests — try again in 15 minutes' },
   standardHeaders: true,
   legacyHeaders: false,
@@ -116,7 +116,7 @@ app.use('/api/auth', rateLimit({
 // Login endpoints: strictest limit to prevent brute-force (both local and LDAP)
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 20,
+  max: process.env.NODE_ENV === 'production' ? 20 : 200,
   message: { success: false, error: 'Too many login attempts — try again in 15 minutes' },
   standardHeaders: true,
   legacyHeaders: false,

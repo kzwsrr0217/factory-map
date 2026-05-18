@@ -443,7 +443,7 @@ docker exec factory-map-backend npx ts-node src/scripts/seed-mssql.ts
 - [ ] Review user accounts and ensure all default passwords are changed
 - [ ] Set `NODE_ENV=production` to disable TypeORM `synchronize: true` (automatic schema modification) and suppress the startup warning
 - [ ] When using `LDAP_TLS_ENABLED=true` / `ldaps://`, ensure the LDAP server has a valid CA-signed TLS certificate — the backend enforces `rejectUnauthorized: true` and will refuse connections with self-signed or expired certs
-- [ ] Rate limiting covers both local and LDAP login endpoints (20 requests per 15 minutes per IP) — ensure your reverse proxy forwards the real client IP via `X-Forwarded-For`
+- [ ] Rate limiting covers both local and LDAP login endpoints (20 requests per 15 minutes per IP in production) — ensure your reverse proxy forwards the real client IP via `X-Forwarded-For`
 
 ### Helmet security headers
 The backend uses `helmet` middleware which sets these headers automatically:
@@ -453,7 +453,14 @@ The backend uses `helmet` middleware which sets these headers automatically:
 - `Content-Security-Policy`
 
 ### Rate limiting
-Login attempts (both local and LDAP) are rate-limited to **20 requests per 15 minutes** per IP address. The limiter is shared — LDAP and local attempts count against the same window.
+Login attempts (both local and LDAP) are rate-limited per IP address. The limiter is shared — LDAP and local attempts count against the same window.
+
+| Environment | Limit |
+|-------------|-------|
+| `NODE_ENV=production` | **20 requests / 15 minutes** |
+| `NODE_ENV=development` | **200 requests / 15 minutes** (relaxed to prevent automated test lock-outs) |
+
+Ensure your reverse proxy forwards the real client IP via `X-Forwarded-For` (the backend sets `trust proxy: 1`).
 
 ### Audit trail
 All create, update, and delete operations on assets are recorded in `audit_logs` with the user ID, username, timestamp, IP address, and a diff. Audit logs are append-only and cannot be deleted through the application.
@@ -548,9 +555,9 @@ docker-compose restart factory-map-backend
 ```
 
 ### "Too many login attempts" error
-**Cause**: Rate limiter triggered (20 attempts / 15 minutes per IP)
+**Cause**: Rate limiter triggered. Limits: 20 attempts / 15 minutes per IP in production; 200 / 15 minutes in development.
 
-**Fix**: Wait 15 minutes, or if the server is behind a proxy, ensure `X-Forwarded-For` headers are set correctly.
+**Fix**: Wait 15 minutes, or if the server is behind a proxy, ensure `X-Forwarded-For` headers are set correctly so the limiter tracks the real client IP rather than the proxy's IP.
 
 ### Account locked
 **Cause**: 5 consecutive failed login attempts
