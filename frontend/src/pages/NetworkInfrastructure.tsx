@@ -11,9 +11,10 @@ import styles from '../styles/pages/NetworkInfrastructure.module.css';
 
 type ModalState =
   | { kind: 'none' }
-  | { kind: 'room'; room?: NetworkRoom }
-  | { kind: 'rack'; room: NetworkRoom; rack?: NetworkRack }
-  | { kind: 'panel'; rack: NetworkRack; panel?: PatchPanel };
+  | { kind: 'room';     room?: NetworkRoom }
+  | { kind: 'rack';     room: NetworkRoom; rack?: NetworkRack }
+  | { kind: 'panel';    rack: NetworkRack; panel?: PatchPanel }
+  | { kind: 'wallport'; panel: PatchPanel; portNum: number; existing?: WallPort };
 
 interface PortTooltip {
   port: WallPort;
@@ -70,6 +71,11 @@ const NetworkInfrastructure: React.FC = () => {
   const floorName = (floorId: string | null) => (floors as { _id: string; name: string }[]).find(f => f._id === floorId)?.name ?? '—';
   const buildingName = (bId: string) => buildings.find(b => b._id === bId)?.name ?? '—';
 
+  const reloadPanelPorts = async (panelId: string) => {
+    const ports = await networkService.getWallPorts({ patch_panel_id: panelId });
+    setPanelPorts(prev => ({ ...prev, [panelId]: ports }));
+  };
+
   const openModal = (state: ModalState) => {
     const defaults: Record<string, string> = {};
     if (state.kind === 'room') {
@@ -88,6 +94,11 @@ const NetworkInfrastructure: React.FC = () => {
       defaults.port_count = String(state.panel?.port_count ?? 24);
       defaults.cable_type = state.panel?.cable_type ?? 'copper';
       defaults.description = state.panel?.description ?? '';
+    } else if (state.kind === 'wallport') {
+      defaults.label       = state.existing?.label ?? '';
+      defaults.floor_id    = state.existing?.floor_id ?? '';
+      defaults.switch_port = state.existing?.switch_port ?? '';
+      defaults.description = state.existing?.description ?? '';
     }
     setForm(defaults);
     setModal(state);
@@ -137,6 +148,25 @@ const NetworkInfrastructure: React.FC = () => {
         else await networkService.createPatchPanel(payload);
         toast.success(modal.panel ? 'Patch panel updated' : 'Patch panel created');
         await invalidateRooms();
+      } else if (modal.kind === 'wallport') {
+        if (!form.label?.trim()) { toast.error('Label is required'); setSaving(false); return; }
+        if (!form.floor_id)      { toast.error('Floor is required'); setSaving(false); return; }
+        const payload = {
+          label:          form.label.trim(),
+          floor_id:       form.floor_id,
+          patch_panel_id: modal.panel._id,
+          patch_port:     modal.portNum,
+          switch_port:    form.switch_port?.trim() || null,
+          description:    form.description?.trim() || null,
+        };
+        if (modal.existing) {
+          await networkService.updateWallPort(modal.existing._id, payload);
+          toast.success('Wall port updated');
+        } else {
+          await networkService.createWallPort(payload);
+          toast.success('Wall port created');
+        }
+        await reloadPanelPorts(modal.panel._id);
       }
       closeModal();
     } catch (err: unknown) {
@@ -164,6 +194,15 @@ const NetworkInfrastructure: React.FC = () => {
       toast.success('Rack deleted');
       if (selectedRackId === rack._id) setSelectedRackId(null);
       await invalidateRooms();
+    } catch { toast.error('Delete failed'); }
+  };
+
+  const handleDeleteWallPort = async (wp: WallPort, panelId: string) => {
+    if (!window.confirm(`Remove wall port "${wp.label}" (port ${wp.patch_port})?`)) return;
+    try {
+      await networkService.deleteWallPort(wp._id);
+      toast.success('Wall port removed');
+      await reloadPanelPorts(panelId);
     } catch { toast.error('Delete failed'); }
   };
 
@@ -311,11 +350,17 @@ const NetworkInfrastructure: React.FC = () => {
                             <div
                               key={portNum}
                               className={`${styles.port} ${wp ? styles.portUsed : styles.portFree}`}
+                              title={wp ? `${wp.label} — click to edit` : `Port ${portNum} — click to assign wall port`}
                               onMouseEnter={wp ? (e) => {
                                 e.stopPropagation();
                                 setPortTooltip({ port: wp, x: e.clientX, y: e.clientY });
                               } : undefined}
                               onMouseLeave={wp ? () => setPortTooltip(null) : undefined}
+                              onClick={e => {
+                                e.stopPropagation();
+                                setPortTooltip(null);
+                                openModal({ kind: 'wallport', panel, portNum, existing: wp });
+                              }}
                             >
                               {portNum}
                             </div>
@@ -366,14 +411,20 @@ const NetworkInfrastructure: React.FC = () => {
             <div className={styles.modalHeader}>
               <div>
                 <h3>
-                  {modal.kind === 'room'  ? (modal.room  ? 'Edit Room'        : 'New Network Room') :
-                   modal.kind === 'rack'  ? (modal.rack  ? 'Edit Rack'        : `New Rack in ${modal.room.name}`) :
-                                            (modal.panel ? 'Edit Patch Panel' : `New Panel in ${modal.rack.name}`)}
+                  {modal.kind === 'room'     ? (modal.room     ? 'Edit Room'        : 'New Network Room') :
+                   modal.kind === 'rack'     ? (modal.rack     ? 'Edit Rack'        : `New Rack in ${modal.room.name}`) :
+                   modal.kind === 'wallport' ? (modal.existing  ? 'Edit Wall Port'  : `Assign Wall Port — Port ${modal.portNum}`) :
+                                               (modal.panel    ? 'Edit Patch Panel' : `New Panel in ${modal.rack.name}`)}
                 </h3>
                 {modal.kind === 'panel' && !modal.panel && (
                   <p className={styles.modalSubtitle}>
                     {modal.rack.network_room_id ? `${selectedRoom?.name ?? ''} · ` : ''}
                     {modal.rack.u_count}U rack
+                  </p>
+                )}
+                {modal.kind === 'wallport' && (
+                  <p className={styles.modalSubtitle}>
+                    {modal.panel.name} · patch port {modal.portNum}
                   </p>
                 )}
               </div>
@@ -450,14 +501,58 @@ const NetworkInfrastructure: React.FC = () => {
                   <input className={styles.formInput} value={form.description ?? ''} onChange={e => setForm(p => ({ ...p, description: e.target.value }))} placeholder="e.g. Production floor drops, Gi0/1–24" />
                 </>
               )}
+
+              {modal.kind === 'wallport' && (
+                <>
+                  <label className={styles.formLabel}>Label *  <span className={styles.formHint}>(identifier printed on the wall socket)</span></label>
+                  <input
+                    className={styles.formInput}
+                    value={form.label ?? ''}
+                    onChange={e => setForm(p => ({ ...p, label: e.target.value }))}
+                    placeholder="e.g. WP-F1-A01, Drop-12"
+                    autoFocus
+                  />
+                  <label className={styles.formLabel}>Floor where this socket is physically located *</label>
+                  <select className={styles.formInput} value={form.floor_id ?? ''} onChange={e => setForm(p => ({ ...p, floor_id: e.target.value }))}>
+                    <option value="">— Select floor —</option>
+                    {(floors as { _id: string; name: string; building_id: string }[]).map(f => (
+                      <option key={f._id} value={f._id}>{f.name}</option>
+                    ))}
+                  </select>
+                  <p className={styles.formHint} style={{ marginTop: '-8px' }}>
+                    The rack and patch panel can be on a different floor — that is fine.
+                  </p>
+                  <label className={styles.formLabel}>Switch port (optional)</label>
+                  <input
+                    className={styles.formInput}
+                    value={form.switch_port ?? ''}
+                    onChange={e => setForm(p => ({ ...p, switch_port: e.target.value }))}
+                    placeholder="e.g. Gi1/0/5, Fa0/12"
+                  />
+                  <label className={styles.formLabel}>Description (optional)</label>
+                  <input
+                    className={styles.formInput}
+                    value={form.description ?? ''}
+                    onChange={e => setForm(p => ({ ...p, description: e.target.value }))}
+                    placeholder="e.g. Assembly line row A, station 1"
+                  />
+                </>
+              )}
             </div>
             <div className={styles.modalFooter}>
+              {modal.kind === 'wallport' && modal.existing && (
+                <Button variant="danger" onClick={() => { closeModal(); handleDeleteWallPort(modal.existing!, modal.panel._id); }} disabled={saving}>
+                  Remove
+                </Button>
+              )}
               <Button variant="secondary" onClick={closeModal} disabled={saving}>Cancel</Button>
-              <Button variant="primary" onClick={handleSave} disabled={!form.name?.trim() || saving}>
+              <Button variant="primary" onClick={handleSave}
+                disabled={saving || (modal.kind === 'wallport' ? !form.label?.trim() || !form.floor_id : !form.name?.trim())}>
                 {saving ? 'Saving…' : (
-                  modal.kind === 'room'  ? (modal.room  ? 'Update Room'  : 'Create Room') :
-                  modal.kind === 'rack'  ? (modal.rack  ? 'Update Rack'  : 'Create Rack') :
-                                           (modal.panel ? 'Update Panel' : 'Create Panel')
+                  modal.kind === 'room'     ? (modal.room     ? 'Update Room'     : 'Create Room') :
+                  modal.kind === 'rack'     ? (modal.rack     ? 'Update Rack'     : 'Create Rack') :
+                  modal.kind === 'wallport' ? (modal.existing  ? 'Update Wall Port' : 'Create Wall Port') :
+                                              (modal.panel    ? 'Update Panel'    : 'Create Panel')
                 )}
               </Button>
             </div>
