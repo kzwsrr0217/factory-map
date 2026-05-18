@@ -73,9 +73,9 @@ async function seed() {
 
   // ── 2. Users ───────────────────────────────────────────────────────────────
   console.log('\n👤 Creating users...');
-  const admin    = await uRepo.save(uRepo.create({ username: 'admin',    password: 'Admin@1234',    role: 'admin',    email: 'admin@factory.local',    active: true }));
-  const operator = await uRepo.save(uRepo.create({ username: 'operator', password: 'Operator@1234', role: 'operator', email: 'operator@factory.local', active: true }));
-  await uRepo.save(uRepo.create({ username: 'viewer', password: 'Viewer@1234', role: 'viewer', email: 'viewer@factory.local', active: true }));
+  await uRepo.save(uRepo.create({ username: 'admin',    password: 'Admin@1234',    role: 'admin',    email: 'admin@factory.local',    active: true }));
+  await uRepo.save(uRepo.create({ username: 'operator', password: 'Operator@1234', role: 'operator', email: 'operator@factory.local', active: true }));
+  await uRepo.save(uRepo.create({ username: 'viewer',   password: 'Viewer@1234',   role: 'viewer',   email: 'viewer@factory.local',   active: true }));
   console.log('   admin/Admin@1234 · operator/Operator@1234 · viewer/Viewer@1234');
 
   // ── 3. Building ────────────────────────────────────────────────────────────
@@ -103,7 +103,7 @@ async function seed() {
 
   // ── 5. Work Areas ──────────────────────────────────────────────────────────
   console.log('\n📐 Creating work areas...');
-  const wa_serverRoom = await waRepo.save(waRepo.create({
+  await waRepo.save(waRepo.create({
     floor_id: basement.id, name: 'Main Server Room',
     type: 'server_room', coord_x: 50, coord_y: 50, dim_width: 400, dim_height: 300,
   }));
@@ -187,7 +187,7 @@ async function seed() {
     cable_type: 'copper',
     description: 'First floor drops',
   }));
-  const pp03 = await ppRepo.save(ppRepo.create({
+  await ppRepo.save(ppRepo.create({
     name: 'PP-03',
     rack_id: rack02.id,
     u_position: 1,
@@ -287,7 +287,7 @@ async function seed() {
   // Assembly Line A — Station A1
   const pc_a1_1 = await aRepo.save(mkFloor(
     'PC-A1-001', 'workstation', groundFloor.id, wa_assemblyA.id, sec_a1.id, 100, 100, wp_gf_01.id,
-    { manufacturer: 'HP', model: 'EliteDesk 800 G6', serial_number: 'WS001', mac_address: 'AA:BB:CC:00:02:01', ip_address: '10.0.1.101', asset_tag: 'TAG-0101', maint_next_date: day(15), maint_interval_days: 180, assigned_person_name: 'Franz Müller' }
+    { manufacturer: 'HP', model: 'EliteDesk 800 G6', serial_number: 'WS001', mac_address: 'AA:BB:CC:00:02:01', ip_address: '10.0.1.101', asset_tag: 'TAG-0101', maint_next_date: day(15), maint_interval_days: 180, person_full_name: 'Franz Müller' }
   ));
   const hmi_a1 = await aRepo.save(mkFloor(
     'HMI-A1-001', 'hmi', groundFloor.id, wa_assemblyA.id, sec_a1.id, 180, 100, null,
@@ -313,7 +313,7 @@ async function seed() {
     'PC-B2-001', 'workstation', groundFloor.id, wa_assemblyB.id, sec_b2.id, 280, 370, wp_gf_04.id,
     { manufacturer: 'Lenovo', model: 'ThinkCentre M90q', serial_number: 'WS004', mac_address: 'AA:BB:CC:00:02:04', ip_address: '10.0.1.104', asset_tag: 'TAG-0202' }
   ));
-  const robot_b = await aRepo.save(mkFloor(
+  await aRepo.save(mkFloor(
     'ROBOT-B-001', 'robot', groundFloor.id, wa_assemblyB.id, null, 200, 420, null,
     { manufacturer: 'KUKA', model: 'KR AGILUS KR 6 R700', serial_number: 'ROB001', ip_address: '10.0.1.250', asset_tag: 'TAG-0203', maint_next_date: day(-30), maint_interval_days: 90 }
   ));
@@ -321,9 +321,9 @@ async function seed() {
   // IT Office
   const pc_it = await aRepo.save(mkFloor(
     'PC-IT-001', 'laptop', groundFloor.id, wa_itOffice.id, null, 580, 100, wp_gf_05.id,
-    { manufacturer: 'Dell', model: 'Latitude 5540', serial_number: 'LT001', mac_address: 'AA:BB:CC:00:03:01', ip_address: '10.0.1.50', asset_tag: 'TAG-0301', os_type: 'Windows', os_version: 'Windows 11 Pro', assigned_person_name: 'Anna Schmidt' }
+    { manufacturer: 'Dell', model: 'Latitude 5540', serial_number: 'LT001', mac_address: 'AA:BB:CC:00:03:01', ip_address: '10.0.1.50', asset_tag: 'TAG-0301', os_type: 'Windows', os_version: 'Windows 11 Pro', person_full_name: 'Anna Schmidt' }
   ));
-  const printer_it = await aRepo.save(mkFloor(
+  await aRepo.save(mkFloor(
     'Printer-IT-001', 'printer', groundFloor.id, wa_itOffice.id, null, 700, 150, wp_gf_06.id,
     { manufacturer: 'HP', model: 'LaserJet Pro MFP M428fdn', serial_number: 'PRT001', ip_address: '10.0.1.60', asset_tag: 'TAG-0302' }
   ));
@@ -331,13 +331,13 @@ async function seed() {
   // First floor
   const pc_mgmt1 = await aRepo.save(mkFloor(
     'PC-MGMT-001', 'workstation', firstFloor.id, wa_mgmt.id, null, 100, 100, wp_ff_01.id,
-    { manufacturer: 'Apple', model: 'Mac mini M2', serial_number: 'MM001', mac_address: 'AA:BB:CC:00:04:01', ip_address: '10.0.2.101', asset_tag: 'TAG-0401', os_type: 'macOS', os_version: 'Ventura 13.6', assigned_person_name: 'Petra Koch' }
+    { manufacturer: 'Apple', model: 'Mac mini M2', serial_number: 'MM001', mac_address: 'AA:BB:CC:00:04:01', ip_address: '10.0.2.101', asset_tag: 'TAG-0401', os_type: 'macOS', os_version: 'Ventura 13.6', person_full_name: 'Petra Koch' }
   ));
-  const pc_mgmt2 = await aRepo.save(mkFloor(
+  await aRepo.save(mkFloor(
     'PC-MGMT-002', 'laptop', firstFloor.id, wa_mgmt.id, null, 250, 100, wp_ff_02.id,
-    { manufacturer: 'Lenovo', model: 'ThinkPad X1 Carbon', serial_number: 'LT002', mac_address: 'AA:BB:CC:00:04:02', ip_address: '10.0.2.102', asset_tag: 'TAG-0402', os_type: 'Windows', os_version: 'Windows 11 Pro', assigned_person_name: 'Markus Bauer' }
+    { manufacturer: 'Lenovo', model: 'ThinkPad X1 Carbon', serial_number: 'LT002', mac_address: 'AA:BB:CC:00:04:02', ip_address: '10.0.2.102', asset_tag: 'TAG-0402', os_type: 'Windows', os_version: 'Windows 11 Pro', person_full_name: 'Markus Bauer' }
   ));
-  const display_conf = await aRepo.save(mkFloor(
+  await aRepo.save(mkFloor(
     'Display-CONF-001', 'display', firstFloor.id, wa_conf.id, null, 120, 370, wp_ff_03.id,
     { manufacturer: 'Samsung', model: '65" Smart Signage QM65B', serial_number: 'DSP001', asset_tag: 'TAG-0501' }
   ));
@@ -345,7 +345,7 @@ async function seed() {
   // ── 11. Software ───────────────────────────────────────────────────────────
   console.log('\n📦 Adding software...');
   const sw = (assetId: string, name: string, version: string) =>
-    swRepo.create({ asset_id: assetId, display_name: name, version, source: 'local', license_type: 'commercial', install_date: day(-90) });
+    swRepo.create({ asset_id: assetId, display_name: name, version, source: 'manual' });
   await swRepo.save([
     sw(pc_a1_1.id, 'Windows 11 Pro', '22H2'),
     sw(pc_a1_1.id, 'SAP GUI', '7.70'),
