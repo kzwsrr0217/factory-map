@@ -78,7 +78,7 @@ const MapView: React.FC = () => {
     assets: true,
     connections: true,
     grid: true,
-    wallports: true,
+    wallports: false,
   });
   const [tracingAsset, setTracingAsset] = useState<Asset | null>(null);
   const assetUpdateTimer = useRef<NodeJS.Timeout | null>(null);
