@@ -158,6 +158,10 @@ const NetworkInfrastructure: React.FC = () => {
           patch_port:     modal.portNum,
           switch_port:    form.switch_port?.trim() || null,
           description:    form.description?.trim() || null,
+          // Place in the centre of the floor map so it is easy to find;
+          // the user drags it to the exact spot in Map View.
+          pos_x: modal.existing?.pos_x ?? 500,
+          pos_y: modal.existing?.pos_y ?? 400,
         };
         if (modal.existing) {
           await networkService.updateWallPort(modal.existing._id, payload);
@@ -536,6 +540,11 @@ const NetworkInfrastructure: React.FC = () => {
                     onChange={e => setForm(p => ({ ...p, description: e.target.value }))}
                     placeholder="e.g. Assembly line row A, station 1"
                   />
+                  {!modal.existing && (
+                    <p className={styles.formHint}>
+                      The wall port will appear in the centre of the floor map. Drag it to the exact location in Map View.
+                    </p>
+                  )}
                 </>
               )}
             </div>
