@@ -61,7 +61,7 @@ If your company uses Active Directory, click **Sign in with Active Directory** a
 Contact your system administrator — they can reset your password from the User Management page.
 
 ### Account locked?
-After 5 failed login attempts, your account is locked for 30 minutes. Contact your administrator to unlock it sooner.
+After 5 failed login attempts, your account is locked for 30 minutes. The login page shows a countdown timer (`MM:SS`) next to the error message, and the Sign In button is disabled until the lockout expires. Contact your administrator to unlock it sooner.
 
 ---
 

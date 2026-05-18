@@ -360,6 +360,7 @@ docker exec -it factory-map-mssql /opt/mssql-tools18/bin/sqlcmd \
 | `assets`, `asset_software`, `asset_connections` | Asset inventory and relationships |
 | `network_rooms`, `network_racks`, `patch_panels`, `wall_ports` | Physical network infrastructure (IDF/MDF rooms, racks, cabling) |
 | `users` | Application users |
+| `active_sessions` | JWT session tokens with revocation support |
 | `audit_logs` | Immutable change history |
 | `alert_config`, `alert_logs`, `scheduled_alerts` | Maintenance alert system |
 
@@ -440,6 +441,9 @@ docker exec factory-map-backend npx ts-node src/scripts/seed-mssql.ts
 - [ ] Use a reverse proxy (nginx/IIS/Traefik) with HTTPS in front of port 4000
 - [ ] Enable firewall rules to restrict access to admin ports
 - [ ] Review user accounts and ensure all default passwords are changed
+- [ ] Set `NODE_ENV=production` to disable TypeORM `synchronize: true` (automatic schema modification) and suppress the startup warning
+- [ ] When using `LDAP_TLS_ENABLED=true` / `ldaps://`, ensure the LDAP server has a valid CA-signed TLS certificate — the backend enforces `rejectUnauthorized: true` and will refuse connections with self-signed or expired certs
+- [ ] Rate limiting covers both local and LDAP login endpoints (20 requests per 15 minutes per IP) — ensure your reverse proxy forwards the real client IP via `X-Forwarded-For`
 
 ### Helmet security headers
 The backend uses `helmet` middleware which sets these headers automatically:
@@ -449,7 +453,7 @@ The backend uses `helmet` middleware which sets these headers automatically:
 - `Content-Security-Policy`
 
 ### Rate limiting
-Login attempts are rate-limited to **20 requests per 15 minutes** per IP. This prevents brute-force password attacks.
+Login attempts (both local and LDAP) are rate-limited to **20 requests per 15 minutes** per IP address. The limiter is shared — LDAP and local attempts count against the same window.
 
 ### Audit trail
 All create, update, and delete operations on assets are recorded in `audit_logs` with the user ID, username, timestamp, IP address, and a diff. Audit logs are append-only and cannot be deleted through the application.
@@ -500,6 +504,15 @@ GET http://localhost:4000/health
 ```
 Returns `{"status":"OK","timestamp":"..."}`. Use this for uptime monitoring (e.g., UptimeRobot, Nagios, Zabbix).
 
+### Docker health check
+The backend Dockerfile includes a `HEALTHCHECK` directive that polls `GET /health` every 30 seconds with a 5-second timeout. Docker will mark the container as unhealthy after 3 consecutive failures. Monitor with:
+```bash
+docker inspect --format='{{.State.Health.Status}}' factory-map-backend
+```
+
+### Cron job failures
+If a scheduled job (daily maintenance alerts, hourly scheduled alerts, or weekly audit log prune) throws an error, the failure is automatically written to the **AlertLog** table. You can see it on the **Alerts** page under **Alert History** — the channel will appear as `internal` with `success: false` and the error message in the details.
+
 ### Application logs
 In development (`NODE_ENV=development`), HTTP requests are logged by Morgan to stdout:
 ```
@@ -543,6 +556,16 @@ docker-compose restart factory-map-backend
 **Cause**: 5 consecutive failed login attempts
 
 **Fix**: Admin deactivates the user and re-activates them in User Management, which resets the lockout counter.
+
+### Cron job failure in Alert History
+**Symptom**: An entry in **Alert History** with channel `internal` and status `failed`.
+
+**Cause**: The daily maintenance alert, hourly scheduled alert, or weekly audit prune cron job threw an exception.
+
+**Fix**: Read the error message in the Alert History row. Common causes:
+- SMTP credentials expired (reconfigure in Alerts → Email settings)
+- Teams webhook URL changed or was deleted
+- Database temporarily unavailable during the cron window
 
 ### ITSM sync shows "Real ITSM adapter not yet implemented"
 **Cause**: `ITSM_MODE=real` is set but the real adapter is not implemented

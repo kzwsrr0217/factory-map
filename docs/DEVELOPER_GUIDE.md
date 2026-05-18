@@ -185,7 +185,9 @@ factory-map/
 │       │   ├── hierarchy.types.ts         # IBuilding, IFloor, IWorkArea, ISection, IWorkstation
 │       │   └── itsm.types.ts              # IITSMHardware, IITSMSyncResult, etc.
 │       ├── utils/
-│       │   └── passwordPolicy.ts          # validatePassword + constants
+│       │   ├── asyncHandler.ts            # Wraps async controllers; forwards rejections to next(error)
+│       │   ├── passwordPolicy.ts          # validatePassword + constants
+│       │   └── validate.ts               # Zod v3 schemas + validate() middleware factory
 │       └── server.ts                      # Express bootstrap, Socket.io, daily cron (07:00) + hourly cron (scheduled alerts)
 │
 ├── frontend/
@@ -288,7 +290,7 @@ All routes require a valid `Authorization: Bearer <JWT>` header except `/api/aut
 |--------|------|-------------|
 | GET | `/capabilities` | Returns which auth providers are enabled (local, ldap, azure) |
 | POST | `/login` | Local login; returns token + user. Rate-limited: 20 req/15 min |
-| POST | `/login/ldap` | LDAP login |
+| POST | `/login/ldap` | LDAP login. Rate-limited: 20 req/15 min (shared limiter with /login) |
 | POST | `/logout` | Invalidates session (audit log entry) |
 | GET | `/me` | Current user profile |
 | PATCH | `/password` | Change own password |
@@ -356,7 +358,7 @@ Similar CRUD, filtered by `section_id`.
 | DELETE | `/:id/connections/:connId` | — | Remove connection (also removes reverse) |
 | POST | `/:id/work-items/:taskId/notify` | — | Send immediate alert for one work item; sets `alert_sent=true` |
 
-**Pagination**: when `page` and `limit` are provided, response includes `{ data, total, page, limit, pages }`. Without them, all matching assets are returned.
+**Pagination**: when `page` and `limit` are provided, the response includes `{ data, meta: { page, limit, total, totalPages } }`. Without them, the response includes `{ data, meta: { limit: 1000, truncated: boolean } }` — up to 1000 assets are returned and `meta.truncated` is `true` if there are more. Explicit `limit` is capped at 500.
 
 **Response envelope**: all endpoints return `{ success: boolean, data: ... }` (or `{ success: false, error: string }` on failure).
 
@@ -582,6 +584,7 @@ Test suites:
 - `src/__tests__/buildings.test.ts` — CRUD, cascade checks
 - `src/__tests__/itsm.test.ts` — hardware search, sync (mock mode)
 - `src/__tests__/network.test.ts` — rooms/racks/patch panels/wall ports CRUD; `cable_type` copper/fiber/mixed round-trip; asset `wall_port_id` FK assign + null-clear
+- `src/__tests__/auth.lockout.test.ts` — account lockout (423), locked-account rejects correct password, pagination safety cap (`meta.limit`/`meta.truncated`), Zod 400 validation for assets + buildings
 
 ### Frontend
 
@@ -711,6 +714,8 @@ cd frontend && npm audit
 - **Repository pattern**: `AppDataSource.getRepository(Entity)` called inside each function (not as a module variable) to avoid stale connections
 - **Response envelope**: always `{ success: boolean, data: ... }` or `{ success: false, error: string }`
 - **Error handling**: pass to `next(error)` for the global handler; never swallow errors silently except in audit log writes
+- **`asyncHandler`**: wrap every async controller function with `asyncHandler(fn)` from `utils/asyncHandler.ts` instead of try/catch boilerplate — rejections automatically call `next(error)`
+- **Zod validation**: use the `validate(schema)` middleware from `utils/validate.ts` on every POST/PATCH route that accepts a body; schemas live in `validate.ts`, not inline in controllers
 
 ### Frontend
 - **CSS Modules** — all styles in `src/styles/components/` or `src/styles/pages/`
@@ -758,9 +763,10 @@ cd frontend && npm audit
 
 ### Adding a new API endpoint
 
-1. Add the handler function to the relevant controller file
-2. Register it in the router file
-3. Apply `auditLog(...)` middleware if it mutates data
+1. Add the handler function to the relevant controller file, wrapped with `asyncHandler`
+2. Define a Zod schema in `utils/validate.ts` and apply `validate(schema)` middleware in the router for any route that accepts a body
+3. Register it in the router file
+4. Apply `auditLog(...)` middleware if it mutates data
 
 ### Implementing the Real ITSM adapter
 
