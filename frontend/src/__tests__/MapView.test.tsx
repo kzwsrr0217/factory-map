@@ -23,7 +23,7 @@ jest.mock('react-router-dom', () => ({
   Link: ({ children, to }: { children: React.ReactNode; to: string }) => <a href={to}>{children}</a>,
 }));
 
-jest.mock('jspdf',          () => function JsPDF() { return { save: jest.fn(), text: jest.fn(), addPage: jest.fn(), setFontSize: jest.fn(), addImage: jest.fn(), setFont: jest.fn(), setFontSize: jest.fn(), internal: { pageSize: { getWidth: () => 297, getHeight: () => 210 } } }; });
+jest.mock('jspdf',          () => function JsPDF() { return { save: jest.fn(), text: jest.fn(), addPage: jest.fn(), setFontSize: jest.fn(), addImage: jest.fn(), setFont: jest.fn(), internal: { pageSize: { getWidth: () => 297, getHeight: () => 210 } } }; });
 jest.mock('jspdf-autotable', () => jest.fn());
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'warn' }));
