@@ -1,0 +1,230 @@
+/* ── Outer wrapper ────────────────────────────────────────────────────────── */
+
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+  margin-top: var(--spacing-lg);
+}
+
+/* ── Diagram row (slot grid + SVG) ──────────────────────────────────────── */
+
+.diagramRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 0;
+  overflow-y: auto;
+  max-height: 600px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
+}
+
+.slotCol {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.cableSvg {
+  flex-shrink: 0;
+  overflow: visible;
+}
+
+/* ── U row ────────────────────────────────────────────────────────────────── */
+
+.uRow {
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid var(--color-border);
+  min-height: 24px;
+}
+
+.uNum {
+  width: 32px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.65rem;
+  color: var(--color-text-secondary);
+  border-right: 1px solid var(--color-border);
+  background: var(--color-bg-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.emptySlot {
+  flex: 1;
+  background: repeating-linear-gradient(
+    90deg,
+    var(--color-bg-secondary) 0px,
+    var(--color-bg-secondary) 4px,
+    var(--color-bg-primary)   4px,
+    var(--color-bg-primary)   8px
+  );
+  opacity: 0.5;
+}
+
+/* ── Device block ─────────────────────────────────────────────────────────── */
+
+.device {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  background: var(--color-primary);
+  color: #fff;
+  border-radius: 2px;
+  margin: 1px 2px 1px 0;
+  overflow: hidden;
+  cursor: pointer;
+  transition: filter 0.15s;
+}
+
+.device:hover {
+  filter: brightness(1.1);
+}
+
+.deviceActive {
+  outline: 2px solid var(--color-warning, #f59e0b);
+  outline-offset: 1px;
+}
+
+.deviceName {
+  font-size: 0.78rem;
+  font-weight: var(--font-weight-semibold);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+}
+
+.deviceMeta {
+  font-size: 0.65rem;
+  opacity: 0.8;
+  white-space: nowrap;
+}
+
+.patchBtn {
+  background: rgba(255,255,255,0.2);
+  border: 1px solid rgba(255,255,255,0.4);
+  color: #fff;
+  font-size: 0.65rem;
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+
+.patchBtn:hover {
+  background: rgba(255,255,255,0.35);
+}
+
+/* ── No-U section ─────────────────────────────────────────────────────────── */
+
+.noUSection {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  padding: 6px 8px;
+  background: var(--color-bg-secondary);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+}
+
+.noULabel {
+  color: var(--color-text-secondary);
+  font-size: 0.75rem;
+  font-style: italic;
+  margin-right: 4px;
+}
+
+.noUItem {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+/* ── Inline patch form ────────────────────────────────────────────────────── */
+
+.patchForm {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 8px 10px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+}
+
+.patchFromLabel {
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-primary);
+  white-space: nowrap;
+}
+
+.patchArrow {
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.patchInput {
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  font-size: 0.8rem;
+  min-width: 100px;
+}
+
+.patchInput:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+
+.patchSave {
+  height: 32px;
+  padding: 0 14px;
+  background: var(--color-primary);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: var(--font-weight-semibold);
+  transition: opacity 0.15s;
+}
+
+.patchSave:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.patchCancel {
+  height: 32px;
+  padding: 0 10px;
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  color: var(--color-text-secondary);
+  font-size: 0.8rem;
+  transition: color 0.15s;
+}
+
+.patchCancel:hover {
+  color: var(--color-danger, #ef4444);
+}

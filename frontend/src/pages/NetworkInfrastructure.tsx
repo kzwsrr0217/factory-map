@@ -4,6 +4,7 @@ import Card from '../components/common/Card';
 import Button from '../components/common/Button';
 import { networkService, NetworkRoom, NetworkRack, PatchPanel, WallPort } from '../services/network.service';
 import { assetService, Asset } from '../services/asset.service';
+import { RackDiagram } from '../components/network/RackDiagram';
 import { useToast } from '../contexts/ToastContext';
 import { useBuildings } from '../hooks/queries/useBuildings';
 import { useFloors } from '../hooks/queries/useFloors';
@@ -35,6 +36,7 @@ const NetworkInfrastructure: React.FC = () => {
   const [selectedRackId, setSelectedRackId] = useState<string | null>(null);
   const [panelPorts, setPanelPorts] = useState<Record<string, WallPort[]>>({});
   const [buildingAssets, setBuildingAssets] = useState<Asset[]>([]);
+  const [rackAssets,     setRackAssets]     = useState<Asset[]>([]);
   const [portTooltip, setPortTooltip] = useState<PortTooltip | null>(null);
   const tooltipRef = useRef<HTMLDivElement>(null);
   const [modal, setModal] = useState<ModalState>({ kind: 'none' });
@@ -65,16 +67,19 @@ const NetworkInfrastructure: React.FC = () => {
     }
   }, [selectedBuildingId]);
 
-  // Load wall ports for all panels in the selected rack
+  // Load wall ports and rack assets when selected rack changes
   useEffect(() => {
-    if (!selectedRack || selectedRack.patch_panels.length === 0) { setPanelPorts({}); return; }
-    Promise.all(
-      selectedRack.patch_panels.map(p => networkService.getWallPorts({ patch_panel_id: p._id }))
-    ).then(results => {
-      const map: Record<string, WallPort[]> = {};
-      selectedRack.patch_panels.forEach((p, i) => { map[p._id] = results[i]; });
-      setPanelPorts(map);
-    });
+    if (!selectedRack) { setPanelPorts({}); setRackAssets([]); return; }
+    if (selectedRack.patch_panels.length > 0) {
+      Promise.all(
+        selectedRack.patch_panels.map(p => networkService.getWallPorts({ patch_panel_id: p._id }))
+      ).then(results => {
+        const map: Record<string, WallPort[]> = {};
+        selectedRack.patch_panels.forEach((p, i) => { map[p._id] = results[i]; });
+        setPanelPorts(map);
+      });
+    }
+    loadRackAssets(selectedRack._id);
   }, [selectedRack]);
 
   const invalidateRooms = () => qc.invalidateQueries({ queryKey: networkKeys.rooms({ building_id: selectedBuildingId }) });
@@ -85,6 +90,11 @@ const NetworkInfrastructure: React.FC = () => {
   const reloadPanelPorts = async (panelId: string) => {
     const ports = await networkService.getWallPorts({ patch_panel_id: panelId });
     setPanelPorts(prev => ({ ...prev, [panelId]: ports }));
+  };
+
+  const loadRackAssets = async (rackId: string) => {
+    const all = await assetService.getAssetsWithConnections();
+    setRackAssets(all.filter(a => a.hierarchy?.rack_id === rackId));
   };
 
   const openModal = (state: ModalState) => {
@@ -392,6 +402,22 @@ const NetworkInfrastructure: React.FC = () => {
                   );
                 })}
               </div>
+
+              {/* Rack devices diagram */}
+              <div className={styles.panelHeader} style={{ marginTop: 'var(--spacing-xl)' }}>
+                <h2>{selectedRack.name} — Rack Devices</h2>
+              </div>
+              {rackAssets.length === 0 ? (
+                <div className={styles.empty}>
+                  No rack-mounted assets yet. Set <strong>rack_id</strong> on an asset to place it here.
+                </div>
+              ) : (
+                <RackDiagram
+                  rack={selectedRack}
+                  assets={rackAssets}
+                  onRefresh={() => loadRackAssets(selectedRack._id)}
+                />
+              )}
             </>
           )}
         </div>

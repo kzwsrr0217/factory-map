@@ -23,7 +23,7 @@ import { hierarchyService, Building } from '../../services/hierarchy.service';
 import { floorService, Floor } from '../../services/floor.service';
 import { workareaService, WorkArea } from '../../services/workarea.service';
 import { sectionService, Section } from '../../services/section.service';
-import { networkService, WallPort } from '../../services/network.service';
+import { networkService, WallPort, NetworkRack } from '../../services/network.service';
 import { ASSET_TYPE_OPTIONS } from '../../utils/assetTypes';
 import { ASSET_TEMPLATES } from '../../utils/assetTemplates';
 import { usePersonSuggestions } from '../../hooks/usePersonSuggestions';
@@ -100,6 +100,9 @@ const EMPTY_FORM = {
   coordinates_x: '',
   coordinates_y: '',
   location_description: '',
+  rack_id: '',
+  u_position: '',
+  rack_u_size: '1',
   person_full_name: '',
   person_id: '',
   cpu: '',
@@ -168,6 +171,7 @@ const AssetCreationWizard: React.FC<AssetCreationWizardProps> = ({
   const [sections, setSections]     = useState<Section[]>([]);
   const [wallPorts, setWallPorts]   = useState<WallPort[]>([]);
   const [allAssets, setAllAssets]   = useState<AssetOption[]>([]);
+  const [racks,     setRacks]       = useState<NetworkRack[]>([]);
 
   // ── Connection draft inputs ─────────────────────────────────────────────────
   const [connSearch,      setConnSearch]      = useState('');
@@ -214,6 +218,10 @@ const AssetCreationWizard: React.FC<AssetCreationWizardProps> = ({
   useEffect(() => {
     if (!formData.building_id) { setFloors([]); return; }
     floorService.getFloors(formData.building_id).then(setFloors).catch(() => {});
+    networkService.getRacks().then(all => {
+      // Load all racks; filter to building via network rooms (rooms not available here, so load all)
+      setRacks(all);
+    }).catch(() => {});
   }, [formData.building_id]);
 
   // ── Cascade: floor → workareas + wall ports + SVG ──────────────────────────
@@ -283,11 +291,14 @@ const AssetCreationWizard: React.FC<AssetCreationWizardProps> = ({
         os_version:    formData.os_version    || undefined,
       },
       hierarchy: {
-        building_id:   formData.building_id   || null,
-        floor_id:      formData.floor_id      || null,
-        workarea_id:   formData.workarea_id   || null,
-        section_id:    formData.section_id    || null,
+        building_id:    formData.building_id   || null,
+        floor_id:       formData.floor_id      || null,
+        workarea_id:    formData.workarea_id   || null,
+        section_id:     formData.section_id    || null,
         workstation_id: null,
+        rack_id:        formData.rack_id       || null,
+        u_position:     formData.u_position    ? Number(formData.u_position)   : null,
+        rack_u_size:    formData.rack_u_size   ? Number(formData.rack_u_size)  : 1,
       },
       location: {
         coordinates: {
@@ -501,7 +512,30 @@ const AssetCreationWizard: React.FC<AssetCreationWizardProps> = ({
             placeholder="Additional placement details" />
         </div>
 
-        {imgSrc ? (
+        {racks.length > 0 && (
+          <div className={styles.section}>
+            <p className={styles.sectionLabel}>Rack Mount (optional)</p>
+            <p className={styles.hint}>
+              Rack-mounted assets are shown in the rack diagram and excluded from the floor map.
+            </p>
+            <Select value={formData.rack_id}
+              onChange={v => setField({ rack_id: v })}
+              options={[{ value: '', label: '— Not rack-mounted —' }, ...racks.map(r => ({ value: r._id, label: r.name }))]}
+              placeholder="Rack" />
+            {formData.rack_id && (
+              <div className={styles.row}>
+                <Input label="U Position" value={formData.u_position}
+                  onChange={e => setField({ u_position: e.target.value })}
+                  placeholder="e.g. 1" type="number" />
+                <Input label="U Size" value={formData.rack_u_size}
+                  onChange={e => setField({ rack_u_size: e.target.value })}
+                  placeholder="e.g. 2" type="number" />
+              </div>
+            )}
+          </div>
+        )}
+
+        {!formData.rack_id && imgSrc ? (
           <div className={styles.section}>
             <p className={styles.sectionLabel}>
               Click the map to place the asset
@@ -526,7 +560,7 @@ const AssetCreationWizard: React.FC<AssetCreationWizardProps> = ({
                 onChange={e => setField({ coordinates_y: e.target.value })} placeholder="0" />
             </div>
           </div>
-        ) : formData.floor_id ? (
+        ) : (!formData.rack_id && formData.floor_id) ? (
           <div className={styles.section}>
             <p className={styles.hint}>No floor map uploaded yet. You can place the asset on the Map view after saving.</p>
             <div className={styles.row}>

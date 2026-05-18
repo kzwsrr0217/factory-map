@@ -111,6 +111,9 @@ const MapView: React.FC = () => {
 
   const filteredAssets = useMemo(() => {
     return assets.filter((asset) => {
+      // Rack-mounted assets live in a rack, not on the floor map
+      if (asset.hierarchy?.rack_id) return false;
+
       // Search filter
       if (searchQuery) {
         const query = searchQuery.toLowerCase();

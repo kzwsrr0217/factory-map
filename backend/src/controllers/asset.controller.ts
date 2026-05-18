@@ -145,6 +145,12 @@ function applyBodyToAsset(asset: Asset, body: Record<string, unknown>): void {
     if (hier.workarea_id !== undefined) asset.workarea_id = (hier.workarea_id as string) ?? null;
     if (hier.section_id !== undefined) asset.section_id = (hier.section_id as string) ?? null;
     if (hier.workstation_id !== undefined) asset.workstation_id = (hier.workstation_id as string) ?? null;
+    if (hier.rack_id !== undefined) {
+      asset.rack_id = (hier.rack_id as string) ?? null;
+      if (asset.rack_id) asset.is_placed = true;
+    }
+    if (hier.u_position !== undefined) asset.u_position = (hier.u_position as number) ?? null;
+    if (hier.rack_u_size !== undefined) asset.rack_u_size = (hier.rack_u_size as number) ?? 1;
   }
 
   const cf = body.custom_fields as Record<string, unknown> | undefined;

@@ -59,11 +59,14 @@ export interface Asset {
   successor_id?: string | null;
   is_placed?: boolean;
   hierarchy: {
-    building_id: string | null;
-    floor_id: string | null;
-    workarea_id: string | null;
-    section_id: string | null;
+    building_id:  string | null;
+    floor_id:     string | null;
+    workarea_id:  string | null;
+    section_id:   string | null;
     workstation_id: string | null;
+    rack_id?:     string | null;
+    u_position?:  number | null;
+    rack_u_size?: number;
   };
   itsm: {
     itsm_guid?: string | null;

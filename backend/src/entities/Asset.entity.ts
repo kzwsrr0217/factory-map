@@ -101,6 +101,12 @@ export class Asset {
   @Column({ name: 'rack_id', type: 'nvarchar', length: 36, nullable: true })
   rack_id!: string | null;
 
+  @Column({ name: 'u_position', type: 'int', nullable: true })
+  u_position!: number | null;
+
+  @Column({ name: 'rack_u_size', type: 'int', default: 1 })
+  rack_u_size!: number;
+
   // ── basic_info (flattened) ────────────────────────────────────────────────
   @Column({ name: 'display_name', type: 'nvarchar', length: 200 })
   @Index()
@@ -359,7 +365,9 @@ export class Asset {
         workarea_id: this.workarea_id,
         section_id: this.section_id,
         workstation_id: this.workstation_id,
-        rack_id: this.rack_id,
+        rack_id:      this.rack_id,
+        u_position:   this.u_position,
+        rack_u_size:  this.rack_u_size,
       },
       basic_info: {
         display_name: this.display_name,
