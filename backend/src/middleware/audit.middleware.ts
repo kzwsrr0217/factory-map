@@ -26,6 +26,9 @@ import { AuthRequest } from './auth.middleware';
 
 type AuditAction = 'create' | 'update' | 'delete';
 
+let auditFailureCount = 0;
+const AUDIT_FAILURE_THRESHOLD = 5;
+
 const methodToAction: Record<string, AuditAction> = {
   POST: 'create',
   PATCH: 'update',
@@ -113,8 +116,15 @@ export const auditLog = (collection: string) => {
         entity_type: collection,
         document_id,
         diff,
-      })).catch((err: unknown) => {
-        console.error('[AuditLog] Failed to write audit entry:', err);
+      })).then(() => {
+        auditFailureCount = 0;
+      }).catch((err: unknown) => {
+        auditFailureCount++;
+        if (auditFailureCount >= AUDIT_FAILURE_THRESHOLD) {
+          console.error(`[AuditLog] CRITICAL: ${auditFailureCount} consecutive audit write failures. Audit trail may be incomplete.`, err);
+        } else {
+          console.error('[AuditLog] Failed to write audit entry:', err);
+        }
       });
     });
 

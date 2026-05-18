@@ -205,6 +205,7 @@ import { auditLog, captureAuditBefore } from '../middleware/audit.middleware';
 import { requireOperator } from '../middleware/auth.middleware';
 import { Asset } from '../entities/Asset.entity';
 import { notifyTask } from '../controllers/alert.controller';
+import { validate, AssetCreateSchema, AssetUpdateSchema, BulkAssetSchema } from '../utils/validate';
 
 const router = Router();
 
@@ -215,10 +216,11 @@ router.get('/maintenance-counts',  getMaintenanceCounts);
 router.get('/:id',                 getAssetById);
 
 // Write — operator or admin only
-router.post('/',    requireOperator, auditLog('asset'), createAsset);
-router.post('/bulk', requireOperator, auditLog('asset'), bulkCreateAssets);
+router.post('/',    requireOperator, validate(AssetCreateSchema), auditLog('asset'), createAsset);
+router.post('/bulk', requireOperator, validate(BulkAssetSchema), auditLog('asset'), bulkCreateAssets);
 router.patch('/:id',
   requireOperator,
+  validate(AssetUpdateSchema),
   captureAuditBefore(Asset),
   auditLog('asset'),
   updateAsset,

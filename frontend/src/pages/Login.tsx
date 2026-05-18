@@ -44,10 +44,23 @@ const Login: React.FC = () => {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [lockoutSecondsLeft, setLockoutSecondsLeft] = useState(0);
 
   useEffect(() => {
     if (isAuthenticated) navigate(from, { replace: true });
   }, [isAuthenticated, navigate, from]);
+
+  // Countdown timer for locked accounts
+  useEffect(() => {
+    if (lockoutSecondsLeft <= 0) return;
+    const t = setInterval(() => {
+      setLockoutSecondsLeft(s => {
+        if (s <= 1) { clearInterval(t); setError(''); return 0; }
+        return s - 1;
+      });
+    }, 1000);
+    return () => clearInterval(t);
+  }, [lockoutSecondsLeft]);
 
   useEffect(() => {
     api.get<{ success: boolean; data: AuthCapabilities }>('/auth/capabilities')
@@ -80,8 +93,13 @@ const Login: React.FC = () => {
         navigate(passwordExpired ? '/settings' : from, { replace: true });
       }
     } catch (err: any) {
-      const msg = err?.response?.data?.error;
-      setError(msg ?? 'Invalid username or password');
+      const msg: string = err?.response?.data?.error ?? 'Invalid username or password';
+      setError(msg);
+      // Parse lockout duration from "Account locked. Try again in X minute(s)."
+      const minuteMatch = msg.match(/(\d+)\s*minute/i);
+      if (minuteMatch) {
+        setLockoutSecondsLeft(parseInt(minuteMatch[1], 10) * 60);
+      }
     } finally {
       setLoading(false);
     }
@@ -150,9 +168,16 @@ const Login: React.FC = () => {
             />
           </div>
 
-          {error && <p className={styles.error}>{error}</p>}
+          {error && (
+            <p className={styles.error}>
+              {error}
+              {lockoutSecondsLeft > 0 && (
+                <span> ({Math.floor(lockoutSecondsLeft / 60)}:{String(lockoutSecondsLeft % 60).padStart(2, '0')} remaining)</span>
+              )}
+            </p>
+          )}
 
-          <button className={styles.button} type="submit" disabled={loading}>
+          <button className={styles.button} type="submit" disabled={loading || lockoutSecondsLeft > 0}>
             {loading ? 'Signing in…' : mode === 'ldap' ? 'Sign in with LDAP' : 'Sign in'}
           </button>
         </form>

@@ -86,13 +86,14 @@ import {
   updateBuilding,
   deleteBuilding,
 } from '../controllers/building.controller';
+import { validate, BuildingCreateSchema, BuildingUpdateSchema } from '../utils/validate';
 
 const router = Router();
 
 router.get('/', getAllBuildings);
 router.get('/:id', getBuildingById);
-router.post('/', createBuilding);
-router.patch('/:id', updateBuilding);
+router.post('/', validate(BuildingCreateSchema), createBuilding);
+router.patch('/:id', validate(BuildingUpdateSchema), updateBuilding);
 router.delete('/:id', deleteBuilding);
 
 export default router;

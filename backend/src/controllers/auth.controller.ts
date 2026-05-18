@@ -69,7 +69,7 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
     if (!username || !password) { res.status(400).json({ success: false, error: 'Username and password are required' }); return; }
 
     const user = await AppDataSource.getRepository(User).createQueryBuilder('u')
-      .addSelect('u.password').addSelect('u.failed_login_attempts').addSelect('u.locked_until')
+      .addSelect('u.password')
       .where('LOWER(u.username) = LOWER(:username)', { username })
       .getOne();
 

@@ -29,10 +29,26 @@ import { Server as SocketServer } from 'socket.io';
 import config from './config/config';
 import { connectDatabase, AppDataSource } from './config/database';
 import { AuditLog } from './entities/AuditLog.entity';
+import { AlertLog } from './entities/AlertLog.entity';
 import { loadRevokedSessions } from './middleware/auth.middleware';
 import { swaggerSpec } from './config/swagger';
 import { checkAndSend, checkScheduledAlerts } from './services/alert/AlertService';
 import routes from './routes';
+
+// Writes a failure record to AlertLog so admins can see cron errors in the UI
+function writeCronFailure(job: string, err: unknown): void {
+  if (!AppDataSource.isInitialized) return;
+  const msg = err instanceof Error ? err.message : String(err);
+  AppDataSource.getRepository(AlertLog).save(
+    AppDataSource.getRepository(AlertLog).create({
+      channel: 'internal' as 'email',
+      subject: `Cron job failed: ${job}`,
+      body_snippet: msg.slice(0, 500),
+      success: false,
+      error_message: msg.slice(0, 1000),
+    })
+  ).catch((e: unknown) => console.error('[CronLog] Could not write cron failure:', e));
+}
 
 // Initialize Express app
 const app: Application = express();
@@ -97,14 +113,15 @@ app.use('/api/auth', rateLimit({
   legacyHeaders: false,
 }));
 
-// Login endpoint: strictest limit to prevent brute-force
-app.use('/api/auth/login', rateLimit({
+// Login endpoints: strictest limit to prevent brute-force (both local and LDAP)
+const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 20,
   message: { success: false, error: 'Too many login attempts — try again in 15 minutes' },
   standardHeaders: true,
   legacyHeaders: false,
-}));
+});
+app.use('/api/auth/login', loginLimiter);
 
 // Body parsing — 20 MB limit to support base64-encoded floor plan image uploads
 app.use(express.json({ limit: '20mb' }));
@@ -192,6 +209,7 @@ const startServer = async () => {
         if (result.errors.length) console.warn('   Alert errors:', result.errors);
       } catch (err) {
         console.error('❌ Alert scheduler error:', err);
+        writeCronFailure('maintenance_alert_check', err);
       }
     });
 
@@ -201,6 +219,7 @@ const startServer = async () => {
         await checkScheduledAlerts();
       } catch (err) {
         console.error('❌ Scheduled alert check error:', err);
+        writeCronFailure('scheduled_alert_check', err);
       }
     });
 
@@ -247,6 +266,7 @@ if (process.env.NODE_ENV !== 'test') {
 // Graceful shutdown — drain in-flight requests, then close DB
 const shutdown = (signal: string) => {
   console.log(`\n⏹  ${signal} received — shutting down gracefully…`);
+  io.close();
   httpServer.close(async () => {
     try {
       if (AppDataSource.isInitialized) await AppDataSource.destroy();

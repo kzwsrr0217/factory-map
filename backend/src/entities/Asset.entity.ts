@@ -113,9 +113,11 @@ export class Asset {
   serial_number!: string | null;
 
   @Column({ name: 'model', type: 'nvarchar', length: 200, nullable: true })
+  @Index()
   model!: string | null;
 
   @Column({ name: 'manufacturer', type: 'nvarchar', length: 200, nullable: true })
+  @Index()
   manufacturer!: string | null;
 
   @Column({ name: 'status', type: 'nvarchar', length: 50, nullable: true })
@@ -127,9 +129,11 @@ export class Asset {
   asset_type!: string | null;
 
   @Column({ name: 'os_type', type: 'nvarchar', length: 100, nullable: true })
+  @Index()
   os_type!: string | null;
 
   @Column({ name: 'os_version', type: 'nvarchar', length: 100, nullable: true })
+  @Index()
   os_version!: string | null;
 
   @Column({ name: 'mac_address', type: 'nvarchar', length: 50, nullable: true })
@@ -157,6 +161,7 @@ export class Asset {
   hostname!: string | null;
 
   @Column({ name: 'vlan', type: 'nvarchar', length: 50, nullable: true })
+  @Index()
   vlan!: string | null;
 
   @Column({ name: 'switch_port', type: 'nvarchar', length: 50, nullable: true })
@@ -181,12 +186,14 @@ export class Asset {
   org_itsm_id!: string | null;
 
   @Column({ name: 'org_display_name', type: 'nvarchar', length: 200, nullable: true })
+  @Index()
   org_display_name!: string | null;
 
   @Column({ name: 'catalog_itsm_id', type: 'nvarchar', length: 100, nullable: true })
   catalog_itsm_id!: string | null;
 
   @Column({ name: 'catalog_display_name', type: 'nvarchar', length: 200, nullable: true })
+  @Index()
   catalog_display_name!: string | null;
 
   // ── ITSM (flattened) ──────────────────────────────────────────────────────
@@ -245,6 +252,7 @@ export class Asset {
   physical_condition!: string | null;
 
   @Column({ name: 'environment', type: 'nvarchar', length: 200, nullable: true })
+  @Index()
   environment!: string | null;
 
   @Column({ name: 'notes', type: 'nvarchar', length: 'max' as unknown as number, nullable: true })
@@ -258,15 +266,19 @@ export class Asset {
   object_id!: string | null;
 
   @Column({ name: 'serial_object', type: 'nvarchar', length: 100, nullable: true })
+  @Index()
   serial_object!: string | null;
 
   @Column({ name: 'remote_access_tool', type: 'nvarchar', length: 200, nullable: true })
+  @Index()
   remote_access_tool!: string | null;
 
   @Column({ name: 'remote_access_version', type: 'nvarchar', length: 100, nullable: true })
+  @Index()
   remote_access_version!: string | null;
 
   @Column({ name: 'backup_tool', type: 'nvarchar', length: 200, nullable: true })
+  @Index()
   backup_tool!: string | null;
 
   @Column({ name: 'backup_status', type: 'nvarchar', length: 50, nullable: true })

@@ -317,19 +317,20 @@ import {
   listPatchPanels, getPatchPanel, createPatchPanel, updatePatchPanel, deletePatchPanel,
   listWallPorts, getWallPort, createWallPort, updateWallPort, deleteWallPort,
 } from '../controllers/network.controller';
+import { validate, RoomCreateSchema, RoomUpdateSchema, RackCreateSchema, RackUpdateSchema } from '../utils/validate';
 
 const router = Router();
 
 router.get('/rooms',              listRooms);
 router.get('/rooms/:id',          getRoom);
-router.post('/rooms',             createRoom);
-router.patch('/rooms/:id',        updateRoom);
+router.post('/rooms',             validate(RoomCreateSchema), createRoom);
+router.patch('/rooms/:id',        validate(RoomUpdateSchema), updateRoom);
 router.delete('/rooms/:id',       deleteRoom);
 
 router.get('/racks',              listRacks);
 router.get('/racks/:id',          getRack);
-router.post('/racks',             createRack);
-router.patch('/racks/:id',        updateRack);
+router.post('/racks',             validate(RackCreateSchema), createRack);
+router.patch('/racks/:id',        validate(RackUpdateSchema.partial()), updateRack);
 router.delete('/racks/:id',       deleteRack);
 
 router.get('/patch-panels',       listPatchPanels);

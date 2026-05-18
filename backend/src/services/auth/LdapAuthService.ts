@@ -48,7 +48,7 @@ function attr(entry: LdapEntry, key: string): string {
 function createClient(): ldap.Client {
   return ldap.createClient({
     url: config.ldap.url,
-    ...(config.ldap.tlsEnabled ? { tlsOptions: { rejectUnauthorized: false } } : {}),
+    ...(config.ldap.tlsEnabled ? { tlsOptions: { rejectUnauthorized: true } } : {}),
   });
 }
 

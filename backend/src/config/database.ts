@@ -58,6 +58,9 @@ export const AppDataSource = new DataSource({
 
 export const connectDatabase = async (): Promise<void> => {
   try {
+    if (config.env !== 'production' && AppDataSource.options.synchronize) {
+      console.warn('⚠️  TypeORM synchronize: true — schema auto-sync is ON. This must be disabled in production (set NODE_ENV=production).');
+    }
     await AppDataSource.initialize();
     console.log('✅ SQL Server connected successfully');
     console.log(`   Host: ${config.mssql.host}:${config.mssql.port}`);
