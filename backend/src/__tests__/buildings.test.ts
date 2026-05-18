@@ -2,6 +2,8 @@
  * buildings.test.ts — Integration tests for /api/buildings CRUD.
  */
 import request from 'supertest';
+import { AppDataSource } from '../config/database';
+import { Building } from '../entities/Building.entity';
 import { setupTests } from './helpers/testApp';
 
 let app: any; // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -13,6 +15,15 @@ beforeAll(async () => {
   ({ app, getAdminToken } = await setupTests());
   token = await getAdminToken();
 }, 30000);
+
+afterAll(async () => {
+  // Fallback cleanup: remove __test_building__ if the DELETE test was skipped or failed
+  await AppDataSource.getRepository(Building)
+    .createQueryBuilder()
+    .delete()
+    .where('name IN (:...names)', { names: ['__test_building__', '__test_building_updated__'] })
+    .execute();
+});
 
 describe('GET /api/buildings', () => {
   it('returns 401 without a token', async () => {

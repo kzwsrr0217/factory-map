@@ -23,6 +23,7 @@ let app: any; // eslint-disable-line @typescript-eslint/no-explicit-any
 let adminToken: string;
 let viewerToken: string;
 let operatorToken: string;
+const createdAssetIds: string[] = [];
 
 const RBAC_PREFIX = `rbac_${Date.now()}`;
 const VIEWER_USER = `${RBAC_PREFIX}_viewer`;
@@ -54,6 +55,9 @@ beforeAll(async () => {
 }, 30000);
 
 afterAll(async () => {
+  for (const id of createdAssetIds) {
+    await request(app).delete(`/api/assets/${id}`).set('Authorization', `Bearer ${adminToken}`).catch(() => {});
+  }
   await AppDataSource.getRepository(User)
     .createQueryBuilder()
     .delete()
@@ -118,6 +122,7 @@ describe('Viewer role', () => {
       .set('Authorization', `Bearer ${adminToken}`)
       .send({ basic_info: { display_name: 'RBAC Viewer Target Asset' } });
     const assetId = createRes.body.data?._id ?? createRes.body.data?.id;
+    if (assetId) createdAssetIds.push(assetId);
 
     const res = await request(app)
       .patch(`/api/assets/${assetId}`)
@@ -146,6 +151,8 @@ describe('Operator role', () => {
       .set('Authorization', `Bearer ${operatorToken}`)
       .send({ basic_info: { display_name: 'Operator Test Asset' } });
     expect(res.status).toBe(201);
+    const id = res.body.data?._id ?? res.body.data?.id;
+    if (id) createdAssetIds.push(id);
   });
 
   it('can read the audit log', async () => {
