@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import Card from '../components/common/Card';
 import Button from '../components/common/Button';
 import { networkService, NetworkRoom, NetworkRack, PatchPanel, WallPort } from '../services/network.service';
+import { assetService, Asset } from '../services/asset.service';
 import { useToast } from '../contexts/ToastContext';
 import { useBuildings } from '../hooks/queries/useBuildings';
 import { useFloors } from '../hooks/queries/useFloors';
@@ -33,6 +34,7 @@ const NetworkInfrastructure: React.FC = () => {
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
   const [selectedRackId, setSelectedRackId] = useState<string | null>(null);
   const [panelPorts, setPanelPorts] = useState<Record<string, WallPort[]>>({});
+  const [buildingAssets, setBuildingAssets] = useState<Asset[]>([]);
   const [portTooltip, setPortTooltip] = useState<PortTooltip | null>(null);
   const tooltipRef = useRef<HTMLDivElement>(null);
   const [modal, setModal] = useState<ModalState>({ kind: 'none' });
@@ -51,8 +53,17 @@ const NetworkInfrastructure: React.FC = () => {
   const selectedRoom = rooms.find(r => r._id === selectedRoomId) ?? null;
   const selectedRack = selectedRoom?.racks.find(r => r._id === selectedRackId) ?? null;
 
-  // Reset room/rack selection when building changes
-  useEffect(() => { setSelectedRoomId(null); setSelectedRackId(null); setPanelPorts({}); }, [selectedBuildingId]);
+  // Reset room/rack selection when building changes; load assets for switch picker
+  useEffect(() => {
+    setSelectedRoomId(null);
+    setSelectedRackId(null);
+    setPanelPorts({});
+    if (selectedBuildingId) {
+      assetService.getAssets().then(all => {
+        setBuildingAssets(all.filter(a => a.hierarchy?.building_id === selectedBuildingId));
+      }).catch(() => {});
+    }
+  }, [selectedBuildingId]);
 
   // Load wall ports for all panels in the selected rack
   useEffect(() => {
@@ -95,10 +106,11 @@ const NetworkInfrastructure: React.FC = () => {
       defaults.cable_type = state.panel?.cable_type ?? 'copper';
       defaults.description = state.panel?.description ?? '';
     } else if (state.kind === 'wallport') {
-      defaults.label       = state.existing?.label ?? '';
-      defaults.floor_id    = state.existing?.floor_id ?? '';
-      defaults.switch_port = state.existing?.switch_port ?? '';
-      defaults.description = state.existing?.description ?? '';
+      defaults.label            = state.existing?.label ?? '';
+      defaults.floor_id         = state.existing?.floor_id ?? '';
+      defaults.switch_asset_id  = state.existing?.switch_asset_id ?? '';
+      defaults.switch_port      = state.existing?.switch_port ?? '';
+      defaults.description      = state.existing?.description ?? '';
     }
     setForm(defaults);
     setModal(state);
@@ -152,14 +164,13 @@ const NetworkInfrastructure: React.FC = () => {
         if (!form.label?.trim()) { toast.error('Label is required'); setSaving(false); return; }
         if (!form.floor_id)      { toast.error('Floor is required'); setSaving(false); return; }
         const payload = {
-          label:          form.label.trim(),
-          floor_id:       form.floor_id,
-          patch_panel_id: modal.panel._id,
-          patch_port:     modal.portNum,
-          switch_port:    form.switch_port?.trim() || null,
-          description:    form.description?.trim() || null,
-          // Place in the centre of the floor map so it is easy to find;
-          // the user drags it to the exact spot in Map View.
+          label:           form.label.trim(),
+          floor_id:        form.floor_id,
+          patch_panel_id:  modal.panel._id,
+          patch_port:      modal.portNum,
+          switch_asset_id: form.switch_asset_id || null,
+          switch_port:     form.switch_port?.trim() || null,
+          description:     form.description?.trim() || null,
           pos_x: modal.existing?.pos_x ?? 500,
           pos_y: modal.existing?.pos_y ?? 400,
         };
@@ -396,6 +407,12 @@ const NetworkInfrastructure: React.FC = () => {
         >
           <div className={styles.tooltipLabel}>🔌 {portTooltip.port.label}</div>
           <div className={styles.tooltipRow}><span>Panel port</span><strong>#{portTooltip.port.patch_port}</strong></div>
+          {portTooltip.port.switch_asset_id && (
+            <div className={styles.tooltipRow}>
+              <span>Switch</span>
+              <strong>{buildingAssets.find(a => a._id === portTooltip.port.switch_asset_id)?.basic_info?.display_name ?? portTooltip.port.switch_asset_id}</strong>
+            </div>
+          )}
           {portTooltip.port.switch_port && (
             <div className={styles.tooltipRow}><span>Switch port</span><strong>{portTooltip.port.switch_port}</strong></div>
           )}
@@ -526,7 +543,18 @@ const NetworkInfrastructure: React.FC = () => {
                   <p className={styles.formHint} style={{ marginTop: '-8px' }}>
                     The rack and patch panel can be on a different floor — that is fine.
                   </p>
-                  <label className={styles.formLabel}>Switch port (optional)</label>
+                  <label className={styles.formLabel}>Switch / uplink device (optional)</label>
+                  <select
+                    className={styles.formInput}
+                    value={form.switch_asset_id ?? ''}
+                    onChange={e => setForm(p => ({ ...p, switch_asset_id: e.target.value }))}
+                  >
+                    <option value="">— None —</option>
+                    {buildingAssets.map(a => (
+                      <option key={a._id} value={a._id}>{a.basic_info?.display_name ?? a._id}</option>
+                    ))}
+                  </select>
+                  <label className={styles.formLabel}>Switch port identifier (optional)</label>
                   <input
                     className={styles.formInput}
                     value={form.switch_port ?? ''}

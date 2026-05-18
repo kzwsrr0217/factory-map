@@ -495,7 +495,7 @@ export const addConnection = async (req: Request, res: Response, next: NextFunct
   try {
     const asset = await loadWithRelations(req.params.id);
     if (!asset) { res.status(404).json({ success: false, error: 'Asset not found' }); return; }
-    const connData = req.body as { connected_asset_id: string; connection_type: string; description?: string; label?: string; bidirectional?: boolean; strength?: string; patch_panel?: { panel_name?: string; panel_port?: string; switch_name?: string; switch_port?: string } | null };
+    const connData = req.body as { connected_asset_id: string; connection_type: string; description?: string; label?: string; bidirectional?: boolean; strength?: string; patch_panel?: { panel_name?: string; panel_port?: string; switch_name?: string; switch_port?: string } | null; source_port?: string | null; target_port?: string | null };
     const existing = (asset.connections ?? []).find((c) => c.connected_asset_id === connData.connected_asset_id);
     if (existing) { res.status(400).json({ success: false, error: 'Connection already exists' }); return; }
     const conn = connRepo().create({ asset_id: req.params.id, ...connData });
@@ -510,7 +510,7 @@ export const updateConnection = async (req: Request, res: Response, next: NextFu
     const { id, connectedAssetId } = req.params;
     const conn = await connRepo().findOne({ where: { asset_id: id, connected_asset_id: connectedAssetId } });
     if (!conn) { res.status(404).json({ success: false, error: 'Connection not found' }); return; }
-    const body = req.body as Partial<{ connection_type: string; description: string; label: string; bidirectional: boolean; strength: string; patch_panel: { panel_name?: string; panel_port?: string; switch_name?: string; switch_port?: string } | null }>;
+    const body = req.body as Partial<{ connection_type: string; description: string; label: string; bidirectional: boolean; strength: string; patch_panel: { panel_name?: string; panel_port?: string; switch_name?: string; switch_port?: string } | null; source_port: string | null; target_port: string | null }>;
     Object.assign(conn, body);
     await connRepo().save(conn);
     const full = (await loadWithRelations(id))!;

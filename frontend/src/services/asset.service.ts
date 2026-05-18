@@ -160,6 +160,8 @@ export interface Asset {
       switch_name?: string;
       switch_port?: string;
     } | null;
+    source_port?: string | null;
+    target_port?: string | null;
     created_at?: string;
   }>;
   location: {
@@ -267,6 +269,8 @@ export const assetService = {
     bidirectional?: boolean;
     strength?: string;
     patch_panel?: { panel_name?: string; panel_port?: string; switch_name?: string; switch_port?: string } | null;
+    source_port?: string | null;
+    target_port?: string | null;
   }): Promise<Asset> => {
     const response = await api.post(`/assets/${assetId}/connections`, connectionData);
     return response.data.data;
@@ -279,6 +283,8 @@ export const assetService = {
     bidirectional?: boolean;
     strength?: string;
     patch_panel?: { panel_name?: string; panel_port?: string; switch_name?: string; switch_port?: string } | null;
+    source_port?: string | null;
+    target_port?: string | null;
   }): Promise<Asset> => {
     const response = await api.patch(`/assets/${assetId}/connections/${connectedAssetId}`, connectionData);
     return response.data.data;

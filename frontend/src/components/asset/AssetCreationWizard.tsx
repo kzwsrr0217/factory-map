@@ -40,6 +40,8 @@ interface ConnectionDraft {
   connection_type: string;
   label: string;
   bidirectional: boolean;
+  source_port: string;
+  target_port: string;
 }
 
 interface AssetOption {
@@ -168,10 +170,12 @@ const AssetCreationWizard: React.FC<AssetCreationWizardProps> = ({
   const [allAssets, setAllAssets]   = useState<AssetOption[]>([]);
 
   // ── Connection draft inputs ─────────────────────────────────────────────────
-  const [connSearch, setConnSearch] = useState('');
-  const [connType,   setConnType]   = useState('ethernet');
-  const [connLabel,  setConnLabel]  = useState('');
-  const [connBidi,   setConnBidi]   = useState(true);
+  const [connSearch,      setConnSearch]      = useState('');
+  const [connType,        setConnType]        = useState('ethernet');
+  const [connLabel,       setConnLabel]       = useState('');
+  const [connBidi,        setConnBidi]        = useState(true);
+  const [connSourcePort,  setConnSourcePort]  = useState('');
+  const [connTargetPort,  setConnTargetPort]  = useState('');
 
   const personSuggestions = usePersonSuggestions();
   const lookups = useAssetLookups();
@@ -357,6 +361,8 @@ const AssetCreationWizard: React.FC<AssetCreationWizardProps> = ({
           connection_type:    conn.connection_type,
           label:              conn.label || undefined,
           bidirectional:      conn.bidirectional,
+          source_port:        conn.source_port || null,
+          target_port:        conn.target_port || null,
         }).catch(() => {});
       }
       invalidateLookupCache();
@@ -378,10 +384,12 @@ const AssetCreationWizard: React.FC<AssetCreationWizardProps> = ({
       connected_asset_id:    matched._id,
       connected_asset_label: matched.label,
       connection_type: connType,
-      label:     connLabel,
+      label:       connLabel,
       bidirectional: connBidi,
+      source_port: connSourcePort.trim(),
+      target_port: connTargetPort.trim(),
     }]);
-    setConnSearch(''); setConnLabel('');
+    setConnSearch(''); setConnLabel(''); setConnSourcePort(''); setConnTargetPort('');
   };
 
   // ── Step renderers ────────────────────────────────────────────────────────
@@ -581,6 +589,8 @@ const AssetCreationWizard: React.FC<AssetCreationWizardProps> = ({
               <li key={c.tempId} className={styles.connItem}>
                 <span className={styles.connType}>{c.connection_type}</span>
                 <span className={styles.connTarget}>{c.connected_asset_label}</span>
+                {c.source_port && <span className={styles.connLabel}>{c.source_port} →</span>}
+                {c.target_port && <span className={styles.connLabel}>→ {c.target_port}</span>}
                 {c.label && <span className={styles.connLabel}>{c.label}</span>}
                 {c.bidirectional && <span className={styles.badge}>↔</span>}
                 <button type="button" className={styles.removeBtn}
@@ -598,6 +608,10 @@ const AssetCreationWizard: React.FC<AssetCreationWizardProps> = ({
           <input list="wiz-asset-list" className={styles.assetSearch}
             value={connSearch} onChange={e => setConnSearch(e.target.value)}
             placeholder="Search asset…" />
+          <input className={styles.labelInput} value={connSourcePort}
+            onChange={e => setConnSourcePort(e.target.value)} placeholder="My port (e.g. Gi0/1)" />
+          <input className={styles.labelInput} value={connTargetPort}
+            onChange={e => setConnTargetPort(e.target.value)} placeholder="Their port (e.g. eth0)" />
           <input className={styles.labelInput} value={connLabel}
             onChange={e => setConnLabel(e.target.value)} placeholder="Label (optional)" />
           <label className={styles.bidiLabel}>

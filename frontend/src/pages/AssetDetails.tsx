@@ -40,6 +40,10 @@ import { useToast } from '../contexts/ToastContext';
 import styles from '../styles/pages/AssetDetails.module.css';
 import AssetFormModal from '../components/asset/AssetFormModal';
 
+const CONN_TYPE_OPTIONS = [
+  'ethernet','fiber','network','power','usb','serial','bluetooth','wifi','dependency','peer','other',
+];
+
 const AssetDetails: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -55,6 +59,17 @@ const AssetDetails: React.FC = () => {
   const [formOpen, setFormOpen] = useState(false);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const toast = useToast();
+
+  // Connections management
+  const [allAssets, setAllAssets] = useState<{ _id: string; label: string }[]>([]);
+  const [connSearch,     setConnSearch]     = useState('');
+  const [connType,       setConnType]       = useState('ethernet');
+  const [connSourcePort, setConnSourcePort] = useState('');
+  const [connTargetPort, setConnTargetPort] = useState('');
+  const [connLabel,      setConnLabel]      = useState('');
+  const [connBidi,       setConnBidi]       = useState(true);
+  const [addingConn,     setAddingConn]     = useState(false);
+  const [showAddConn,    setShowAddConn]    = useState(false);
 
   const loadAssetDetails = useCallback(async (assetId: string) => {
     try {
@@ -88,6 +103,12 @@ const AssetDetails: React.FC = () => {
   useEffect(() => {
     if (id) loadAssetDetails(id);
   }, [id, loadAssetDetails]);
+
+  useEffect(() => {
+    assetService.getAssets().then(all => {
+      setAllAssets(all.map(a => ({ _id: a._id!, label: a.basic_info?.display_name ?? a._id! })));
+    }).catch(() => {});
+  }, []);
 
   /** Build the structured text payload encoded into the QR code.
    *
@@ -126,6 +147,42 @@ const AssetDetails: React.FC = () => {
   const handleFormSuccess = () => {
     if (id) {
       loadAssetDetails(id);
+    }
+  };
+
+  const handleAddConnection = async () => {
+    if (!asset || !id) return;
+    const matched = allAssets.find(a => a.label === connSearch || a._id === connSearch);
+    if (!matched) { toast.error('Select an asset from the list first'); return; }
+    setAddingConn(true);
+    try {
+      const updated = await assetService.addConnection(id, {
+        connected_asset_id: matched._id,
+        connection_type:    connType,
+        label:              connLabel || undefined,
+        bidirectional:      connBidi,
+        source_port:        connSourcePort.trim() || null,
+        target_port:        connTargetPort.trim() || null,
+      });
+      setAsset(updated);
+      setConnSearch(''); setConnLabel(''); setConnSourcePort(''); setConnTargetPort('');
+      setShowAddConn(false);
+      toast.success('Connection added');
+    } catch {
+      toast.error('Failed to add connection');
+    } finally {
+      setAddingConn(false);
+    }
+  };
+
+  const handleRemoveConnection = async (connectedAssetId: string) => {
+    if (!id) return;
+    try {
+      const updated = await assetService.removeConnection(id, connectedAssetId);
+      setAsset(updated);
+      toast.success('Connection removed');
+    } catch {
+      toast.error('Failed to remove connection');
     }
   };
 
@@ -608,6 +665,115 @@ const AssetDetails: React.FC = () => {
               </div>
             </Card>
           )}
+
+          {/* Connections */}
+          <Card padding="lg">
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
+              <h3 className={styles.sectionTitle} style={{ margin: 0 }}>Connections</h3>
+              <Button variant="secondary" onClick={() => setShowAddConn(v => !v)}>
+                {showAddConn ? 'Cancel' : '+ Add Connection'}
+              </Button>
+            </div>
+
+            {showAddConn && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1rem', padding: '0.75rem', background: 'var(--color-bg-secondary)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)' }}>
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', minWidth: '130px' }}>
+                    <label style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)' }}>Type</label>
+                    <select
+                      style={{ height: '36px', padding: '0 8px', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', background: 'var(--color-bg-primary)', color: 'var(--color-text-primary)', fontSize: '0.875rem' }}
+                      value={connType} onChange={e => setConnType(e.target.value)}
+                    >
+                      {CONN_TYPE_OPTIONS.map(t => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: 1, minWidth: '180px' }}>
+                    <label style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)' }}>Connected asset</label>
+                    <datalist id="detail-asset-list">
+                      {allAssets.filter(a => a._id !== id).map(a => <option key={a._id} value={a.label} />)}
+                    </datalist>
+                    <input
+                      list="detail-asset-list"
+                      style={{ height: '36px', padding: '0 8px', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', background: 'var(--color-bg-primary)', color: 'var(--color-text-primary)', fontSize: '0.875rem' }}
+                      value={connSearch} onChange={e => setConnSearch(e.target.value)}
+                      placeholder="Search asset…"
+                    />
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', width: '120px' }}>
+                    <label style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)' }}>My port</label>
+                    <input
+                      style={{ height: '36px', padding: '0 8px', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', background: 'var(--color-bg-primary)', color: 'var(--color-text-primary)', fontSize: '0.875rem' }}
+                      value={connSourcePort} onChange={e => setConnSourcePort(e.target.value)}
+                      placeholder="e.g. Gi0/1"
+                    />
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', width: '120px' }}>
+                    <label style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)' }}>Their port</label>
+                    <input
+                      style={{ height: '36px', padding: '0 8px', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', background: 'var(--color-bg-primary)', color: 'var(--color-text-primary)', fontSize: '0.875rem' }}
+                      value={connTargetPort} onChange={e => setConnTargetPort(e.target.value)}
+                      placeholder="e.g. eth0"
+                    />
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', width: '120px' }}>
+                    <label style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)' }}>Label</label>
+                    <input
+                      style={{ height: '36px', padding: '0 8px', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', background: 'var(--color-bg-primary)', color: 'var(--color-text-primary)', fontSize: '0.875rem' }}
+                      value={connLabel} onChange={e => setConnLabel(e.target.value)}
+                      placeholder="optional"
+                    />
+                  </div>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.875rem', color: 'var(--color-text-secondary)', height: '36px', alignSelf: 'flex-end' }}>
+                    <input type="checkbox" checked={connBidi} onChange={e => setConnBidi(e.target.checked)} />
+                    ↔ bidirectional
+                  </label>
+                  <Button variant="primary" onClick={handleAddConnection} disabled={addingConn || !connSearch.trim()} style={{ alignSelf: 'flex-end' }}>
+                    {addingConn ? 'Adding…' : 'Add'}
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {(!asset.connections || asset.connections.length === 0) ? (
+              <p style={{ fontSize: '0.875rem', color: 'var(--color-text-secondary)', fontStyle: 'italic', margin: 0 }}>No connections yet.</p>
+            ) : (
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid var(--color-border)' }}>
+                    <th style={{ textAlign: 'left', padding: '4px 8px', color: 'var(--color-text-secondary)', fontWeight: 600, fontSize: '0.75rem', textTransform: 'uppercase' }}>Type</th>
+                    <th style={{ textAlign: 'left', padding: '4px 8px', color: 'var(--color-text-secondary)', fontWeight: 600, fontSize: '0.75rem', textTransform: 'uppercase' }}>Connected Asset</th>
+                    <th style={{ textAlign: 'left', padding: '4px 8px', color: 'var(--color-text-secondary)', fontWeight: 600, fontSize: '0.75rem', textTransform: 'uppercase' }}>My Port</th>
+                    <th style={{ textAlign: 'left', padding: '4px 8px', color: 'var(--color-text-secondary)', fontWeight: 600, fontSize: '0.75rem', textTransform: 'uppercase' }}>Their Port</th>
+                    <th style={{ textAlign: 'left', padding: '4px 8px', color: 'var(--color-text-secondary)', fontWeight: 600, fontSize: '0.75rem', textTransform: 'uppercase' }}>Label</th>
+                    <th style={{ width: '40px' }}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {asset.connections.map(c => {
+                    const name = allAssets.find(a => a._id === c.connected_asset_id)?.label ?? c.connected_asset_id;
+                    return (
+                      <tr key={c.connected_asset_id} style={{ borderBottom: '1px solid var(--color-gray-100)' }}>
+                        <td style={{ padding: '6px 8px' }}>
+                          <span style={{ fontSize: '0.7rem', fontWeight: 600, textTransform: 'uppercase', padding: '1px 6px', borderRadius: '4px', background: 'var(--color-primary)', color: '#fff' }}>{c.connection_type}</span>
+                        </td>
+                        <td style={{ padding: '6px 8px', color: 'var(--color-text-primary)' }}>{name}</td>
+                        <td style={{ padding: '6px 8px', color: 'var(--color-text-secondary)', fontFamily: 'monospace', fontSize: '0.8rem' }}>{(c as any).source_port ?? '—'}</td>
+                        <td style={{ padding: '6px 8px', color: 'var(--color-text-secondary)', fontFamily: 'monospace', fontSize: '0.8rem' }}>{(c as any).target_port ?? '—'}</td>
+                        <td style={{ padding: '6px 8px', color: 'var(--color-text-secondary)' }}>{c.label ?? '—'}</td>
+                        <td style={{ padding: '6px 4px', textAlign: 'right' }}>
+                          <button
+                            onClick={() => handleRemoveConnection(c.connected_asset_id)}
+                            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-text-secondary)', fontSize: '0.8rem', padding: '2px 4px' }}
+                            title="Remove connection"
+                          >✕</button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </Card>
 
           {/* ITSM Integration */}
           {(asset.itsm?.is_managed || asset.itsm?.itsm_guid) && (

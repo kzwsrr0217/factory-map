@@ -56,6 +56,12 @@ export class AssetConnection {
   @Column({ name: 'patch_panel', type: 'simple-json', nullable: true })
   patch_panel!: { panel_name?: string; panel_port?: string; switch_name?: string; switch_port?: string } | null;
 
+  @Column({ name: 'source_port', type: 'nvarchar', length: 50, nullable: true })
+  source_port!: string | null;
+
+  @Column({ name: 'target_port', type: 'nvarchar', length: 50, nullable: true })
+  target_port!: string | null;
+
   @CreateDateColumn({ name: 'created_at' })
   created_at!: Date;
 }
