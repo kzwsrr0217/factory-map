@@ -972,6 +972,8 @@ const MapView: React.FC = () => {
                           label: string | undefined;
                           direction: 'out' | 'in';
                           patch_panel?: { panel_name?: string; panel_port?: string; switch_name?: string; switch_port?: string } | null;
+                          source_port?: string | null;
+                          target_port?: string | null;
                         };
                         const outgoing: TraceEdge[] = (tracingAsset.connections ?? []).map(c => ({
                           peer_id: c.connected_asset_id,
@@ -980,6 +982,8 @@ const MapView: React.FC = () => {
                           label: c.label,
                           direction: 'out',
                           patch_panel: c.patch_panel,
+                          source_port: (c as any).source_port ?? null,
+                          target_port: (c as any).target_port ?? null,
                         }));
                         const incoming: TraceEdge[] = [];
                         for (const a of allAssets) {
@@ -994,6 +998,8 @@ const MapView: React.FC = () => {
                               label: c.label,
                               direction: 'in',
                               patch_panel: c.patch_panel,
+                              source_port: (c as any).target_port ?? null,
+                              target_port: (c as any).source_port ?? null,
                             });
                           }
                         }
@@ -1004,14 +1010,19 @@ const MapView: React.FC = () => {
                         return allEdges.map((edge, i) => {
                           const connectedPort = wallPorts.find(wp => wp._id === edge.peer_id);
                           const connectedAsset = allAssets.find(a => a._id === edge.peer_id);
-                          const isOnFloor = filteredAssets.some(a => a._id === edge.peer_id);
+                          const isRackMounted = !!connectedAsset?.hierarchy?.rack_id;
+                          const isOnFloor = !isRackMounted && filteredAssets.some(a => a._id === edge.peer_id);
                           const lineColor = CONN_COLORS[edge.connection_type] ?? '#9ca3af';
                           const dirLabel = edge.direction === 'in' ? ' ←' : edge.bidirectional ? ' ↔' : ' →';
+                          const portLabel = edge.source_port && edge.target_port
+                            ? ` ${edge.source_port} → ${edge.target_port}`
+                            : edge.source_port ? ` ${edge.source_port} →`
+                            : edge.target_port ? ` → ${edge.target_port}` : '';
                           return (
                             <div key={i} className={styles.traceConnection}>
                               <div className={styles.traceConnType}>
                                 <span className={styles.traceConnDot} style={{ background: lineColor }} />
-                                <span>{edge.connection_type}{dirLabel}{edge.label ? ` · ${edge.label}` : ''}</span>
+                                <span>{edge.connection_type}{dirLabel}{portLabel}{edge.label ? ` · ${edge.label}` : ''}</span>
                               </div>
                               {connectedPort ? (
                                 <div className={styles.traceEndpoint}>
@@ -1047,8 +1058,12 @@ const MapView: React.FC = () => {
                               ) : connectedAsset ? (
                                 <div className={styles.traceEndpoint}>
                                   <div className={styles.traceEndpointName}>
-                                    💻 {connectedAsset.basic_info.display_name}
-                                    {!isOnFloor && <span className={styles.traceFloorBadge}>↕ diff. floor</span>}
+                                    {isRackMounted ? '🗄️' : '💻'} {connectedAsset.basic_info.display_name}
+                                    {isRackMounted
+                                      ? <span className={styles.traceFloorBadge}>in rack</span>
+                                      : !isOnFloor
+                                        ? <span className={styles.traceFloorBadge}>↕ diff. floor</span>
+                                        : null}
                                   </div>
                                   <div className={styles.traceEndpointSub}>
                                     {connectedAsset.basic_info.type}
