@@ -1,33 +1,7 @@
-/**
- * AssetDetails.tsx — Full-page asset detail view ("/assets/:id").
- *
- * A standalone page (as opposed to the AssetDetailsModal overlay) for deep
- * linking to a specific asset. Renders all asset sections on the page without
- * a modal wrapper, and adds:
- *
- *   QR Code generation — encodes a structured text payload (see buildQrPayload)
- *     containing key asset fields AND the full asset URL. Scanning the code on
- *     any device shows the data immediately and provides a tappable deep-link.
- *     The "Download QR" button saves a PNG; the QR is also embedded in the
- *     printable label produced by "Print Label".
- *
- *   QR URL resolution — the URL embedded in the QR uses, in order of priority:
- *     1. REACT_APP_PUBLIC_BASE_URL env var (set this in production to your
- *        public hostname so QR codes work from any device on any network).
- *     2. window.location.origin as fallback (correct when the app is accessed
- *        via a routable IP/hostname from a phone on the same network).
- *
- *   ITSM sync button — appears when `itsm_source_id` is set; calls
- *     `assetService.syncAsset()` and refreshes the page data.
- *
- *   Edit button — opens AssetFormModal in edit mode.
- *
- *   Breadcrumb — Building > Floor > Asset for hierarchy context.
- */
-import React, { useEffect, useState, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import QRCode from 'qrcode';
-import { RefreshCw, QrCode, Tag, AlertTriangle } from 'lucide-react';
+import { RefreshCw, QrCode, Tag, AlertTriangle, MoreVertical, CheckCircle } from 'lucide-react';
 import Card from '../components/common/Card';
 import Button from '../components/common/Button';
 import Badge from '../components/common/Badge';
@@ -36,7 +10,10 @@ import ConfirmDialog from '../components/common/ConfirmDialog';
 import { assetService, Asset } from '../services/asset.service';
 import { hierarchyService, Building } from '../services/hierarchy.service';
 import { floorService, Floor } from '../services/floor.service';
+import { networkService, NetworkRack } from '../services/network.service';
+import { workareaService, WorkArea } from '../services/workarea.service';
 import { useToast } from '../contexts/ToastContext';
+import { getAssetIcon, getAssetTypeLabel } from '../utils/assetTypes';
 import styles from '../styles/pages/AssetDetails.module.css';
 import AssetFormModal from '../components/asset/AssetFormModal';
 
@@ -44,56 +21,66 @@ const CONN_TYPE_OPTIONS = [
   'ethernet','fiber','network','power','usb','serial','bluetooth','wifi','dependency','peer','other',
 ];
 
+const statusVariant = (s?: string): 'success' | 'warning' | 'error' | 'neutral' => {
+  if (s === 'active')                          return 'success';
+  if (s === 'maintenance')                     return 'warning';
+  if (s === 'inactive' || s === 'retired')     return 'error';
+  return 'neutral';
+};
+
 const AssetDetails: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
-  const [asset, setAsset] = useState<Asset | null>(null);
+  const [asset, setAsset]       = useState<Asset | null>(null);
   const [building, setBuilding] = useState<Building | null>(null);
-  const [floor, setFloor] = useState<Floor | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [syncing, setSyncing] = useState(false);
-  const [deleting, setDeleting] = useState(false);
+  const [floor, setFloor]       = useState<Floor | null>(null);
+  const [rack, setRack]         = useState<NetworkRack | null>(null);
+  const [workArea, setWorkArea] = useState<WorkArea | null>(null);
+  const [loading, setLoading]   = useState(true);
+  const [error, setError]       = useState<string | null>(null);
+  const [syncing, setSyncing]         = useState(false);
+  const [deleting, setDeleting]       = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const [formOpen, setFormOpen] = useState(false);
-  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+  const [formOpen, setFormOpen]       = useState(false);
+  const [menuOpen, setMenuOpen]       = useState(false);
+  const [markingDone, setMarkingDone] = useState(false);
+  const [qrDataUrl, setQrDataUrl]     = useState<string | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const toast = useToast();
 
   // Connections management
-  const [allAssets, setAllAssets] = useState<{ _id: string; label: string }[]>([]);
-  const [connSearch,     setConnSearch]     = useState('');
-  const [connType,       setConnType]       = useState('ethernet');
+  const [allAssets, setAllAssets]         = useState<{ _id: string; label: string }[]>([]);
+  const [connSearch, setConnSearch]       = useState('');
+  const [connType, setConnType]           = useState('ethernet');
   const [connSourcePort, setConnSourcePort] = useState('');
   const [connTargetPort, setConnTargetPort] = useState('');
-  const [connLabel,      setConnLabel]      = useState('');
-  const [connBidi,       setConnBidi]       = useState(true);
-  const [addingConn,     setAddingConn]     = useState(false);
-  const [showAddConn,    setShowAddConn]    = useState(false);
+  const [connLabel, setConnLabel]         = useState('');
+  const [connBidi, setConnBidi]           = useState(true);
+  const [addingConn, setAddingConn]       = useState(false);
+  const [showAddConn, setShowAddConn]     = useState(false);
 
   const loadAssetDetails = useCallback(async (assetId: string) => {
     try {
       setLoading(true);
       const data = await assetService.getAsset(assetId);
       setAsset(data);
+
       const dataUrl = await QRCode.toDataURL(buildQrPayload(data, assetId), {
-        width: 220,
-        margin: 1,
-        errorCorrectionLevel: 'M',
+        width: 220, margin: 1, errorCorrectionLevel: 'M',
       });
       setQrDataUrl(dataUrl);
 
-      // Load breadcrumb hierarchy non-blocking
+      // Load breadcrumb / location context non-blocking
       const bId = data.hierarchy?.building_id;
       const fId = data.hierarchy?.floor_id;
-      if (bId) {
-        hierarchyService.getBuilding(bId).then(setBuilding).catch(() => {});
-      }
-      if (fId) {
-        floorService.getFloor(fId).then(setFloor).catch(() => {});
-      }
-    } catch (err) {
-      console.error('Error loading asset details:', err);
+      const rId = data.hierarchy?.rack_id;
+      const waId = data.hierarchy?.workarea_id;
+      if (bId)  hierarchyService.getBuilding(bId).then(setBuilding).catch(() => {});
+      if (fId)  floorService.getFloor(fId).then(setFloor).catch(() => {});
+      if (rId)  networkService.getRack(rId).then(setRack).catch(() => {});
+      if (waId) workareaService.getWorkArea(waId).then(setWorkArea).catch(() => {});
+    } catch {
       setError('Failed to load asset details. Please try again.');
     } finally {
       setLoading(false);
@@ -110,21 +97,17 @@ const AssetDetails: React.FC = () => {
     }).catch(() => {});
   }, []);
 
-  /** Build the structured text payload encoded into the QR code.
-   *
-   * Format (each field only included when non-empty):
-   *   FACTORY MAP ASSET
-   *   Name: …
-   *   S/N: …
-   *   Tag: …
-   *   Model: …
-   *   Status: …
-   *   URL: …
-   *
-   * URL priority: REACT_APP_PUBLIC_BASE_URL env var → window.location.origin.
-   * Set REACT_APP_PUBLIC_BASE_URL in .env for production deployments so the
-   * link in the QR resolves correctly from any network, not just localhost.
-   */
+  // Close overflow menu on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
   const buildQrPayload = (a: Asset, assetId: string): string => {
     const base = process.env.REACT_APP_PUBLIC_BASE_URL?.replace(/\/$/, '') ?? window.location.origin;
     const url = `${base}/assets/${assetId}`;
@@ -140,15 +123,8 @@ const AssetDetails: React.FC = () => {
     lines.push(`URL: ${url}`);
     return lines.join('\n');
   };
-  const handleEdit = () => {
-    setFormOpen(true);
-  };
 
-  const handleFormSuccess = () => {
-    if (id) {
-      loadAssetDetails(id);
-    }
-  };
+  const handleFormSuccess = () => { if (id) loadAssetDetails(id); };
 
   const handleAddConnection = async () => {
     if (!asset || !id) return;
@@ -186,6 +162,30 @@ const AssetDetails: React.FC = () => {
     }
   };
 
+  const handleMarkDone = async () => {
+    if (!asset || !id) return;
+    setMarkingDone(true);
+    try {
+      const today = new Date();
+      const todayStr = today.toISOString().split('T')[0];
+      let nextStr: string | undefined;
+      if (asset.maintenance?.interval_days) {
+        const next = new Date(today);
+        next.setDate(next.getDate() + asset.maintenance.interval_days);
+        nextStr = next.toISOString().split('T')[0];
+      }
+      await assetService.updateAsset(id, {
+        maintenance: { last_date: todayStr, next_date: nextStr },
+      });
+      toast.success('Maintenance marked as done');
+      loadAssetDetails(id);
+    } catch {
+      toast.error('Failed to update maintenance');
+    } finally {
+      setMarkingDone(false);
+    }
+  };
+
   const handleDelete = async () => {
     if (!asset) return;
     setDeleting(true);
@@ -206,8 +206,8 @@ const AssetDetails: React.FC = () => {
     const printWindow = window.open('', '_blank', 'width=440,height=360');
     if (!printWindow) return;
     const statusColor =
-      asset.basic_info?.status === 'active' ? '#10b981' :
-      asset.basic_info?.status === 'maintenance' ? '#f59e0b' :
+      asset.basic_info?.status === 'active'      ? '#10b981' :
+      asset.basic_info?.status === 'maintenance'  ? '#f59e0b' :
       asset.basic_info?.status === 'inactive' || asset.basic_info?.status === 'retired' ? '#ef4444' :
       '#6b7280';
     const scriptClose = '</script>';
@@ -231,8 +231,8 @@ const AssetDetails: React.FC = () => {
       '<div class="name">' + (asset.basic_info?.display_name ?? '') + '</div>' +
       '<span class="status" style="background:' + statusColor + '">' + (asset.basic_info?.status || 'unknown') + '</span>' +
       '</div>' + qrImg + '</div>' +
-      (asset.basic_info?.asset_tag ? '<div class="row"><label>Asset Tag</label><span>' + asset.basic_info?.asset_tag + '</span></div>' : '') +
-      (asset.basic_info?.serial_number ? '<div class="row"><label>Serial No.</label><span>' + asset.basic_info?.serial_number + '</span></div>' : '') +
+      (asset.basic_info?.asset_tag ? '<div class="row"><label>Asset Tag</label><span>' + asset.basic_info.asset_tag + '</span></div>' : '') +
+      (asset.basic_info?.serial_number ? '<div class="row"><label>Serial No.</label><span>' + asset.basic_info.serial_number + '</span></div>' : '') +
       (asset.basic_info?.manufacturer || asset.basic_info?.model ? '<div class="row"><label>Model</label><span>' + [asset.basic_info?.manufacturer, asset.basic_info?.model].filter(Boolean).join(' ') + '</span></div>' : '') +
       (asset.network?.ip_address ? '<div class="row"><label>IP Address</label><span>' + asset.network.ip_address + '</span></div>' : '') +
       (asset.assigned_person ? '<div class="row"><label>Assigned To</label><span>' + asset.assigned_person.full_name + '</span></div>' : '') +
@@ -279,9 +279,7 @@ const AssetDetails: React.FC = () => {
         <div className={styles.empty}>
           <AlertTriangle size={32} style={{ color: 'var(--color-danger)', marginBottom: 8 }} />
           <h3>{error}</h3>
-          <Button variant="outline" onClick={() => id && loadAssetDetails(id)}>
-            Retry
-          </Button>
+          <Button variant="outline" onClick={() => id && loadAssetDetails(id)}>Retry</Button>
         </div>
       </Card>
     );
@@ -292,28 +290,29 @@ const AssetDetails: React.FC = () => {
       <Card padding="lg">
         <div className={styles.empty}>
           <h3>Asset not found</h3>
-          <Button variant="outline" onClick={() => navigate(-1)}>
-            Go Back
-          </Button>
+          <Button variant="outline" onClick={() => navigate(-1)}>Go Back</Button>
         </div>
       </Card>
     );
   }
+
+  const isRackMounted = !!asset.hierarchy?.rack_id;
+  const isOverdue = asset.maintenance?.next_date
+    ? new Date(asset.maintenance.next_date) < new Date()
+    : false;
 
   return (
     <div className={styles.assetDetails}>
       <Breadcrumb items={[
         { label: 'Dashboard', href: '/' },
         ...(building ? [{ label: building.name, href: `/buildings/${building._id}` }] : []),
-        ...(floor    ? [{ label: floor.name,     href: `/floors/${floor._id}` }]     : []),
+        ...(floor    ? [{ label: floor.name,    href: `/floors/${floor._id}` }]     : []),
         { label: asset.basic_info?.display_name ?? 'Asset' },
       ]} />
 
       {/* Header */}
       <div className={styles.header}>
-        <Button variant="outline" onClick={() => navigate(-1)}>
-          ← Back
-        </Button>
+        <Button variant="outline" onClick={() => navigate(-1)}>← Back</Button>
         <div className={styles.headerActions}>
           {asset.itsm?.is_managed && (
             <Button variant="primary" onClick={handleSync} loading={syncing}>
@@ -331,12 +330,28 @@ const AssetDetails: React.FC = () => {
             <Tag size={15} style={{ marginRight: 6 }} />
             Print Label
           </Button>
-          <Button variant="outline" onClick={handleEdit}>
-            Edit
-          </Button>
-          <Button variant="danger" onClick={() => setConfirmOpen(true)}>
-            Delete
-          </Button>
+          <Button variant="outline" onClick={() => setFormOpen(true)}>Edit</Button>
+
+          {/* Overflow menu — Delete lives here */}
+          <div className={styles.overflowMenu} ref={menuRef}>
+            <button
+              className={styles.overflowBtn}
+              onClick={() => setMenuOpen(v => !v)}
+              aria-label="More actions"
+            >
+              <MoreVertical size={16} />
+            </button>
+            {menuOpen && (
+              <div className={styles.overflowDropdown}>
+                <button
+                  className={styles.overflowItemDanger}
+                  onClick={() => { setMenuOpen(false); setConfirmOpen(true); }}
+                >
+                  Delete asset
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -353,17 +368,15 @@ const AssetDetails: React.FC = () => {
       {/* Asset Header Card */}
       <Card padding="lg" className={styles.headerCard}>
         <div className={styles.assetHeader}>
-          <div className={styles.assetIcon} aria-hidden="true">💻</div>
+          <div className={styles.assetIcon} aria-hidden="true">
+            {getAssetIcon(asset.basic_info?.type)}
+          </div>
           <div className={styles.assetInfo}>
             <h1 className={styles.assetName}>{asset.basic_info?.display_name}</h1>
             <div className={styles.assetMeta}>
-              {asset.basic_info?.manufacturer && (
-                <span>{asset.basic_info?.manufacturer}</span>
-              )}
-              {asset.basic_info?.model && <span>• {asset.basic_info?.model}</span>}
-              {asset.basic_info?.serial_number && (
-                <span>• SN: {asset.basic_info?.serial_number}</span>
-              )}
+              {asset.basic_info?.manufacturer && <span>{asset.basic_info.manufacturer}</span>}
+              {asset.basic_info?.model         && <span>• {asset.basic_info.model}</span>}
+              {asset.basic_info?.serial_number && <span>• SN: {asset.basic_info.serial_number}</span>}
             </div>
           </div>
           <Badge variant={asset.itsm?.is_managed ? 'success' : 'neutral'} size="md">
@@ -379,7 +392,6 @@ const AssetDetails: React.FC = () => {
           )}
         </div>
 
-        {/* ITSM Banner */}
         {asset.itsm?.is_managed && (
           <div className={styles.itsmBanner}>
             <div className={styles.bannerIcon}>✅</div>
@@ -390,12 +402,10 @@ const AssetDetails: React.FC = () => {
                   Source: {asset.itsm?.source_of_truth ?? 'local'}
                 </Badge>
               </div>
-              <p className={styles.bannerText}>
-                Hardware ID: {asset.itsm?.hardware_asset_id || '—'}
-              </p>
+              <p className={styles.bannerText}>Hardware ID: {asset.itsm?.hardware_asset_id || '—'}</p>
               {asset.itsm?.last_synced && (
                 <p className={styles.bannerTime}>
-                  Last synced: {new Date(asset.itsm?.last_synced).toLocaleString()}
+                  Last synced: {new Date(asset.itsm.last_synced).toLocaleString()}
                 </p>
               )}
             </div>
@@ -415,24 +425,32 @@ const AssetDetails: React.FC = () => {
                 <p>{asset.basic_info?.display_name}</p>
               </div>
               <div className={styles.field}>
+                <label>Type</label>
+                <p>{getAssetTypeLabel(asset.basic_info?.type)}</p>
+              </div>
+              <div className={styles.field}>
                 <label>Manufacturer</label>
-                <p>{asset.basic_info?.manufacturer || '-'}</p>
+                <p>{asset.basic_info?.manufacturer || '—'}</p>
               </div>
               <div className={styles.field}>
                 <label>Model</label>
-                <p>{asset.basic_info?.model || '-'}</p>
+                <p>{asset.basic_info?.model || '—'}</p>
               </div>
               <div className={styles.field}>
                 <label>Serial Number</label>
-                <p>{asset.basic_info?.serial_number || '-'}</p>
+                <p>{asset.basic_info?.serial_number || '—'}</p>
               </div>
               <div className={styles.field}>
                 <label>Asset Tag</label>
-                <p>{asset.basic_info?.asset_tag || '-'}</p>
+                <p>{asset.basic_info?.asset_tag || '—'}</p>
               </div>
               <div className={styles.field}>
                 <label>Status</label>
-                <p>{asset.basic_info?.status || '-'}</p>
+                <div>
+                  <Badge variant={statusVariant(asset.basic_info?.status)} size="sm">
+                    {asset.basic_info?.status ?? 'unknown'}
+                  </Badge>
+                </div>
               </div>
               {asset.catalog_item?.display_name && (
                 <div className={styles.field}>
@@ -444,34 +462,14 @@ const AssetDetails: React.FC = () => {
           </Card>
 
           {/* Technical Specs */}
-          {asset.technical_specs && (
+          {asset.technical_specs && (asset.technical_specs.cpu || asset.technical_specs.ram || asset.technical_specs.storage || asset.technical_specs.gpu) && (
             <Card padding="lg">
               <h3 className={styles.sectionTitle}>Technical Specifications</h3>
               <div className={styles.fieldsList}>
-                {asset.technical_specs.cpu && (
-                  <div className={styles.field}>
-                    <label>CPU</label>
-                    <p>{asset.technical_specs.cpu}</p>
-                  </div>
-                )}
-                {asset.technical_specs.ram && (
-                  <div className={styles.field}>
-                    <label>RAM</label>
-                    <p>{asset.technical_specs.ram}</p>
-                  </div>
-                )}
-                {asset.technical_specs.storage && (
-                  <div className={styles.field}>
-                    <label>Storage</label>
-                    <p>{asset.technical_specs.storage}</p>
-                  </div>
-                )}
-                {asset.technical_specs.gpu && (
-                  <div className={styles.field}>
-                    <label>GPU</label>
-                    <p>{asset.technical_specs.gpu}</p>
-                  </div>
-                )}
+                {asset.technical_specs.cpu     && <div className={styles.field}><label>CPU</label><p>{asset.technical_specs.cpu}</p></div>}
+                {asset.technical_specs.ram     && <div className={styles.field}><label>RAM</label><p>{asset.technical_specs.ram}</p></div>}
+                {asset.technical_specs.storage && <div className={styles.field}><label>Storage</label><p>{asset.technical_specs.storage}</p></div>}
+                {asset.technical_specs.gpu     && <div className={styles.field}><label>GPU</label><p>{asset.technical_specs.gpu}</p></div>}
               </div>
             </Card>
           )}
@@ -481,14 +479,8 @@ const AssetDetails: React.FC = () => {
             <Card padding="lg">
               <h3 className={styles.sectionTitle}>Operating System</h3>
               <div className={styles.fieldsList}>
-                <div className={styles.field}>
-                  <label>OS Type</label>
-                  <p>{asset.basic_info?.os_type || '-'}</p>
-                </div>
-                <div className={styles.field}>
-                  <label>OS Version</label>
-                  <p>{asset.basic_info?.os_version || '-'}</p>
-                </div>
+                {asset.basic_info?.os_type    && <div className={styles.field}><label>OS Type</label><p>{asset.basic_info.os_type}</p></div>}
+                {asset.basic_info?.os_version && <div className={styles.field}><label>OS Version</label><p>{asset.basic_info.os_version}</p></div>}
               </div>
             </Card>
           )}
@@ -522,16 +514,11 @@ const AssetDetails: React.FC = () => {
             <Card padding="lg">
               <h3 className={styles.sectionTitle}>Organization</h3>
               <div className={styles.fieldsList}>
-                <div className={styles.field}>
-                  <label>Name</label>
-                  <p>{asset.organization.display_name}</p>
-                </div>
+                <div className={styles.field}><label>Name</label><p>{asset.organization.display_name}</p></div>
                 {asset.organization.itsm_id && (
                   <div className={styles.field}>
                     <label>ITSM ID</label>
-                    <p style={{ fontFamily: 'monospace', fontSize: '12px', wordBreak: 'break-all' }}>
-                      {asset.organization.itsm_id}
-                    </p>
+                    <p style={{ fontFamily: 'monospace', fontSize: '12px', wordBreak: 'break-all' }}>{asset.organization.itsm_id}</p>
                   </div>
                 )}
               </div>
@@ -539,79 +526,95 @@ const AssetDetails: React.FC = () => {
           )}
 
           {/* Network Information */}
-          {asset.network && (
+          {asset.network && (asset.network.ip_address || asset.network.hostname || asset.network.vlan || asset.network.switch_port || asset.basic_info?.mac_address) && (
             <Card padding="lg">
               <h3 className={styles.sectionTitle}>Network Information</h3>
               <div className={styles.fieldsList}>
-                {asset.network.ip_address && (
-                  <div className={styles.field}>
-                    <label>IP Address</label>
-                    <p>{asset.network.ip_address}</p>
-                  </div>
-                )}
-                {asset.network.hostname && (
-                  <div className={styles.field}>
-                    <label>Hostname</label>
-                    <p>{asset.network.hostname}</p>
-                  </div>
-                )}
-                {asset.network.vlan && (
-                  <div className={styles.field}>
-                    <label>VLAN</label>
-                    <p>{asset.network.vlan}</p>
-                  </div>
-                )}
-                {asset.network.switch_port && (
-                  <div className={styles.field}>
-                    <label>Switch Port</label>
-                    <p>{asset.network.switch_port}</p>
-                  </div>
-                )}
-                {asset.basic_info?.mac_address && (
-                  <div className={styles.field}>
-                    <label>MAC Address</label>
-                    <p>{asset.basic_info?.mac_address}</p>
-                  </div>
-                )}
+                {asset.network.ip_address   && <div className={styles.field}><label>IP Address</label><p>{asset.network.ip_address}</p></div>}
+                {asset.network.hostname     && <div className={styles.field}><label>Hostname</label><p>{asset.network.hostname}</p></div>}
+                {asset.network.vlan         && <div className={styles.field}><label>VLAN</label><p>{asset.network.vlan}</p></div>}
+                {asset.network.switch_port  && <div className={styles.field}><label>Switch Port</label><p>{asset.network.switch_port}</p></div>}
+                {asset.basic_info?.mac_address && <div className={styles.field}><label>MAC Address</label><p>{asset.basic_info.mac_address}</p></div>}
               </div>
             </Card>
           )}
 
-          {/* Location */}
+          {/* Location — human-readable, no raw coordinates */}
           <Card padding="lg">
             <h3 className={styles.sectionTitle}>Location</h3>
             <div className={styles.fieldsList}>
-              <div className={styles.field}>
-                <label>Coordinates</label>
-                <p>
-                  X: {asset.location.coordinates.x}, Y: {asset.location.coordinates.y}
-                </p>
-              </div>
-              {asset.location.rotation !== undefined && (
+              {building && (
                 <div className={styles.field}>
-                  <label>Rotation</label>
-                  <p>{asset.location.rotation}°</p>
+                  <label>Building</label>
+                  <p><Link to={`/buildings/${building._id}`} style={{ color: 'var(--color-primary)' }}>{building.name}</Link></p>
                 </div>
+              )}
+              {floor && (
+                <div className={styles.field}>
+                  <label>Floor</label>
+                  <p><Link to={`/floors/${floor._id}`} style={{ color: 'var(--color-primary)' }}>{floor.name}</Link></p>
+                </div>
+              )}
+              {workArea && (
+                <div className={styles.field}>
+                  <label>Work Area</label>
+                  <p>{workArea.name}</p>
+                </div>
+              )}
+              {isRackMounted && rack && (
+                <div className={styles.field}>
+                  <label>Rack</label>
+                  <p>{rack.name}</p>
+                </div>
+              )}
+              {isRackMounted && asset.hierarchy?.u_position != null && (
+                <div className={styles.field}>
+                  <label>Rack Position</label>
+                  <p>U{asset.hierarchy.u_position} — {asset.hierarchy.rack_u_size ?? 1}U tall</p>
+                </div>
+              )}
+              {!isRackMounted && !building && !floor && (
+                <p style={{ fontSize: '0.875rem', color: 'var(--color-text-secondary)', fontStyle: 'italic', margin: 0 }}>
+                  Not placed on a floor
+                </p>
               )}
               {asset.location.description && (
                 <div className={styles.field}>
-                  <label>Description</label>
+                  <label>Notes</label>
                   <p>{asset.location.description}</p>
+                </div>
+              )}
+              {/* Wall port connection */}
+              {asset.wall_port && (
+                <div className={styles.field}>
+                  <label>Wall Port</label>
+                  <p style={{ fontFamily: 'monospace', fontSize: '0.85rem' }}>
+                    {asset.wall_port.label}
+                    {asset.wall_port.patch_panel_name && ` → ${asset.wall_port.patch_panel_name} port ${asset.wall_port.patch_port}`}
+                    {asset.wall_port.room_name && ` → ${asset.wall_port.room_name}`}
+                  </p>
                 </div>
               )}
             </div>
           </Card>
-{/* Asset Form Modal */}
-<AssetFormModal
-  isOpen={formOpen}
-  onClose={() => setFormOpen(false)}
-  onSuccess={handleFormSuccess}
-  asset={asset}
-/>
+
           {/* Maintenance */}
           {asset.maintenance && (asset.maintenance.last_date || asset.maintenance.next_date) && (
             <Card padding="lg">
-              <h3 className={styles.sectionTitle}>Maintenance</h3>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
+                <h3 className={styles.sectionTitle} style={{ margin: 0 }}>Maintenance</h3>
+                {isOverdue && (
+                  <Button
+                    variant="success"
+                    onClick={handleMarkDone}
+                    loading={markingDone}
+                    style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+                  >
+                    <CheckCircle size={14} />
+                    Mark Done
+                  </Button>
+                )}
+              </div>
               <div className={styles.fieldsList}>
                 {asset.maintenance.last_date && (
                   <div className={styles.field}>
@@ -622,9 +625,11 @@ const AssetDetails: React.FC = () => {
                 {asset.maintenance.next_date && (
                   <div className={styles.field}>
                     <label>Next Due</label>
-                    <p style={{ color: new Date(asset.maintenance.next_date) < new Date() ? '#ef4444' : undefined }}>
-                      {new Date(asset.maintenance.next_date).toLocaleDateString()}
-                      {new Date(asset.maintenance.next_date) < new Date() && ' ⚠️ OVERDUE'}
+                    <p>
+                      {isOverdue
+                        ? <Badge variant="error" size="sm">OVERDUE — {new Date(asset.maintenance.next_date).toLocaleDateString()}</Badge>
+                        : new Date(asset.maintenance.next_date).toLocaleDateString()
+                      }
                     </p>
                   </div>
                 )}
@@ -653,9 +658,7 @@ const AssetDetails: React.FC = () => {
                   <div key={index} className={styles.softwareItem}>
                     <div>
                       <p className={styles.softwareName}>{sw.display_name}</p>
-                      {sw.version && (
-                        <p className={styles.softwareVersion}>v{sw.version}</p>
-                      )}
+                      {sw.version && <p className={styles.softwareVersion}>v{sw.version}</p>}
                     </div>
                     <Badge variant={sw.source === 'itsm' ? 'info' : 'neutral'} size="sm">
                       {sw.source}
@@ -750,15 +753,25 @@ const AssetDetails: React.FC = () => {
                 </thead>
                 <tbody>
                   {asset.connections.map(c => {
-                    const name = allAssets.find(a => a._id === c.connected_asset_id)?.label ?? c.connected_asset_id;
+                    const peer = allAssets.find(a => a._id === c.connected_asset_id);
+                    const peerName = peer?.label ?? '…';
                     return (
                       <tr key={c.connected_asset_id} style={{ borderBottom: '1px solid var(--color-gray-100)' }}>
                         <td style={{ padding: '6px 8px' }}>
-                          <span style={{ fontSize: '0.7rem', fontWeight: 600, textTransform: 'uppercase', padding: '1px 6px', borderRadius: '4px', background: 'var(--color-primary)', color: '#fff' }}>{c.connection_type}</span>
+                          <span style={{ fontSize: '0.7rem', fontWeight: 600, textTransform: 'uppercase', padding: '1px 6px', borderRadius: '4px', background: 'var(--color-primary)', color: '#fff' }}>
+                            {c.connection_type}
+                          </span>
                         </td>
-                        <td style={{ padding: '6px 8px', color: 'var(--color-text-primary)' }}>{name}</td>
-                        <td style={{ padding: '6px 8px', color: 'var(--color-text-secondary)', fontFamily: 'monospace', fontSize: '0.8rem' }}>{(c as any).source_port ?? '—'}</td>
-                        <td style={{ padding: '6px 8px', color: 'var(--color-text-secondary)', fontFamily: 'monospace', fontSize: '0.8rem' }}>{(c as any).target_port ?? '—'}</td>
+                        <td style={{ padding: '6px 8px' }}>
+                          <Link
+                            to={`/assets/${c.connected_asset_id}`}
+                            style={{ color: 'var(--color-primary)', textDecoration: 'none', fontWeight: 500 }}
+                          >
+                            {peerName}
+                          </Link>
+                        </td>
+                        <td style={{ padding: '6px 8px', color: 'var(--color-text-secondary)', fontFamily: 'monospace', fontSize: '0.8rem' }}>{c.source_port ?? '—'}</td>
+                        <td style={{ padding: '6px 8px', color: 'var(--color-text-secondary)', fontFamily: 'monospace', fontSize: '0.8rem' }}>{c.target_port ?? '—'}</td>
                         <td style={{ padding: '6px 8px', color: 'var(--color-text-secondary)' }}>{c.label ?? '—'}</td>
                         <td style={{ padding: '6px 4px', textAlign: 'right' }}>
                           <button
@@ -822,8 +835,15 @@ const AssetDetails: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* Modals — always at root of return, never inside a column */}
+      <AssetFormModal
+        isOpen={formOpen}
+        onClose={() => setFormOpen(false)}
+        onSuccess={handleFormSuccess}
+        asset={asset}
+      />
     </div>
-    
   );
 };
 
