@@ -26,7 +26,8 @@ export interface AuditEntry {
   action: AuditAction;
   entity_type: string;
   document_id: string;
-  diff?: any;
+  diff?: Record<string, { old: unknown; new: unknown }>;
+  changes?: Record<string, { old: unknown; new: unknown }>; // alias for diff
   ip_address?: string;
   user_agent?: string;
   timestamp: string;

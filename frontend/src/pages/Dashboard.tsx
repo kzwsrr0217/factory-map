@@ -19,7 +19,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { Monitor, Activity, Wrench, Building2, AlertTriangle, Bell, Eye, Download, Upload, BarChart2, Filter, Trash2, MoveRight, FileText, LayoutGrid, List, ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react';
+import { Monitor, Activity, Wrench, Building2, AlertTriangle, Bell, Eye, Map, Download, Upload, BarChart2, Filter, Trash2, MoveRight, FileText, LayoutGrid, List, ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react';
 import Card from '../components/common/Card';
 import Button from '../components/common/Button';
 import Badge from '../components/common/Badge';
@@ -929,6 +929,18 @@ const Dashboard: React.FC = () => {
                           <button className={styles.quickViewBtn} title="Quick view" onClick={(e) => { e.stopPropagation(); setViewAsset(asset); }}>
                             <Eye size={14} />
                           </button>
+                          {asset.is_placed && asset.hierarchy?.floor_id && (
+                            <button
+                              className={styles.quickViewBtn}
+                              title="Show on map"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                navigate(`/map?building=${asset.hierarchy?.building_id}&floor=${asset.hierarchy?.floor_id}`);
+                              }}
+                            >
+                              <Map size={14} />
+                            </button>
+                          )}
                         </div>
                       </div>
                     );
@@ -1013,6 +1025,15 @@ const Dashboard: React.FC = () => {
                               <button className={styles.quickViewBtn} title="Quick view" onClick={() => setViewAsset(asset)}>
                                 <Eye size={14} />
                               </button>
+                              {asset.is_placed && asset.hierarchy?.floor_id && (
+                                <button
+                                  className={styles.quickViewBtn}
+                                  title="Show on map"
+                                  onClick={() => navigate(`/map?building=${asset.hierarchy?.building_id}&floor=${asset.hierarchy?.floor_id}`)}
+                                >
+                                  <Map size={14} />
+                                </button>
+                              )}
                             </td>
                           </tr>
                         );

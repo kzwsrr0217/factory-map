@@ -254,6 +254,15 @@
 
 .calMore {
   font-size: 10px;
-  color: var(--color-gray-400);
+  color: var(--color-primary);
   padding: 1px 4px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+}
+
+.calMore:hover {
+  text-decoration: underline;
 }

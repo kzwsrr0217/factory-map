@@ -64,8 +64,17 @@ const EntrySkeleton: React.FC = () => (
   </li>
 );
 
+const formatVal = (v: unknown): string => {
+  if (v === null || v === undefined) return '—';
+  if (typeof v === 'object') return JSON.stringify(v);
+  return String(v);
+};
+
 const AuditLog: React.FC = () => {
   const [page, setPage] = useState(1);
+  const [expandedEntries, setExpandedEntries] = useState<Set<string>>(new Set());
+  const toggleExpand = (id: string) =>
+    setExpandedEntries(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; });
 
   const [draftUsername, setDraftUsername] = useState('');
   const [draftAction, setDraftAction] = useState<AuditAction | ''>('');
@@ -278,19 +287,55 @@ const AuditLog: React.FC = () => {
                 {ACTION_ICON[entry.action] ?? <ShieldAlert size={16} />}
               </span>
               <div className={styles.entryContent}>
-                <p className={styles.entryTitle}>
-                  <strong>{entry.username}</strong>{' '}
-                  {ACTION_LABEL[entry.action] ?? entry.action}
-                  {entry.entity_type !== 'auth' && (
-                    <>{' '}<em>{entry.entity_type}</em>{' '}<code title={entry.document_id}>{entry.document_id.slice(0, 12)}…</code></>
-                  )}
-                </p>
-                <p className={styles.entryMeta}>
-                  <span>{new Date(entry.timestamp).toLocaleString()}</span>
-                  {entry.ip_address && (
-                    <span className={styles.entryIp}>IP: {entry.ip_address}</span>
-                  )}
-                </p>
+                {(() => {
+                  const entryChanges = entry.diff ?? entry.changes;
+                  const changeCount = entryChanges ? Object.keys(entryChanges).length : 0;
+                  return (
+                    <>
+                      <p className={styles.entryTitle}>
+                        <strong>{entry.username}</strong>{' '}
+                        {ACTION_LABEL[entry.action] ?? entry.action}
+                        {entry.entity_type !== 'auth' && (
+                          <>{' '}<em>{entry.entity_type}</em>{' '}<code title={entry.document_id}>{entry.document_id.slice(0, 12)}…</code></>
+                        )}
+                        {entry.action === 'update' && changeCount > 0 && (
+                          <button
+                            onClick={() => toggleExpand(entry._id)}
+                            style={{ marginLeft: 8, fontSize: '0.7rem', padding: '1px 6px', borderRadius: 4, border: '1px solid var(--color-border)', background: 'none', cursor: 'pointer', color: 'var(--color-text-secondary)' }}
+                          >
+                            {expandedEntries.has(entry._id) ? 'hide changes' : `${changeCount} field${changeCount !== 1 ? 's' : ''} changed`}
+                          </button>
+                        )}
+                      </p>
+                      <p className={styles.entryMeta}>
+                        <span>{new Date(entry.timestamp).toLocaleString()}</span>
+                        {entry.ip_address && (
+                          <span className={styles.entryIp}>IP: {entry.ip_address}</span>
+                        )}
+                      </p>
+                      {entry.action === 'update' && expandedEntries.has(entry._id) && entryChanges && (
+                        <table style={{ marginTop: 8, fontSize: '0.75rem', borderCollapse: 'collapse', width: '100%' }}>
+                          <thead>
+                            <tr>
+                              <th style={{ textAlign: 'left', padding: '2px 8px', color: 'var(--color-text-secondary)', fontWeight: 600, borderBottom: '1px solid var(--color-border)', width: '25%' }}>Field</th>
+                              <th style={{ textAlign: 'left', padding: '2px 8px', color: 'var(--color-danger, #ef4444)', fontWeight: 600, borderBottom: '1px solid var(--color-border)', width: '37.5%' }}>Before</th>
+                              <th style={{ textAlign: 'left', padding: '2px 8px', color: 'var(--color-success, #10b981)', fontWeight: 600, borderBottom: '1px solid var(--color-border)', width: '37.5%' }}>After</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {Object.entries(entryChanges).map(([field, diff]) => (
+                              <tr key={field}>
+                                <td style={{ padding: '3px 8px', fontFamily: 'monospace', color: 'var(--color-text-secondary)' }}>{field}</td>
+                                <td style={{ padding: '3px 8px', fontFamily: 'monospace', color: 'var(--color-danger, #ef4444)', wordBreak: 'break-all' }}>{formatVal(diff.old)}</td>
+                                <td style={{ padding: '3px 8px', fontFamily: 'monospace', color: 'var(--color-success, #10b981)', wordBreak: 'break-all' }}>{formatVal(diff.new)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
             </li>
           ))}

@@ -29,6 +29,8 @@ const Maintenance: React.FC = () => {
   const [viewMonth, setViewMonth] = useState(today.getMonth()); // 0-based
   const [overdueOpen, setOverdueOpen] = useState(true);
   const [viewAsset, setViewAsset] = useState<Asset | null>(null);
+  // key = "YYYY-MM-DD", value = true when expanded past 3 items
+  const [expandedDays, setExpandedDays] = useState<Set<string>>(new Set());
 
   const overdue = useMemo(
     () => assets.filter(a => new Date(a.maintenance!.next_date!).getTime() < today.setHours(0, 0, 0, 0)),
@@ -174,6 +176,15 @@ const Maintenance: React.FC = () => {
             <button className={styles.navBtn} onClick={prevMonth}><ChevronLeft size={16} /></button>
             <h2 className={styles.monthTitle}>{monthName}</h2>
             <button className={styles.navBtn} onClick={nextMonth}><ChevronRight size={16} /></button>
+            <select
+              value={viewYear}
+              onChange={e => setViewYear(Number(e.target.value))}
+              style={{ marginLeft: 8, height: 30, padding: '0 6px', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', background: 'var(--color-bg-primary)', color: 'var(--color-text-primary)', fontSize: '0.85rem', cursor: 'pointer' }}
+            >
+              {Array.from({ length: 10 }, (_, i) => today.getFullYear() - 2 + i).map(y => (
+                <option key={y} value={y}>{y}</option>
+              ))}
+            </select>
           </div>
           <div className={styles.calNavRight}>
             {upcomingThisMonth > 0 && (
@@ -210,7 +221,7 @@ const Maintenance: React.FC = () => {
               >
                 <span className={`${styles.calDayNum} ${isToday ? styles.calDayNumToday : ''}`}>{day}</span>
                 <div className={styles.calEvents}>
-                  {dayAssets.slice(0, 3).map(a => (
+                  {(expandedDays.has(key) ? dayAssets : dayAssets.slice(0, 3)).map(a => (
                     <button
                       key={a._id}
                       className={`${styles.calEvent} ${isPast ? styles.calEventOverdue : styles.calEventNormal}`}
@@ -221,8 +232,21 @@ const Maintenance: React.FC = () => {
                       <span className={styles.calEventName}>{a.basic_info.display_name}</span>
                     </button>
                   ))}
-                  {dayAssets.length > 3 && (
-                    <span className={styles.calMore}>+{dayAssets.length - 3} more</span>
+                  {dayAssets.length > 3 && !expandedDays.has(key) && (
+                    <button
+                      className={styles.calMore}
+                      onClick={() => setExpandedDays(prev => new Set([...prev, key]))}
+                    >
+                      +{dayAssets.length - 3} more
+                    </button>
+                  )}
+                  {dayAssets.length > 3 && expandedDays.has(key) && (
+                    <button
+                      className={styles.calMore}
+                      onClick={() => setExpandedDays(prev => { const s = new Set(prev); s.delete(key); return s; })}
+                    >
+                      show less
+                    </button>
                   )}
                 </div>
               </div>

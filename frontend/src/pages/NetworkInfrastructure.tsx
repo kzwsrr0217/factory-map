@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import Card from '../components/common/Card';
 import Button from '../components/common/Button';
+import ConfirmDialog from '../components/common/ConfirmDialog';
 import { networkService, NetworkRoom, NetworkRack, PatchPanel, WallPort } from '../services/network.service';
 import { assetService, Asset } from '../services/asset.service';
 import { RackDiagram } from '../components/network/RackDiagram';
@@ -42,6 +43,14 @@ const NetworkInfrastructure: React.FC = () => {
   const [modal, setModal] = useState<ModalState>({ kind: 'none' });
   const [form, setForm] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
+
+  type DeleteTarget =
+    | { kind: 'room';   room: NetworkRoom }
+    | { kind: 'rack';   rack: NetworkRack }
+    | { kind: 'panel';  panel: PatchPanel; rack: NetworkRack }
+    | { kind: 'wp';     wp: WallPort; panelId: string };
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   // Auto-select first building
   useEffect(() => {
@@ -202,42 +211,40 @@ const NetworkInfrastructure: React.FC = () => {
     }
   };
 
-  const handleDeleteRoom = async (room: NetworkRoom) => {
-    if (!window.confirm(`Delete "${room.name}" and all its racks and panels?`)) return;
+  const handleConfirmDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleteLoading(true);
     try {
-      await networkService.deleteRoom(room._id);
-      toast.success('Room deleted');
-      if (selectedRoomId === room._id) { setSelectedRoomId(null); setSelectedRackId(null); }
-      await invalidateRooms();
+      if (deleteTarget.kind === 'room') {
+        await networkService.deleteRoom(deleteTarget.room._id);
+        toast.success('Room deleted');
+        if (selectedRoomId === deleteTarget.room._id) { setSelectedRoomId(null); setSelectedRackId(null); }
+        await invalidateRooms();
+      } else if (deleteTarget.kind === 'rack') {
+        await networkService.deleteRack(deleteTarget.rack._id);
+        toast.success('Rack deleted');
+        if (selectedRackId === deleteTarget.rack._id) setSelectedRackId(null);
+        await invalidateRooms();
+      } else if (deleteTarget.kind === 'panel') {
+        await networkService.deletePatchPanel(deleteTarget.panel._id);
+        toast.success('Panel deleted');
+        await invalidateRooms();
+      } else if (deleteTarget.kind === 'wp') {
+        await networkService.deleteWallPort(deleteTarget.wp._id);
+        toast.success('Wall port removed');
+        await reloadPanelPorts(deleteTarget.panelId);
+      }
     } catch { toast.error('Delete failed'); }
+    finally { setDeleteLoading(false); setDeleteTarget(null); }
   };
 
-  const handleDeleteRack = async (rack: NetworkRack) => {
-    if (!window.confirm(`Delete rack "${rack.name}" and all its patch panels?`)) return;
-    try {
-      await networkService.deleteRack(rack._id);
-      toast.success('Rack deleted');
-      if (selectedRackId === rack._id) setSelectedRackId(null);
-      await invalidateRooms();
-    } catch { toast.error('Delete failed'); }
-  };
-
-  const handleDeleteWallPort = async (wp: WallPort, panelId: string) => {
-    if (!window.confirm(`Remove wall port "${wp.label}" (port ${wp.patch_port})?`)) return;
-    try {
-      await networkService.deleteWallPort(wp._id);
-      toast.success('Wall port removed');
-      await reloadPanelPorts(panelId);
-    } catch { toast.error('Delete failed'); }
-  };
-
-  const handleDeletePanel = async (panel: PatchPanel, rack: NetworkRack) => {
-    if (!window.confirm(`Delete patch panel "${panel.name}" and unlink its ${panelPorts[panel._id]?.length ?? 0} wall ports?`)) return;
-    try {
-      await networkService.deletePatchPanel(panel._id);
-      toast.success('Panel deleted');
-      await invalidateRooms();
-    } catch { toast.error('Delete failed'); }
+  const deleteMessage = () => {
+    if (!deleteTarget) return '';
+    if (deleteTarget.kind === 'room')  return `Delete "${deleteTarget.room.name}" and all its racks and panels?`;
+    if (deleteTarget.kind === 'rack')  return `Delete rack "${deleteTarget.rack.name}" and all its patch panels?`;
+    if (deleteTarget.kind === 'panel') return `Delete patch panel "${deleteTarget.panel.name}" and unlink its ${panelPorts[deleteTarget.panel._id]?.length ?? 0} wall ports?`;
+    if (deleteTarget.kind === 'wp')    return `Remove wall port "${deleteTarget.wp.label}" (port ${deleteTarget.wp.patch_port})?`;
+    return '';
   };
 
   const buildingFloors = (floors as { _id: string; name: string; building_id: string }[]).filter(f => f.building_id === selectedBuildingId);
@@ -281,7 +288,7 @@ const NetworkInfrastructure: React.FC = () => {
                 <span className={styles.roomName}>{room.name}</span>
                 <div className={styles.roomCardActions}>
                   <button className={styles.iconBtn} onClick={e => { e.stopPropagation(); openModal({ kind: 'room', room }); }} title="Edit room">✏️</button>
-                  <button className={styles.iconBtn} onClick={e => { e.stopPropagation(); handleDeleteRoom(room); }} title="Delete room">🗑️</button>
+                  <button className={styles.iconBtn} onClick={e => { e.stopPropagation(); setDeleteTarget({ kind: 'room', room }); }} title="Delete room">🗑️</button>
                 </div>
               </div>
               <div className={styles.roomMeta}>
@@ -316,7 +323,7 @@ const NetworkInfrastructure: React.FC = () => {
                       <span className={styles.rackU}>{rack.u_count}U</span>
                       <div className={styles.rackActions}>
                         <button className={styles.iconBtn} onClick={e => { e.stopPropagation(); openModal({ kind: 'rack', room: selectedRoom, rack }); }} title="Edit rack">✏️</button>
-                        <button className={styles.iconBtn} onClick={e => { e.stopPropagation(); handleDeleteRack(rack); }} title="Delete rack">🗑️</button>
+                        <button className={styles.iconBtn} onClick={e => { e.stopPropagation(); setDeleteTarget({ kind: 'rack', rack }); }} title="Delete rack">🗑️</button>
                       </div>
                     </div>
                     <div className={styles.rackMeta}>
@@ -359,7 +366,7 @@ const NetworkInfrastructure: React.FC = () => {
                         </div>
                         <div className={styles.panelCardActions}>
                           <button className={styles.iconBtn} onClick={() => openModal({ kind: 'panel', rack: selectedRack, panel })} title="Edit panel">✏️</button>
-                          <button className={styles.iconBtn} onClick={() => handleDeletePanel(panel, selectedRack)} title="Delete panel">🗑️</button>
+                          <button className={styles.iconBtn} onClick={() => setDeleteTarget({ kind: 'panel', panel, rack: selectedRack })} title="Delete panel">🗑️</button>
                         </div>
                       </div>
 
@@ -604,7 +611,7 @@ const NetworkInfrastructure: React.FC = () => {
             </div>
             <div className={styles.modalFooter}>
               {modal.kind === 'wallport' && modal.existing && (
-                <Button variant="danger" onClick={() => { closeModal(); handleDeleteWallPort(modal.existing!, modal.panel._id); }} disabled={saving}>
+                <Button variant="danger" onClick={() => { closeModal(); setDeleteTarget({ kind: 'wp', wp: modal.existing!, panelId: (modal as { panel: PatchPanel }).panel._id }); }} disabled={saving}>
                   Remove
                 </Button>
               )}
@@ -622,6 +629,16 @@ const NetworkInfrastructure: React.FC = () => {
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        isOpen={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={handleConfirmDelete}
+        title="Confirm Delete"
+        message={deleteMessage()}
+        confirmText="Delete"
+        loading={deleteLoading}
+      />
     </div>
   );
 };

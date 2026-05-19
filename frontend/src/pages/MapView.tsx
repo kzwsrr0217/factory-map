@@ -19,7 +19,7 @@
  * only the selection changes.
  */
 import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import Card from '../components/common/Card';
 import Button from '../components/common/Button';
 import Select from '../components/common/Select';
@@ -37,6 +37,7 @@ import styles from '../styles/pages/MapView.module.css';
 
 const MapView: React.FC = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [buildings, setBuildings] = useState<Building[]>([]);
   const [floors, setFloors] = useState<Floor[]>([]);
   const [selectedBuildingId, setSelectedBuildingId] = useState<string>('');
@@ -194,14 +195,15 @@ const MapView: React.FC = () => {
       setFloors(floorsData);
       setAllAssets(allAssetsData);
 
-      const firstBuilding = buildingsData[0];
-      const firstFloor = floorsData.find((floor) => floor.building_id === firstBuilding?._id);
-      if (firstBuilding) {
-        setSelectedBuildingId(firstBuilding._id);
-      }
-      if (firstFloor) {
-        setSelectedFloorId(firstFloor._id);
-      }
+      // Honour ?building=<id>&floor=<id> deep-link params (e.g. from Dashboard "Show on map")
+      const paramBuilding = searchParams.get('building');
+      const paramFloor    = searchParams.get('floor');
+      const targetBuilding = buildingsData.find(b => b._id === paramBuilding) ?? buildingsData[0];
+      const targetFloor    = paramFloor
+        ? floorsData.find(f => f._id === paramFloor)
+        : floorsData.find(f => f.building_id === targetBuilding?._id);
+      if (targetBuilding) setSelectedBuildingId(targetBuilding._id);
+      if (targetFloor)    setSelectedFloorId(targetFloor._id);
     } catch (error) {
       console.error('Error loading map metadata:', error);
       setError('Failed to load map data. Please check your connection and try again.');
