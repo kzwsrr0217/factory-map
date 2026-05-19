@@ -477,6 +477,8 @@ export class Asset {
         bidirectional: c.bidirectional,
         strength: c.strength,
         patch_panel: c.patch_panel,
+        source_port: c.source_port,
+        target_port: c.target_port,
         created_at: c.created_at,
       })),
       created_at: this.created_at,
