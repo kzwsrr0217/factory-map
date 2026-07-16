@@ -1,6 +1,6 @@
 # Factory Map — IT Asset Management
 
-Full-stack TypeScript application for tracking and visualizing IT assets in factory environments. Features hierarchical location management, interactive floor plans, ITSM integration, maintenance scheduling, and alerting.
+Full-stack TypeScript application for tracking and visualizing IT assets in factory environments. Features hierarchical location management, interactive floor plans, ITSM integration(read only for sync), maintenance scheduling, and alerting.
 
 ---
 
@@ -11,7 +11,7 @@ Full-stack TypeScript application for tracking and visualizing IT assets in fact
 - **Interactive Floor Plans** — drag-and-drop asset positioning, pan/zoom, minimap, grid snap, map export/print
 - **Asset Connections (Wire Mode)** — model physical/logical links between devices on the floor map
 - **Network Topology Graph** — force-directed graph of all asset connections
-- **ITSM Integration** — sync hardware data from an external ITSM system (mock adapter included; 22 realistic records)
+- **ITSM Integration** — sync hardware data from an external ITSM system (mock adapter included; 22 realistic records), ITSM sync only as READ - ITSM is the sinlge source of thruth
 - **Global Search** — instant client-side prefix-indexed search across all assets (Ctrl+K)
 - **3-Step CSV Import Wizard** — validate, preview, and bulk-import assets
 - **Maintenance Calendar** — monthly calendar view of scheduled maintenance with CSV export
