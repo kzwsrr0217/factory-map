@@ -234,6 +234,22 @@ export class Asset {
   @Column({ name: 'itsm_snapshot', type: 'simple-json', nullable: true })
   itsm_snapshot!: ItsmSnapshot | null;
 
+  // ── Reconcile (read-only ITSM comparison) ─────────────────────────────────
+  // Field diffs the user chose to ignore. An entry suppresses a diff only while
+  // ITSM still reports the same value; if ITSM changes, the diff resurfaces.
+  @Column({ name: 'reconcile_ignored', type: 'simple-json', nullable: true })
+  reconcile_ignored!: Array<{ field: string; itsm_value: string | null; ignored_at: Date; ignored_by?: string }> | null;
+
+  // Result of the last per-asset reconcile check (populated on demand only).
+  @Column({ name: 'reconcile_last_at', type: 'datetime', nullable: true })
+  reconcile_last_at!: Date | null;
+
+  @Column({ name: 'reconcile_last_status', type: 'nvarchar', length: 20, nullable: true })
+  reconcile_last_status!: string | null; // 'in_sync' | 'differences' | 'missing' | 'error'
+
+  @Column({ name: 'reconcile_diff_count', type: 'int', nullable: true })
+  reconcile_diff_count!: number | null;
+
   // ── Location (flattened) ──────────────────────────────────────────────────
   @Column({ name: 'loc_x', type: 'float', default: 0 })
   loc_x!: number;
@@ -419,6 +435,12 @@ export class Asset {
         sync_errors: this.sync_errors ?? [],
       },
       itsm_snapshot: this.itsm_snapshot ?? null,
+      reconcile: {
+        ignored: this.reconcile_ignored ?? [],
+        last_at: this.reconcile_last_at,
+        last_status: this.reconcile_last_status,
+        diff_count: this.reconcile_diff_count,
+      },
       location: {
         coordinates: { x: this.loc_x, y: this.loc_y },
         rotation: this.loc_rotation,

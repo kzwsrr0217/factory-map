@@ -30,8 +30,11 @@
 │  Services:                                                         │
 │    AlertService  — email (nodemailer) + Teams (webhook fetch)     │
 │    ITSMService   — adapter pattern: MockAdapter | RealAdapter     │
+│                    (Real = Alemba/Operaio View API, READ-ONLY)    │
 │    LdapAuthService — optional Active Directory login              │
-│    SyncService   — ITSM → DB reconciliation (create/update/snap) │
+│    SyncService   — ITSM → DB import (create/update/snapshot)      │
+│    ReconcileService — per-asset read-only diff vs ITSM +          │
+│                    per-field accept/ignore/unlink (local writes)  │
 │                                                                    │
 │  Swagger UI at /api/docs  (swagger-jsdoc + swagger-ui-express)   │
 │  node-cron  — 07:00 daily → AlertService.checkAndSend()          │
@@ -88,6 +91,7 @@ User        (N)                    — local + LDAP-provisioned accounts
 | Location | `building_id`, `floor_id`, `workarea_id`, `section_id`, `workstation_id`, `loc_x`, `loc_y`, `loc_rotation`, `loc_icon_type`, `loc_history` (JSON) |
 | Person | `person_id`, `person_full_name` |
 | ITSM | `itsm_guid`, `hardware_asset_id`, `source_of_truth` (`local` / `itsm`), `sync_status`, `itsm_snapshot` |
+| Reconcile | `reconcile_ignored` (JSON: per-field ignores, valid while ITSM value unchanged), `reconcile_last_at`, `reconcile_last_status` (`in_sync` / `differences` / `missing` / `error`), `reconcile_diff_count` |
 | Maintenance | `maint_last_date`, `maint_next_date`, `maint_interval_days`, `maint_notes` |
 | Operational | `remote_access_tool`, `backup_tool`, `backup_status`, `fortiedr_active`, `winupdate_date` |
 | Custom | `environment`, `notes`, `tags` (JSON), `object_id`, `serial_object` |
@@ -130,11 +134,47 @@ Single-row table (id = `'global'`):
 ```typescript
 // backend/src/services/itsm/IITSMAdapter.ts
 interface IITSMAdapter {
+  getHardware(hardwareId: string): Promise<IITSMHardware>;
   searchHardware(query: string): Promise<IITSMHardware[]>;
-  getHardwareById(id: string): Promise<IITSMHardware>;
-  syncAll(): Promise<IITSMSyncResult>;
+  getPerson(personId: string): Promise<IITSMPerson>;
+  getSoftware(softwareId: string): Promise<IITSMSoftware>;
+  getTicketsByHardware(hardwareId: string): Promise<IITSMTicket[]>;
+  syncAsset(hardwareId: string): Promise<IITSMSyncResult>;
+  syncAll(): Promise<IITSMHardware[]>;
+  buildTicketUrl(ticketId: string): string;
 }
 ```
+
+`RealITSMAdapter` targets the **Alemba / Operaio Service Manager View API**
+(`GET {base}/api/ViewAPI/GetViewData/{ITSM_VIEW_ID}`) — the same endpoint the ITSM
+web UI uses. Lookups are server-side filtered so a single-asset query never pulls
+the whole catalogue. Column captions vary per tenant, so the canonical-field →
+caption mapping lives in a `COLUMN_MAP` table that can be overridden without a
+code change via the `ITSM_COLUMN_MAP` env var (JSON). **The adapter only ever
+issues GET requests — nothing is written back to ITSM.**
+
+### 1b. Read-only reconciliation — `ReconcileService`
+
+ITSM is the single source of truth. The reconcile flow compares one local asset
+at a time against ITSM (exactly one GET, on explicit user action — no bulk pulls,
+no scheduled sync) and reports per-field differences. The user resolves each
+difference individually:
+
+| Action | Endpoint | Effect |
+|--------|----------|--------|
+| Check | `POST /api/itsm/reconcile/:id/check` | The only call that reads ITSM; stores a small result summary locally |
+| Accept | `PATCH /api/itsm/reconcile/:id/accept` `{fields}` | Copies the chosen ITSM values into the **local** record |
+| Ignore | `PATCH /api/itsm/reconcile/:id/ignore` `{field, itsm_value}` | Persists the ignore; resurfaces automatically if ITSM's value changes |
+| Un-ignore | `PATCH /api/itsm/reconcile/:id/unignore/:field` | Field is compared again |
+| Unlink | `PATCH /api/itsm/reconcile/:id/unlink` | Clears the local ITSM link (for records deleted from ITSM) |
+| List / summary | `GET /api/itsm/reconcile/linked`, `GET /api/itsm/reconcile/summary` | Built from the local DB only — never call ITSM |
+
+The comparable fields are declared in one table (`RECONCILE_FIELDS`) that drives
+the diff, the accept write-back and the UI. Status values map through
+`statusMapping.ts` (`Deployed⇄active`, `In Stock⇄inactive`, …) and MAC addresses
+are normalised (`AA-BB-…` == `aa:bb:…`) so formatting differences are not flagged.
+All reconcile writes go through the audit middleware (`captureAuditBefore` +
+`auditLog`).
 
 ### 2. `toApiResponse()` — flat SQL ↔ nested JSON
 

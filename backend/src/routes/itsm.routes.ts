@@ -84,14 +84,39 @@ import {
   syncAsset,
   syncAll,
   acceptSnapshot,
+  reconcileLinked,
+  reconcileSummary,
+  reconcileCheckAsset,
+  acceptReconcileFields,
+  ignoreReconcileDiff,
+  unignoreReconcileDiff,
+  unlinkReconcileAsset,
 } from '../controllers/itsm.controller';
+import { requireOperator } from '../middleware/auth.middleware';
+import { auditLog, captureAuditBefore } from '../middleware/audit.middleware';
+import { Asset } from '../entities/Asset.entity';
 
 const router = Router();
 
 router.get('/hardware/search', searchHardware);
 router.get('/hardware/:hardwareId', getHardware);
-router.post('/sync/all', syncAll);
-router.post('/sync/:hardwareId', syncAsset);
-router.patch('/assets/:id/accept-snapshot', acceptSnapshot);
+router.post('/sync/all', requireOperator, syncAll);
+router.post('/sync/:hardwareId', requireOperator, syncAsset);
+router.patch('/assets/:id/accept-snapshot', requireOperator, acceptSnapshot);
+
+// ── READ-ONLY reconciliation (ITSM is the single source of truth) ───────────
+// List + summary are built from the LOCAL DB only — they never call ITSM.
+router.get('/reconcile/linked', reconcileLinked);
+router.get('/reconcile/summary', reconcileSummary);
+
+// Per-asset check: the ONLY endpoint that reads ITSM, and only for one asset,
+// on explicit user action. Nothing is ever written back to ITSM.
+router.post('/reconcile/:id/check', requireOperator, reconcileCheckAsset);
+
+// Local writes (audited). None of these touch ITSM.
+router.patch('/reconcile/:id/accept', requireOperator, captureAuditBefore(Asset), auditLog('asset'), acceptReconcileFields);
+router.patch('/reconcile/:id/ignore', requireOperator, captureAuditBefore(Asset), auditLog('asset'), ignoreReconcileDiff);
+router.patch('/reconcile/:id/unignore/:field', requireOperator, unignoreReconcileDiff);
+router.patch('/reconcile/:id/unlink', requireOperator, captureAuditBefore(Asset), auditLog('asset'), unlinkReconcileAsset);
 
 export default router;

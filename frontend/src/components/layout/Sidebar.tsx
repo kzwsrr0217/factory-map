@@ -12,6 +12,7 @@ import {
   Network,
   Server,
   Wrench,
+  RefreshCw,
   Keyboard,
   LucideIcon,
 } from 'lucide-react';
@@ -33,6 +34,7 @@ const menuItems: MenuItem[] = [
   { icon: Network,         label: 'Network',          path: '/network' },
   { icon: Server,          label: 'Infrastructure',   path: '/infrastructure' },
   { icon: Wrench,          label: 'Maintenance', path: '/maintenance' },
+  { icon: RefreshCw,       label: 'ITSM Reconcile', path: '/itsm' },
   { icon: ClipboardList,   label: 'Audit Log',  path: '/audit' },
   { icon: Bell,            label: 'Alerts',     path: '/alerts' },
   { icon: Settings,        label: 'Settings',   path: '/settings' },

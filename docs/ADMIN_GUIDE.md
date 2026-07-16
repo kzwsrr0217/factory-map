@@ -55,15 +55,23 @@ cp .env.example .env
 # Edit .env with your settings (see Environment Variables section)
 ```
 
-### 3. Start with Docker Compose
+### 3. Start with Docker Compose (or Podman)
 ```bash
 docker-compose up -d
+# or, with Podman 5.x:
+podman compose up -d --build
 ```
 
 This starts:
 - `factory-map-mssql` — SQL Server 2022 on port 1433
 - `factory-map-backend` — Node.js API on port 4000
 - `factory-map-frontend` — React dev server on port 5174 (when using Docker)
+
+**Podman notes:**
+- `podman compose` delegates to the bundled docker-compose provider; the same `docker-compose.yml` works unchanged (use `podman exec` instead of `docker exec`).
+- On Windows the containers are created under the **rootful** connection (`podman-machine-default-root`) by default — if Podman Desktop shows an empty container list, switch it to the rootful machine view.
+- Behind a corporate TLS-inspecting proxy the image builds pin npm and relax `strict-ssl` (see the Dockerfiles) — **dev-only**; bake the corporate root CA into the images for anything beyond local development.
+- File watching across the Windows→WSL bind mount needs polling — already configured (`nodemon` `legacyWatch`, CRA `CHOKIDAR_USEPOLLING`/`WATCHPACK_POLLING`, `BROWSER=none`).
 
 ### 4. Start the frontend (development — without Docker)
 ```bash
@@ -129,10 +137,12 @@ Leave it empty for local/development use — `window.location.origin` will pick 
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `ITSM_MODE` | `mock` | `mock` (in-memory fake data) or `real` (calls real ITSM API) |
-| `ITSM_REAL_API_URL` | — | Base URL of the ITSM REST API (required when `ITSM_MODE=real`) |
-| `ITSM_API_KEY` | — | API key for ITSM authentication |
-| `ITSM_WEB_URL` | — | Web UI base URL (used to construct ticket links) |
+| `ITSM_MODE` | `mock` | `mock` (in-memory fake data) or `real` (calls the Alemba/Operaio View API) |
+| `ITSM_REAL_API_URL` | — | Base URL of the ITSM system (required when `ITSM_MODE=real`) |
+| `ITSM_API_KEY` | — | Bearer token / API key for ITSM authentication |
+| `ITSM_VIEW_ID` | — | GUID of the "Hardware Assets" view: `GET {url}/api/ViewAPI/GetViewData/{id}` (required when `ITSM_MODE=real`) |
+| `ITSM_WEB_URL` | — | ITSM web UI base URL — used to build record deep-links (`/Analyst/Forms/Open/{guid}`) |
+| `ITSM_COLUMN_MAP` | — | Optional JSON mapping canonical fields → view column captions, e.g. `{"serial_number":["Serial Number"]}` — retune the adapter without a code change |
 | `ITSM_SYNC_INTERVAL` | `300000` | Auto-sync interval in ms (currently not auto-triggered; manual only) |
 
 ### Maintenance Alerts
@@ -320,15 +330,25 @@ All endpoints are listed and can be tested directly from the browser. Click **Au
 
 ## ITSM Integration
 
+> **Read-only guarantee:** the application only ever *reads* from ITSM (GET
+> requests against the View API). Nothing is written back to ITSM under any
+> circumstance — ITSM remains the single source of truth. There is also no
+> scheduled/bulk polling: ITSM is contacted only when a user explicitly checks
+> a single asset (or triggers the manual import).
+
 ### Mock mode (default)
-In `ITSM_MODE=mock`, the backend uses an in-memory dataset of 22 realistic hardware records. Use this for development and testing.
+In `ITSM_MODE=mock`, the backend uses an in-memory dataset of 22 realistic hardware records. Use this for development and testing. `npm run seed:itsm` (inside the backend container) links demo assets to the mock records — including deliberate mismatches — so the Reconcile screen is demonstrable end-to-end.
 
-### Real mode
-1. Set `ITSM_MODE=real`, `ITSM_REAL_API_URL`, and `ITSM_API_KEY`
-2. The developer must implement the real adapter (see Developer Guide → Implementing the Real ITSM adapter)
+### Real mode (Alemba / Operaio Service Manager)
+1. Set `ITSM_MODE=real`, `ITSM_REAL_API_URL`, `ITSM_API_KEY` and `ITSM_VIEW_ID` (the Hardware Assets view GUID)
+2. Optionally set `ITSM_WEB_URL` (record deep-links) and `ITSM_COLUMN_MAP` (column-caption overrides — the view's captions vary per tenant)
+3. The adapter calls `GET {url}/api/ViewAPI/GetViewData/{viewId}` with server-side filtering, so single-asset lookups never download the full catalogue
 
-### Manual sync
-Navigate to **Reports** → click **Sync All from ITSM**. The sync runs synchronously and reports counts of created/updated/snapshotted/skipped assets.
+### ITSM Reconcile (recommended workflow)
+Navigate to **ITSM Reconcile** in the sidebar. The list and the drift summary come from the local database (no ITSM traffic). Clicking **Check ITSM** on an asset performs exactly one ITSM read and lists the per-field differences; for each one the user can **Accept** (write the ITSM value into the app), **Ignore** (persisted; resurfaces if ITSM changes), or fix the value manually in ITSM and re-check. Assets missing from ITSM offer **Remove ITSM link**. Every accept/ignore/unlink is written to the audit log. Requires the `operator` or `admin` role.
+
+### Manual sync (bulk import)
+Navigate to **Reports** → click **Sync All from ITSM**. The sync runs synchronously and reports counts of created/updated/snapshotted/skipped assets. Prefer the per-asset Reconcile flow in day-to-day use — the bulk sync downloads the entire hardware view.
 
 ### Sync behavior
 | Scenario | Action |

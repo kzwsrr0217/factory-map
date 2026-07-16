@@ -27,8 +27,36 @@
   right: var(--spacing-md);
   display: flex;
   flex-direction: column;
-  gap: var(--spacing-xs);
+  /* Reserve the bottom-right corner for the minimap (200×160 + margins): cap the
+     rail height and wrap overflowing groups into a second column to the LEFT of
+     the primary one (wrap-reverse keeps the first group pinned to the edge). */
+  max-height: calc(100% - 160px - 3 * var(--spacing-md));
+  flex-wrap: wrap-reverse;
+  align-items: flex-end;
+  gap: var(--spacing-sm);
   z-index: 10;
+  pointer-events: none; /* the container may span wide when wrapped — only the groups catch clicks */
+}
+
+/* Toolbar group — a compact pill of related buttons (view / canvas / layers / export) */
+.controlGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  pointer-events: auto;
+}
+
+.controlGroup .controlButton {
+  width: 34px;
+  height: 34px;
+  border: none;
+  box-shadow: none;
+  font-size: 1.05rem;
 }
 
 .controlButton {
@@ -59,16 +87,16 @@
   border-color: var(--color-primary);
 }
 
-.layerControls {
-  display: flex;
-  flex-direction: row;
-  gap: var(--spacing-xs);
-  margin-top: var(--spacing-xs);
-  padding: var(--spacing-xs);
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-sm);
+/* Small screens: the minimap is usually toggled off — let the rail use the full
+   height, and keep comfortable touch targets. */
+@media (max-width: 768px) {
+  .controls {
+    max-height: calc(100% - 2 * var(--spacing-md));
+  }
+  .controlGroup .controlButton {
+    width: 42px;
+    height: 42px;
+  }
 }
 
 .editMode {
