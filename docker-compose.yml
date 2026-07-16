@@ -65,6 +65,9 @@ services:
       ITSM_MOCK_API_URL: ${ITSM_MOCK_API_URL}
       ITSM_REAL_API_URL: ${ITSM_REAL_API_URL}
       ITSM_API_KEY: ${ITSM_API_KEY}
+      ITSM_WEB_URL: ${ITSM_WEB_URL:-}
+      ITSM_VIEW_ID: ${ITSM_VIEW_ID:-}
+      ITSM_COLUMN_MAP: ${ITSM_COLUMN_MAP:-}
       ITSM_SYNC_INTERVAL: ${ITSM_SYNC_INTERVAL}
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
@@ -97,6 +100,12 @@ services:
       REACT_APP_API_URL: ${REACT_APP_API_URL}
       REACT_APP_PUBLIC_BASE_URL: ${REACT_APP_PUBLIC_BASE_URL:-}
       PORT: 5174
+      # Do not try to auto-open a browser: the WSL-based Podman VM makes CRA's
+      # `open` resolve to a non-existent powershell.exe and crash-loop.
+      BROWSER: "none"
+      # CRA/webpack-dev-server file watching over a bind mount needs polling.
+      CHOKIDAR_USEPOLLING: "true"
+      WATCHPACK_POLLING: "true"
     volumes:
       - ./frontend/src:/app/src
       - ./frontend/public:/app/public

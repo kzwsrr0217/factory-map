@@ -10,6 +10,7 @@
     "lint": "eslint . --ext .ts",
     "lint:fix": "eslint . --ext .ts --fix",
     "seed": "ts-node src/scripts/seed-mssql.ts",
+    "seed:itsm": "ts-node src/scripts/seed-itsm-links.ts",
     "seed:docker": "docker-compose exec backend npm run seed",
     "test": "jest --runInBand --forceExit --passWithNoTests",
     "test:watch": "jest --watch",

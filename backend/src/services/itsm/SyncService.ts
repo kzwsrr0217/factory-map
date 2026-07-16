@@ -23,7 +23,6 @@
  */
 import { AppDataSource } from '../../config/database';
 import { Asset } from '../../entities/Asset.entity';
-import { AssetSoftware } from '../../entities/AssetSoftware.entity';
 import itsmService from './ITSMService';
 import { ISyncAllResult, IITSMHardware } from '../../types/itsm.types';
 
@@ -90,7 +89,6 @@ export async function runSyncAll(): Promise<ISyncAllResult> {
 
   result.total = allHardware.length;
   const assetRepo = AppDataSource.getRepository(Asset);
-  const softwareRepo = AppDataSource.getRepository(AssetSoftware);
 
   for (const hw of allHardware) {
     try {
@@ -115,7 +113,11 @@ export async function runSyncAll(): Promise<ISyncAllResult> {
         applyItsmHardwareToAsset(existing, hw);
         await assetRepo.save(existing);
 
-        await softwareRepo.delete({ asset_id: existing.id });
+        // NOTE: previously this deleted all AssetSoftware rows for the asset and
+        // never re-created them, silently wiping the software list on every sync.
+        // The bulk hardware payload does not carry resolved software details, so
+        // we leave existing software untouched here. Software is (re)populated by
+        // the per-asset sync path (syncAsset), which resolves installed_software.
         result.updated++;
       } else {
         existing.itsm_snapshot = buildSnapshot(hw);

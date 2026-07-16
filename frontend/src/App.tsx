@@ -47,6 +47,7 @@ import Alerts from './pages/Alerts';
 import NetworkGraph from './pages/NetworkGraph';
 import NetworkInfrastructure from './pages/NetworkInfrastructure';
 import Maintenance from './pages/Maintenance';
+import ItsmReconcile from './pages/ItsmReconcile';
 
 // Lazy-load recharts-heavy page — deferred until the user first navigates to /reports
 const Reports = lazy(() => import('./pages/Reports'));
@@ -94,6 +95,7 @@ function App() {
                           <Route path="/network" element={<NetworkGraph />} />
                           <Route path="/infrastructure" element={<NetworkInfrastructure />} />
                           <Route path="/maintenance" element={<Maintenance />} />
+                          <Route path="/itsm" element={<ItsmReconcile />} />
                           <Route path="*" element={<Navigate to="/" replace />} />
                         </Routes>
                         </Suspense>

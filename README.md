@@ -8,10 +8,11 @@ Full-stack TypeScript application for tracking and visualizing IT assets in fact
 
 ### Core
 - **Hierarchical Asset Management** — Buildings → Floors → Work Areas → Sections → Workstations
-- **Interactive Floor Plans** — drag-and-drop asset positioning, pan/zoom, minimap, grid snap, map export/print
+- **Interactive Floor Plans** — drag-and-drop asset positioning; cursor-anchored wheel zoom, touch pan/pinch, fit-to-content, keyboard navigation; constant-size pins with label decluttering; minimap, grid snap, shareable deep-link URLs, map export/print
 - **Asset Connections (Wire Mode)** — model physical/logical links between devices on the floor map
 - **Network Topology Graph** — force-directed graph of all asset connections
-- **ITSM Integration** — sync hardware data from an external ITSM system (mock adapter included; 22 realistic records)
+- **ITSM Integration (read-only)** — Alemba/Operaio View API adapter + mock adapter (22 realistic records); the app **never writes to ITSM**
+- **ITSM Reconcile** — per-asset, on-demand comparison against the ITSM source of truth; per-field **Accept** (copy ITSM value into the app) / **Ignore** (persisted) / **Remove link**, drift summary, full audit trail
 - **Global Search** — instant client-side prefix-indexed search across all assets (Ctrl+K)
 - **3-Step CSV Import Wizard** — validate, preview, and bulk-import assets
 - **Maintenance Calendar** — monthly calendar view of scheduled maintenance with CSV export
@@ -36,7 +37,7 @@ Full-stack TypeScript application for tracking and visualizing IT assets in fact
 ## Quick Start
 
 ### Prerequisites
-- Docker Desktop
+- Docker Desktop **or Podman** (5.x with a running machine)
 - Node.js 20+
 
 ### Start
@@ -45,8 +46,17 @@ Full-stack TypeScript application for tracking and visualizing IT assets in fact
 git clone <repository-url>
 cd factory-map
 cp .env.example .env           # Fill in at minimum: MSSQL_PASSWORD, JWT_SECRET
-docker-compose up -d           # Starts SQL Server 2022 + backend API on port 4000
-cd frontend && npm install && npm start   # React dev server on port 5174
+docker-compose up -d           # Docker — SQL Server 2022 + backend (4000) + frontend (5174)
+# or with Podman:
+podman compose up -d --build
+```
+
+To load demo data (after the stack is up):
+
+```bash
+docker exec factory-map-backend npm run seed        # buildings, floors, assets, users
+docker exec factory-map-backend npm run seed:itsm   # ITSM-linked assets for the Reconcile demo
+# (use `podman exec` with Podman)
 ```
 
 Open **http://localhost:5174** — you will be prompted to log in.
@@ -125,7 +135,10 @@ factory-map/
 │   ├── services/
 │   │   ├── alert/             # AlertService — checkAndSend(), checkScheduledAlerts(), sendEmail(), sendTeams()
 │   │   ├── auth/              # LdapAuthService
-│   │   └── itsm/              # ITSMService + MockITSMAdapter + RealITSMAdapter + SyncService
+│   │   └── itsm/              # ITSMService + Mock/Real adapters + SyncService
+│   │       ├── RealITSMAdapter.ts   # Alemba/Operaio View API client (read-only)
+│   │       ├── ReconcileService.ts  # Per-asset diff vs ITSM + accept/ignore/unlink
+│   │       └── statusMapping.ts     # ITSM ⇄ local status map + MAC normalisation
 │   ├── types/                 # api.types, asset.types, hierarchy.types, itsm.types
 │   ├── utils/                 # passwordPolicy
 │   └── server.ts              # Express bootstrap, Socket.io, daily cron (07:00) + hourly cron for scheduled alerts
@@ -149,6 +162,7 @@ factory-map/
 │   │   ├── UnplacedAssets.tsx # Assets not yet positioned on any floor
 │   │   ├── NetworkGraph.tsx   # Force-directed connection graph
 │   │   ├── Maintenance.tsx    # Monthly maintenance calendar
+│   │   ├── ItsmReconcile.tsx  # Read-only ITSM reconcile — per-field accept/ignore
 │   │   ├── Alerts.tsx         # Alert config (email, Teams) + alert history
 │   │   ├── Reports.tsx        # Statistics + ITSM sync
 │   │   ├── AuditLog.tsx       # Paginated audit trail
@@ -181,6 +195,10 @@ Copy `.env.example` to `.env`. Key variables:
 | `JWT_SECRET` | Token signing secret — `openssl rand -hex 32` |
 | `NODE_ENV` | `development` or `production` |
 | `ITSM_MODE` | `mock` (default) or `real` |
+| `ITSM_REAL_API_URL` / `ITSM_API_KEY` | Base URL + bearer token of the Alemba/Operaio ITSM (real mode) |
+| `ITSM_VIEW_ID` | GUID of the ITSM "Hardware Assets" view (`GET /api/ViewAPI/GetViewData/{id}`) |
+| `ITSM_WEB_URL` | ITSM web UI base URL — used to build record deep-links |
+| `ITSM_COLUMN_MAP` | Optional JSON override mapping canonical fields → view column captions |
 | `SMTP_HOST` | SMTP server for maintenance alert emails |
 | `SMTP_PORT` | SMTP port (default: `587`) |
 | `SMTP_USER` / `SMTP_PASS` | SMTP credentials |
