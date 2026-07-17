@@ -44,3 +44,6 @@ e2e/.auth/
 
 # MongoDB data (ha lokálisan futtatnád)
 data/
+
+# User-uploaded files (floor plans, imports, etc.)
+uploads/
