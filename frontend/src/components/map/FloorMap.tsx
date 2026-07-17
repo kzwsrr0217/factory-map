@@ -82,6 +82,8 @@ interface AssetMarkerProps {
   isSelectedForConnection: boolean;
   isCrossFloor: boolean;
   showLabels: boolean;
+  scale: number; // 1/zoom — keeps the pin a constant on-screen size at any zoom
+  dimmed: boolean; // faded because it doesn't match the active filter/search
   editable: boolean;
   onDragStart: (asset: Asset, e: React.MouseEvent) => void;
   onClick:     (asset: Asset, e: React.MouseEvent) => void;
@@ -91,7 +93,7 @@ interface AssetMarkerProps {
 
 const AssetMarker = React.memo(function AssetMarker({
   asset, isDragging, isHighlighted, isSelectedForConnection, isCrossFloor,
-  showLabels, editable, onDragStart, onClick, onHover, onHoverEnd,
+  showLabels, scale, dimmed, editable, onDragStart, onClick, onHover, onHoverEnd,
 }: AssetMarkerProps) {
   const x = asset.location.coordinates.x;
   const y = asset.location.coordinates.y;
@@ -141,43 +143,50 @@ const AssetMarker = React.memo(function AssetMarker({
     </div>
   );
 
+  // All child geometry is drawn relative to (0,0); the group translates to the
+  // asset position and applies scale = 1/zoom, so pins keep a constant on-screen
+  // size at any zoom level (no shrinking to dots / ballooning when zoomed).
   return (
-    <g opacity={decomm ? 0.45 : 1}>
+    <g opacity={dimmed ? 0.22 : (decomm ? 0.45 : 1)} transform={`translate(${x} ${y}) scale(${scale})`}>
       {isHighlighted && (
-        <circle cx={x} cy={y} r="24" fill="none" stroke="#2563eb" strokeWidth="3" opacity="0.9" />
+        <circle cx={0} cy={0} r="24" fill="none" stroke="#2563eb" strokeWidth="3" opacity="0.9" />
       )}
       {isIsolated && !isHighlighted && (
-        <circle cx={x} cy={y} r="20" fill="none" stroke="#9ca3af" strokeWidth="2" strokeDasharray="4,3" opacity="0.7" />
+        <circle cx={0} cy={0} r="20" fill="none" stroke="#9ca3af" strokeWidth="2" strokeDasharray="4,3" opacity="0.7" />
       )}
       {isSelectedForConnection && (
-        <circle cx={x} cy={y} r="20" fill="none" stroke="#ff6b35" strokeWidth="3" strokeDasharray="5,5" opacity="0.8" />
+        <circle cx={0} cy={0} r="20" fill="none" stroke="#ff6b35" strokeWidth="3" strokeDasharray="5,5" opacity="0.8" />
       )}
       <circle
-        cx={x}
-        cy={y}
+        cx={0}
+        cy={0}
         r="15"
         fill={getAssetColor(asset)}
         stroke="#fff"
         strokeWidth="3"
         className={`${styles.asset} ${isDragging ? styles.dragging : ''}`}
+        role="button"
+        tabIndex={dimmed ? -1 : 0}
+        aria-label={`${asset.basic_info.display_name} — ${getAssetStatus(asset)}${asset.itsm.hardware_asset_id ? `, ${asset.itsm.hardware_asset_id}` : ''}`}
         onMouseDown={(e) => onDragStart(asset, e)}
         onClick={(e) => onClick(asset, e)}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(asset, e as unknown as React.MouseEvent); } }}
         onMouseEnter={(e) => onHover(e as any, tooltipContent)}
         onMouseLeave={onHoverEnd}
         style={{ cursor: editable ? 'move' : 'pointer' }}
       />
-      <text x={x} y={y + 5} textAnchor="middle" className={styles.assetIcon} pointerEvents="none" style={{ fontSize: '14px' }}>
+      <text x={0} y={5} textAnchor="middle" className={styles.assetIcon} pointerEvents="none" style={{ fontSize: '14px' }}>
         {getAssetIcon(asset.basic_info.type)}
       </text>
       {decomm && (
         <g pointerEvents="none">
-          <line x1={x - 10} y1={y - 10} x2={x + 10} y2={y + 10} stroke="#6b7280" strokeWidth="2.5" />
-          <line x1={x + 10} y1={y - 10} x2={x - 10} y2={y + 10} stroke="#6b7280" strokeWidth="2.5" />
+          <line x1={-10} y1={-10} x2={10} y2={10} stroke="#6b7280" strokeWidth="2.5" />
+          <line x1={10} y1={-10} x2={-10} y2={10} stroke="#6b7280" strokeWidth="2.5" />
         </g>
       )}
       {showLabels && (
         <>
-          <text x={x} y={y + 33} textAnchor="middle" className={styles.assetLabel} pointerEvents="none"
+          <text x={0} y={33} textAnchor="middle" className={styles.assetLabel} pointerEvents="none"
             stroke="white" strokeWidth="3" paintOrder="stroke"
             style={{ fontSize: '11px', fontWeight: 'bold', fill: '#1f2937' }}>
             {asset.basic_info.display_name.length > 16
@@ -185,7 +194,7 @@ const AssetMarker = React.memo(function AssetMarker({
               : asset.basic_info.display_name}
           </text>
           {objectId && (
-            <text x={x} y={y + 45} textAnchor="middle" pointerEvents="none"
+            <text x={0} y={45} textAnchor="middle" pointerEvents="none"
               stroke="white" strokeWidth="2" paintOrder="stroke"
               style={{ fontSize: '9px', fill: '#6b7280', fontFamily: 'monospace' }}>
               {objectId}
@@ -195,25 +204,25 @@ const AssetMarker = React.memo(function AssetMarker({
       )}
       {eolOs && !decomm && (
         <g pointerEvents="none">
-          <circle cx={x - 12} cy={y - 12} r="7" fill="#f59e0b" stroke="#fff" strokeWidth="2" />
-          <text x={x - 12} y={y - 8} textAnchor="middle" fill="#fff" fontSize="9" fontWeight="bold">!</text>
+          <circle cx={-12} cy={-12} r="7" fill="#f59e0b" stroke="#fff" strokeWidth="2" />
+          <text x={-12} y={-8} textAnchor="middle" fill="#fff" fontSize="9" fontWeight="bold">!</text>
         </g>
       )}
       {itsmConflict && (
         <g pointerEvents="none">
-          <circle cx={x + 12} cy={y - 12} r="5" fill="#f97316" stroke="#fff" strokeWidth="1.5" />
+          <circle cx={12} cy={-12} r="5" fill="#f97316" stroke="#fff" strokeWidth="1.5" />
         </g>
       )}
       {isCrossFloor && (
         <g pointerEvents="none">
-          <circle cx={x - 13} cy={y + 13} r="7" fill="#06b6d4" stroke="#fff" strokeWidth="2" />
-          <text x={x - 13} y={y + 17} textAnchor="middle" fill="#fff" fontSize="8" fontWeight="bold">↕</text>
+          <circle cx={-13} cy={13} r="7" fill="#06b6d4" stroke="#fff" strokeWidth="2" />
+          <text x={-13} y={17} textAnchor="middle" fill="#fff" fontSize="8" fontWeight="bold">↕</text>
         </g>
       )}
       {!decomm && asset.maintenance?.next_date && new Date(asset.maintenance.next_date) < new Date() && (
         <g pointerEvents="none">
-          <circle cx={x + 11} cy={y - 11} r="7" fill="#ef4444" stroke="#fff" strokeWidth="2" />
-          <text x={x + 11} y={y - 7} textAnchor="middle" fill="#fff" fontSize="9" fontWeight="bold">!</text>
+          <circle cx={11} cy={-11} r="7" fill="#ef4444" stroke="#fff" strokeWidth="2" />
+          <text x={11} y={-7} textAnchor="middle" fill="#fff" fontSize="9" fontWeight="bold">!</text>
         </g>
       )}
     </g>
@@ -245,6 +254,7 @@ interface FloorMapProps {
   selectedAssetsForConnection?: string[];
   onAssetSelectForConnection?: (assetId: string) => void;
   highlightedAssetId?: string | null;
+  dimmedAssetIds?: Set<string>; // assets that don't match the active filter/search — rendered faded
   focusAsset?: { id: string; tick: number } | null;
   onWorkareaCreate?: (x: number, y: number, width: number, height: number) => void;
   onWorkareaDelete?: (workareaId: string) => void;
@@ -265,6 +275,11 @@ interface FloorMapProps {
 }
 
 const GRID_SIZE = 50; // Grid snap size
+const WORLD_W = 1000; // Base world width (viewBox coordinate space)
+const WORLD_H = 800;  // Base world height
+const ZOOM_MIN = 0.2; // Widened range (was 0.5–3) so both floor overview and single-station read work
+const ZOOM_MAX = 8;
+const LABEL_MIN_ZOOM = 0.55; // Below this, hide asset labels to declutter the overview (pins stay)
 
 const FloorMap: React.FC<FloorMapProps> = ({
   workareas,
@@ -285,6 +300,7 @@ const FloorMap: React.FC<FloorMapProps> = ({
   selectedAssetsForConnection = [],
   onAssetSelectForConnection,
   highlightedAssetId = null,
+  dimmedAssetIds,
   focusAsset = null,
   onWorkareaCreate,
   onWorkareaDelete,
@@ -612,19 +628,173 @@ const FloorMap: React.FC<FloorMapProps> = ({
     setViewBox(prev => ({ ...prev, x: svgPt.x - w / 2, y: svgPt.y - h / 2 }));
   };
 
-  // Handle zoom
-  const handleZoomIn = () => {
-    setZoom((prev) => Math.min(prev * 1.2, 3));
-  };
+  // Convert client (screen) coordinates to world/viewBox coordinates (un-snapped).
+  const clientToWorld = useCallback((clientX: number, clientY: number): { x: number; y: number } | null => {
+    const svg = svgRef.current;
+    if (!svg) return null;
+    const pt = svg.createSVGPoint();
+    pt.x = clientX;
+    pt.y = clientY;
+    const ctm = svg.getScreenCTM();
+    if (!ctm) return null;
+    const sp = pt.matrixTransform(ctm.inverse());
+    return { x: sp.x, y: sp.y };
+  }, []);
 
-  const handleZoomOut = () => {
-    setZoom((prev) => Math.max(prev / 1.2, 0.5));
-  };
+  /**
+   * Zoom toward a fixed anchor point (in client coords), keeping the world point
+   * under that anchor stationary — the behaviour every map/design tool has on
+   * scroll. Also used by the +/− buttons (anchored to the canvas centre).
+   */
+  const zoomAtClient = useCallback((factor: number, clientX: number, clientY: number) => {
+    const world = clientToWorld(clientX, clientY);
+    if (!world) return;
+    setZoom((prevZoom) => {
+      const newZoom = Math.min(Math.max(prevZoom * factor, ZOOM_MIN), ZOOM_MAX);
+      if (newZoom === prevZoom) return prevZoom;
+      setViewBox((vb) => {
+        const curW = vb.width / prevZoom, curH = vb.height / prevZoom;
+        const newW = vb.width / newZoom, newH = vb.height / newZoom;
+        const fx = (world.x - vb.x) / curW;
+        const fy = (world.y - vb.y) / curH;
+        return { ...vb, x: world.x - fx * newW, y: world.y - fy * newH };
+      });
+      return newZoom;
+    });
+  }, [clientToWorld]);
 
-  const handleResetView = () => {
+  const zoomAtCenter = useCallback((factor: number) => {
+    const rect = svgRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    zoomAtClient(factor, rect.left + rect.width / 2, rect.top + rect.height / 2);
+  }, [zoomAtClient]);
+
+  const handleZoomIn = () => zoomAtCenter(1.2);
+  const handleZoomOut = () => zoomAtCenter(1 / 1.2);
+
+  const handleResetView = useCallback(() => {
     setZoom(1);
-    setViewBox({ x: 0, y: 0, width: 1000, height: 800 });
-  };
+    setViewBox({ x: 0, y: 0, width: WORLD_W, height: WORLD_H });
+  }, []);
+
+  /**
+   * Fit the view to the placed content (assets + work areas) with padding, so the
+   * user always has a one-click "frame everything" — the most-used map control.
+   * Keeps the base viewBox width/height and only adjusts zoom + pan, so all the
+   * dependent math (minimap, etc.) stays consistent.
+   */
+  const handleFit = useCallback(() => {
+    const xs: number[] = [];
+    const ys: number[] = [];
+    assets.forEach((a) => {
+      const c = a.location?.coordinates;
+      if (c && (c.x || c.y)) { xs.push(c.x); ys.push(c.y); }
+    });
+    workareas.forEach((w) => {
+      const wx = w.coordinates?.x ?? 0, wy = w.coordinates?.y ?? 0;
+      xs.push(wx, wx + (w.dimensions?.width ?? 0));
+      ys.push(wy, wy + (w.dimensions?.height ?? 0));
+    });
+    if (xs.length === 0) { handleResetView(); return; }
+
+    const pad = 60;
+    const minX = Math.min(...xs) - pad, maxX = Math.max(...xs) + pad;
+    const minY = Math.min(...ys) - pad, maxY = Math.max(...ys) + pad;
+    const bw = Math.max(maxX - minX, 1), bh = Math.max(maxY - minY, 1);
+
+    const newZoom = Math.min(Math.max(Math.min(WORLD_W / bw, WORLD_H / bh), ZOOM_MIN), ZOOM_MAX);
+    const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+    setZoom(newZoom);
+    setViewBox({ x: cx - (WORLD_W / newZoom) / 2, y: cy - (WORLD_H / newZoom) / 2, width: WORLD_W, height: WORLD_H });
+  }, [assets, workareas, handleResetView]);
+
+  // Refs mirroring live view state so the (mount-once) native listeners below
+  // never read stale values.
+  const zoomRef = useRef(zoom);
+  const viewBoxRef = useRef(viewBox);
+  const fitRef = useRef(handleFit);
+  const hoverRef = useRef(false);
+  useEffect(() => { zoomRef.current = zoom; }, [zoom]);
+  useEffect(() => { viewBoxRef.current = viewBox; }, [viewBox]);
+  useEffect(() => { fitRef.current = handleFit; }, [handleFit]);
+
+  // Native wheel + touch listeners (non-passive so we can preventDefault),
+  // plus keyboard navigation. Mounted once; all live state read via refs/stable
+  // callbacks so we never re-bind.
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+      zoomAtClient(factor, e.clientX, e.clientY);
+    };
+
+    // Touch: 1 finger pans, 2 fingers pinch-zoom toward the midpoint.
+    let panPt: { x: number; y: number } | null = null;
+    let pinchDist: number | null = null;
+    const dist = (a: Touch, b: Touch) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+    const mid = (a: Touch, b: Touch) => ({ x: (a.clientX + b.clientX) / 2, y: (a.clientY + b.clientY) / 2 });
+
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length === 1) { panPt = { x: e.touches[0].clientX, y: e.touches[0].clientY }; pinchDist = null; }
+      else if (e.touches.length === 2) { pinchDist = dist(e.touches[0], e.touches[1]); panPt = null; }
+    };
+    const onTouchMove = (e: TouchEvent) => {
+      if (e.touches.length === 2 && pinchDist != null) {
+        e.preventDefault();
+        const d = dist(e.touches[0], e.touches[1]);
+        const m = mid(e.touches[0], e.touches[1]);
+        if (pinchDist > 0) zoomAtClient(d / pinchDist, m.x, m.y);
+        pinchDist = d;
+      } else if (e.touches.length === 1 && panPt) {
+        e.preventDefault();
+        const rect = svg.getBoundingClientRect();
+        const worldPerPx = (viewBoxRef.current.width / zoomRef.current) / rect.width;
+        const dx = (e.touches[0].clientX - panPt.x) * worldPerPx;
+        const dy = (e.touches[0].clientY - panPt.y) * worldPerPx;
+        setViewBox((vb) => ({ ...vb, x: vb.x - dx, y: vb.y - dy }));
+        panPt = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+      }
+    };
+    const onTouchEnd = (e: TouchEvent) => {
+      if (e.touches.length === 0) { panPt = null; pinchDist = null; }
+      else if (e.touches.length === 1) { panPt = { x: e.touches[0].clientX, y: e.touches[0].clientY }; pinchDist = null; }
+    };
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!hoverRef.current) return;
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      const step = 40 / zoomRef.current;
+      switch (e.key) {
+        case 'ArrowUp':    setViewBox((vb) => ({ ...vb, y: vb.y - step })); break;
+        case 'ArrowDown':  setViewBox((vb) => ({ ...vb, y: vb.y + step })); break;
+        case 'ArrowLeft':  setViewBox((vb) => ({ ...vb, x: vb.x - step })); break;
+        case 'ArrowRight': setViewBox((vb) => ({ ...vb, x: vb.x + step })); break;
+        case '+': case '=': zoomAtCenter(1.2); break;
+        case '-': case '_': zoomAtCenter(1 / 1.2); break;
+        case '0': handleResetView(); break;
+        case 'f': case 'F': fitRef.current(); break;
+        default: return;
+      }
+      e.preventDefault();
+    };
+
+    svg.addEventListener('wheel', onWheel, { passive: false });
+    svg.addEventListener('touchstart', onTouchStart, { passive: false });
+    svg.addEventListener('touchmove', onTouchMove, { passive: false });
+    svg.addEventListener('touchend', onTouchEnd, { passive: false });
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      svg.removeEventListener('wheel', onWheel);
+      svg.removeEventListener('touchstart', onTouchStart);
+      svg.removeEventListener('touchmove', onTouchMove);
+      svg.removeEventListener('touchend', onTouchEnd);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [zoomAtClient, zoomAtCenter, handleResetView]);
 
   // Opacity control
   const handleOpacityIncrease = () => {
@@ -876,75 +1046,80 @@ const FloorMap: React.FC<FloorMapProps> = ({
   // Get asset color based on status
   return (
     <>
-    <div ref={containerRef} className={styles.mapContainer}>
-      {/* Controls */}
+    <div
+      ref={containerRef}
+      className={styles.mapContainer}
+      onMouseEnter={() => { hoverRef.current = true; }}
+      onMouseLeave={() => { hoverRef.current = false; }}
+    >
+      {/* Controls — grouped pills; the rail height is capped so it never runs
+          under the minimap (extra groups wrap into a second column instead) */}
       <div className={styles.controls}>
-        <button onClick={handleZoomIn} className={styles.controlButton} title="Zoom In">
-          ➕
-        </button>
-        <button onClick={handleZoomOut} className={styles.controlButton} title="Zoom Out">
-          ➖
-        </button>
-        <button onClick={handleResetView} className={styles.controlButton} title="Reset View">
-          🔄
-        </button>
-        <button
-          onClick={() => setSnapToGrid(!snapToGrid)}
-          className={`${styles.controlButton} ${snapToGrid ? styles.active : ''}`}
-          title="Snap to Grid"
-        >
-          🧲
-        </button>
-        <button
-          onClick={() => setShowMinimap(!showMinimap)}
-          className={`${styles.controlButton} ${showMinimap ? styles.active : ''}`}
-          title="Toggle Minimap"
-        >
-          🗺️
-        </button>
-        {backgroundImage && (
-          <>
-            <button
-              onClick={handleOpacityDecrease}
-              className={styles.controlButton}
-              title="Decrease Background Opacity"
-            >
-              🌑
-            </button>
-            <button
-              onClick={handleOpacityIncrease}
-              className={styles.controlButton}
-              title="Increase Background Opacity"
-            >
-              🌕
-            </button>
-            <button
-              onClick={() => setBgFitMode(m => m === 'meet' ? 'slice' : 'meet')}
-              className={`${styles.controlButton} ${bgFitMode === 'slice' ? styles.active : ''}`}
-              title={bgFitMode === 'meet' ? 'Switch to Fill (slice)' : 'Switch to Fit (meet)'}
-            >
-              {bgFitMode === 'meet' ? '⬛' : '🔳'}
-            </button>
-          </>
-        )}
-        <button
-          onClick={() => setShowLabels(s => !s)}
-          className={`${styles.controlButton} ${showLabels ? styles.active : ''}`}
-          title="Toggle Asset Labels"
-        >
-          🏷️
-        </button>
-        <button onClick={handleExportImage} className={styles.controlButton} title="Export as PNG">
-          💾
-        </button>
-        <button onClick={handleExportPdf} className={styles.controlButton} title="Export as PDF">
-          📄
-        </button>
-        <button onClick={handlePrint} className={styles.controlButton} title="Print">
-          🖨️
-        </button>
-        {/* Layer Toggles */}
-        <div className={styles.layerControls}>
+        <div className={styles.controlGroup} role="group" aria-label="View">
+          <button onClick={handleZoomIn} className={styles.controlButton} title="Zoom In (scroll up / +)">
+            ➕
+          </button>
+          <button onClick={handleZoomOut} className={styles.controlButton} title="Zoom Out (scroll down / −)">
+            ➖
+          </button>
+          <button onClick={handleFit} className={styles.controlButton} title="Fit to content (F)">
+            🎯
+          </button>
+          <button onClick={handleResetView} className={styles.controlButton} title="Reset View (0)">
+            🔄
+          </button>
+        </div>
+
+        <div className={styles.controlGroup} role="group" aria-label="Canvas options">
+          <button
+            onClick={() => setSnapToGrid(!snapToGrid)}
+            className={`${styles.controlButton} ${snapToGrid ? styles.active : ''}`}
+            title="Snap to Grid"
+          >
+            🧲
+          </button>
+          <button
+            onClick={() => setShowMinimap(!showMinimap)}
+            className={`${styles.controlButton} ${showMinimap ? styles.active : ''}`}
+            title="Toggle Minimap"
+          >
+            🗺️
+          </button>
+          <button
+            onClick={() => setShowLabels(s => !s)}
+            className={`${styles.controlButton} ${showLabels ? styles.active : ''}`}
+            title="Toggle Asset Labels"
+          >
+            🏷️
+          </button>
+          {backgroundImage && (
+            <>
+              <button
+                onClick={handleOpacityDecrease}
+                className={styles.controlButton}
+                title="Decrease Background Opacity"
+              >
+                🌑
+              </button>
+              <button
+                onClick={handleOpacityIncrease}
+                className={styles.controlButton}
+                title="Increase Background Opacity"
+              >
+                🌕
+              </button>
+              <button
+                onClick={() => setBgFitMode(m => m === 'meet' ? 'slice' : 'meet')}
+                className={`${styles.controlButton} ${bgFitMode === 'slice' ? styles.active : ''}`}
+                title={bgFitMode === 'meet' ? 'Switch to Fill (slice)' : 'Switch to Fit (meet)'}
+              >
+                {bgFitMode === 'meet' ? '⬛' : '🔳'}
+              </button>
+            </>
+          )}
+        </div>
+
+        <div className={styles.controlGroup} role="group" aria-label="Layers">
           <button
             onClick={() => onLayerToggle?.('workareas')}
             className={`${styles.controlButton} ${layers.workareas ? styles.active : ''}`}
@@ -979,6 +1154,18 @@ const FloorMap: React.FC<FloorMapProps> = ({
             title="Toggle Wall Ports"
           >
             🔌
+          </button>
+        </div>
+
+        <div className={styles.controlGroup} role="group" aria-label="Export">
+          <button onClick={handleExportImage} className={styles.controlButton} title="Export as PNG">
+            💾
+          </button>
+          <button onClick={handleExportPdf} className={styles.controlButton} title="Export as PDF">
+            📄
+          </button>
+          <button onClick={handlePrint} className={styles.controlButton} title="Print">
+            🖨️
           </button>
         </div>
         {editable && (
@@ -1391,10 +1578,16 @@ const FloorMap: React.FC<FloorMapProps> = ({
           if (highlightedAssetId === asset._id) return true;
           if (selectedAssetsForConnection.includes(asset._id)) return true;
           const { x, y } = asset.location.coordinates;
-          const M = 100;
-          return x >= viewBox.x - M && x <= viewBox.x + viewBox.width + M &&
-                 y >= viewBox.y - M && y <= viewBox.y + viewBox.height + M;
-        }).map((asset) => (
+          // Cull against the EFFECTIVE view window (viewBox width/height are the
+          // base 1000×800; the on-screen window is that divided by zoom). Using
+          // the raw width previously culled visible edge assets when zoomed out.
+          const effW = viewBox.width / zoom, effH = viewBox.height / zoom;
+          const M = 100 / zoom;
+          return x >= viewBox.x - M && x <= viewBox.x + effW + M &&
+                 y >= viewBox.y - M && y <= viewBox.y + effH + M;
+        }).map((asset) => {
+          const dimmed = dimmedAssetIds?.has(asset._id) ?? false;
+          return (
           <AssetMarker
             key={asset._id}
             asset={asset}
@@ -1402,14 +1595,17 @@ const FloorMap: React.FC<FloorMapProps> = ({
             isHighlighted={highlightedAssetId === asset._id}
             isSelectedForConnection={selectedAssetsForConnection.includes(asset._id)}
             isCrossFloor={crossFloorMap.has(asset._id)}
-            showLabels={showLabels}
+            showLabels={showLabels && !dimmed && (zoom >= LABEL_MIN_ZOOM || highlightedAssetId === asset._id)}
+            scale={1 / zoom}
+            dimmed={dimmed}
             editable={editable}
             onDragStart={startDraggingAsset}
             onClick={handleAssetClickInternal}
             onHover={showTooltip}
             onHoverEnd={hideTooltip}
           />
-        ))}
+          );
+        })}
 
 
       {deployMode && deployPosition && (

@@ -15,6 +15,26 @@ import dotenv from 'dotenv';
 // Load environment variables from .env file
 dotenv.config();
 
+/**
+ * Parse the optional ITSM_COLUMN_MAP override (JSON) that maps canonical field
+ * names to the Alemba view's column captions, e.g.
+ *   {"serial_number":["Serial Number"],"status":["Status"]}
+ * Lets a deployment retune the RealITSMAdapter mapping without a code change.
+ */
+function parseColumnMap(raw: string | undefined): Record<string, string[]> {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as Record<string, string[]>;
+    }
+    console.warn('⚠️  ITSM_COLUMN_MAP is not a JSON object — ignoring.');
+  } catch {
+    console.warn('⚠️  ITSM_COLUMN_MAP is not valid JSON — ignoring.');
+  }
+  return {};
+}
+
 interface Config {
   env: string;
   port: number;
@@ -38,6 +58,8 @@ interface Config {
     realApiUrl: string;
     apiKey: string;
     webUrl: string;
+    viewId: string;
+    columnMap: Record<string, string[]>;
     syncInterval: number;
   };
   ldap: {
@@ -86,6 +108,8 @@ const config: Config = {
     realApiUrl: process.env.ITSM_REAL_API_URL || '',
     apiKey: process.env.ITSM_API_KEY || '',
     webUrl: process.env.ITSM_WEB_URL || '',
+    viewId: process.env.ITSM_VIEW_ID || '',
+    columnMap: parseColumnMap(process.env.ITSM_COLUMN_MAP),
     syncInterval: parseInt(process.env.ITSM_SYNC_INTERVAL || '300000', 10),
   },
   ldap: {

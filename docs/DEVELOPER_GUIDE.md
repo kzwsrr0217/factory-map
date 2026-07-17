@@ -25,7 +25,7 @@ Factory Map is a full-stack IT asset management application designed for industr
 - Track **asset details** (hardware specs, network info, OS, remote access tools, backup status)
 - Manage **work items** per asset (a per-asset todo/checklist for IT tasks)
 - Record **asset connections** (physical or logical links between devices, including patch panel routing)
-- Integrate with an **ITSM system** (IFS/other) for bidirectional hardware data sync
+- Integrate with an **ITSM system** (Alemba/Operaio) — strictly **read-only**: ITSM is the single source of truth and is never written to; a per-asset reconcile flow surfaces differences for the user to accept locally or fix in ITSM
 - Keep a full **audit log** of all create/update/delete operations
 - Search assets **globally** with instant prefix-aware indexing
 
@@ -177,8 +177,10 @@ factory-map/
 │       │       ├── IITSMAdapter.ts        # Interface (contract) all adapters must satisfy
 │       │       ├── ITSMService.ts         # Singleton; picks Mock or Real adapter from config
 │       │       ├── MockITSMAdapter.ts     # In-memory mock with 22 realistic Hungarian assets
-│       │       ├── RealITSMAdapter.ts     # Stub — fill in when real ITSM API is ready
-│       │       └── SyncService.ts         # runSyncAll() — ITSM → DB reconciliation
+│       │       ├── RealITSMAdapter.ts     # Alemba/Operaio View API client (read-only, COLUMN_MAP-driven)
+│       │       ├── ReconcileService.ts    # Per-asset diff vs ITSM + acceptFields/ignore/unlink/summary
+│       │       ├── statusMapping.ts       # ITSM ⇄ local status map + normalizeMac()
+│       │       └── SyncService.ts         # runSyncAll() — ITSM → DB bulk import
 │       ├── types/
 │       │   ├── api.types.ts
 │       │   ├── asset.types.ts             # IAsset and all sub-interfaces
@@ -271,6 +273,7 @@ Asset (N) — has FK columns pointing at any level of the hierarchy
 | Org | `org_itsm_id`, `org_display_name` | Department/team from ITSM |
 | Catalog | `catalog_itsm_id`, `catalog_display_name` | Hardware catalog item from ITSM |
 | ITSM | `itsm_guid`, `hardware_asset_id`, `asset_class`, `source_of_truth`, `is_managed`, `last_synced`, `sync_status`, `itsm_snapshot` | `source_of_truth` = "local" or "itsm" |
+| Reconcile | `reconcile_ignored` (JSON), `reconcile_last_at`, `reconcile_last_status`, `reconcile_diff_count` | Stored result of the last per-asset ITSM check + persisted per-field ignores |
 | Location | `loc_x`, `loc_y`, `loc_rotation`, `loc_icon_type`, `loc_description`, `loc_history` (JSON) | Canvas coordinates on floor plan |
 | Custom | `environment`, `notes`, `tags` (JSON), `object_id`, `serial_object`, `remote_access_tool`, `remote_access_version`, `backup_tool`, `backup_status`, `winupdate_date`, `fortiedr_active` | |
 | Work items | `work_items` (simple-json) | `[{id, description, done, status, priority, due_date, assigned_to, alert_sent, created_at}]` — `id` auto-generated (UUID) if omitted |
@@ -704,19 +707,54 @@ Set `LDAP_ENABLED=true` and configure `LDAP_*` env vars. On first LDAP login, th
 
 The ITSM layer uses an **adapter pattern** — `ITSMService` is a singleton that delegates to either `MockITSMAdapter` or `RealITSMAdapter` based on `ITSM_MODE`.
 
+> **Hard rule: the integration is READ-ONLY.** No adapter method may issue
+> anything other than a GET towards ITSM. ITSM is the single source of truth;
+> conflicts are resolved either locally (accept the ITSM value) or by the user
+> editing the record in ITSM itself.
+
 ### Mock mode (default)
-`MockITSMAdapter` contains 22 realistic Hungarian factory hardware records in-memory. Useful for development and testing without an ITSM system.
+`MockITSMAdapter` contains 22 realistic Hungarian factory hardware records in-memory. Useful for development and testing without an ITSM system. Run `npm run seed:itsm` (backend container) after the base seed — it links assets to the mock records with deliberate serial/status/MAC/name mismatches plus one missing-in-ITSM orphan, so the Reconcile flow is demonstrable.
 
-### Real mode
-`RealITSMAdapter` is a stub with placeholder methods. To implement:
-1. Set `ITSM_MODE=real`, `ITSM_REAL_API_URL`, and `ITSM_API_KEY`
-2. Implement each method in `RealITSMAdapter.ts` calling `this._request()`
+### Real mode — Alemba / Operaio View API
+`RealITSMAdapter` calls the internal View API the ITSM web UI itself uses:
+`GET {ITSM_REAL_API_URL}/api/ViewAPI/GetViewData/{ITSM_VIEW_ID}` with a server-side
+filter, so single-asset lookups return one row instead of the ~18k-row catalogue.
+Because the view's column captions vary per tenant, mapping is driven by the
+`COLUMN_MAP` table in the adapter; individual entries can be overridden at deploy
+time via the `ITSM_COLUMN_MAP` env var (JSON, canonical field → caption list).
+`getPerson`/`getSoftware` are not available through this view and throw;
+`getTicketsByHardware` returns `[]`.
 
-### Sync strategy (`SyncService.runSyncAll`)
+### Reconcile flow (`ReconcileService`) — preferred
+Per-asset, on-demand, read-only comparison. `RECONCILE_FIELDS` is the single
+declarative table that drives the diff, the accept write-back and the UI — add a
+row there to make a new field reconcilable. Status comparisons go through
+`statusMapping.ts` (`Deployed⇄active`, …) and MACs through `normalizeMac()`.
+
+| Endpoint (mounted at `/api/itsm`) | Role | ITSM traffic |
+|---|---|---|
+| `GET /reconcile/linked` | any | none (local DB) |
+| `GET /reconcile/summary` | any | none (local DB) |
+| `POST /reconcile/:id/check` | operator | **1 GET** (the only ITSM read) |
+| `PATCH /reconcile/:id/accept` `{fields:[]}` | operator | 1 GET (re-read at accept time), writes locally |
+| `PATCH /reconcile/:id/ignore` `{field, itsm_value}` | operator | none — the value comes from the client |
+| `PATCH /reconcile/:id/unignore/:field` | operator | none |
+| `PATCH /reconcile/:id/unlink` | operator | none — clears the local link only |
+
+Accept/ignore/unlink are audited (`captureAuditBefore` + `auditLog('asset')`).
+Ignores are stored on the asset (`reconcile_ignored`) together with the ITSM value
+they were ignored at — if ITSM later reports a different value, the diff
+resurfaces automatically.
+
+### Sync strategy (`SyncService.runSyncAll`) — bulk import
 For each hardware record from ITSM:
 - If no local asset with that `itsm_guid` → **create** a new asset
-- If existing asset with `source_of_truth = 'itsm'` → **overwrite** all ITSM fields
+- If existing asset with `source_of_truth = 'itsm'` → **overwrite** the ITSM-owned fields
 - If existing asset with `source_of_truth = 'local'` → store as `itsm_snapshot` (pending review — user must click "Accept" to apply)
+
+Note: the bulk sync no longer touches `AssetSoftware` rows (an earlier version
+deleted them without re-creating — software lists are only populated by the
+per-asset `syncAsset` path, which resolves `installed_software`).
 
 ---
 

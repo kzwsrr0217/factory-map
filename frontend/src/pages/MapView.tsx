@@ -37,7 +37,7 @@ import styles from '../styles/pages/MapView.module.css';
 
 const MapView: React.FC = () => {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [buildings, setBuildings] = useState<Building[]>([]);
   const [floors, setFloors] = useState<Floor[]>([]);
   const [selectedBuildingId, setSelectedBuildingId] = useState<string>('');
@@ -156,6 +156,19 @@ const MapView: React.FC = () => {
     });
   }, [assets, searchQuery, statusFilter, typeFilter, workareaFilter, workareas]);
 
+  // Assets that belong on the floor map (rack-mounted assets live in a rack).
+  const floorAssets = useMemo(() => assets.filter((a) => !a.hierarchy?.rack_id), [assets]);
+
+  const filterActive = !!(searchQuery || statusFilter !== 'all' || typeFilter !== 'all' || workareaFilter !== 'all');
+
+  // When a filter/search is active, keep every asset on the map for spatial
+  // context but fade the non-matching ones instead of hiding them.
+  const dimmedAssetIds = useMemo(() => {
+    if (!filterActive) return undefined;
+    const matched = new Set(filteredAssets.map((a) => a._id));
+    return new Set(floorAssets.filter((a) => !matched.has(a._id)).map((a) => a._id));
+  }, [filterActive, filteredAssets, floorAssets]);
+
   const statusOptions = useMemo(() => [
     { value: 'all', label: 'All Statuses' },
     { value: 'active', label: 'Active' },
@@ -225,6 +238,16 @@ const MapView: React.FC = () => {
       setSelectedBuildingId(buildings[0]._id);
     }
   }, [buildings, selectedBuildingId]);
+
+  // Keep the URL in sync with the selected building/floor so the current view is
+  // shareable — copy the address bar and it reopens exactly here.
+  useEffect(() => {
+    if (!selectedBuildingId && !selectedFloorId) return;
+    const next = new URLSearchParams(searchParams);
+    if (selectedBuildingId) next.set('building', selectedBuildingId); else next.delete('building');
+    if (selectedFloorId) next.set('floor', selectedFloorId); else next.delete('floor');
+    if (next.toString() !== searchParams.toString()) setSearchParams(next, { replace: true });
+  }, [selectedBuildingId, selectedFloorId, searchParams, setSearchParams]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -865,7 +888,8 @@ const MapView: React.FC = () => {
           <div className={sidePanelOpen ? styles.mapWithPanel : undefined}>
             <FloorMap
               workareas={workareas}
-              assets={filteredAssets}
+              assets={floorAssets}
+              dimmedAssetIds={dimmedAssetIds}
               editable={editMode}
               backgroundImage={selectedFloor.svg_background}
               onWorkareaMove={handleWorkareaMove}
