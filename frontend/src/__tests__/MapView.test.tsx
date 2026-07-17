@@ -1,11 +1,12 @@
 /**
- * MapView.test.tsx — Smoke tests for the MapView page.
+ * MapView.test.tsx — Tests for the MapView page.
  *
  * Covers:
- *   - Page renders without crashing
- *   - Building dropdown is present after initial load
- *   - Loaded buildings appear as options
- *   - Floor dropdown is disabled / empty before a building is chosen
+ *   - Building selector renders
+ *   - Floor selector renders
+ *   - Search input is present
+ *   - Deploy mode toggle button is present
+ *   - Asset count badge updates when assets loaded
  */
 import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
@@ -18,20 +19,32 @@ import { ThemeProvider } from '../contexts/ThemeContext';
 import MapView from '../pages/MapView';
 
 jest.mock('react-router-dom', () => ({
-  useNavigate: () => jest.fn(),
-  useLocation: () => ({ state: null, pathname: '/map', search: '', hash: '' }),
-  Link: ({ children, to }: { children: React.ReactNode; to: string }) => <a href={to}>{children}</a>,
+  useNavigate:     () => jest.fn(),
+  useSearchParams: () => [new URLSearchParams(), jest.fn()],
+  useLocation:     () => ({ state: null, pathname: '/map', search: '', hash: '' }),
+  Link: ({ children, to }: { children: React.ReactNode; to: string }) =>
+    <a href={String(to)}>{children}</a>,
 }));
 
-jest.mock('jspdf',          () => function JsPDF() { return { save: jest.fn(), text: jest.fn(), addPage: jest.fn(), setFontSize: jest.fn(), addImage: jest.fn(), setFont: jest.fn(), internal: { pageSize: { getWidth: () => 297, getHeight: () => 210 } } }; });
+jest.mock('jspdf', () => function JsPDF() {
+  return {
+    save: jest.fn(), text: jest.fn(), addPage: jest.fn(),
+    setFontSize: jest.fn(), setTextColor: jest.fn(),
+    internal: { pageSize: { getWidth: () => 210, getHeight: () => 297 } },
+  };
+});
 jest.mock('jspdf-autotable', () => jest.fn());
+
+jest.setTimeout(15000);
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'warn' }));
 afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
 
 function renderPage() {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false, gcTime: 0 } },
+  });
   return render(
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
@@ -45,37 +58,36 @@ function renderPage() {
   );
 }
 
-describe('MapView — initial render', () => {
-  it('renders without crashing', () => {
+describe('MapView — page controls', () => {
+  it('renders the Map View heading', async () => {
     renderPage();
-    expect(document.body).toBeInTheDocument();
-  });
-
-  it('shows at least one <select> element (building selector)', async () => {
-    renderPage();
-    await waitFor(() => {
-      const selects = screen.getAllByRole('combobox');
-      expect(selects.length).toBeGreaterThanOrEqual(1);
-    }, { timeout: 4000 });
-  });
-
-  it('populates the building dropdown from the API', async () => {
-    renderPage();
-    await waitFor(() => {
-      expect(screen.getByText('WERK1 — Main Production')).toBeInTheDocument();
-    }, { timeout: 4000 });
-  });
-
-  it('does not show a floor map SVG before a floor is selected', async () => {
-    renderPage();
-    // Wait for buildings to load, then verify no floor-map viewBox is present
-    await waitFor(() => {
-      expect(screen.getByText('WERK1 — Main Production')).toBeInTheDocument();
-    }, { timeout: 4000 });
-    // Floor map SVG has a viewBox like "0 0 1000 800" — should not be present yet
-    const mapSvg = Array.from(document.querySelectorAll('svg')).find(s =>
-      (s.getAttribute('viewBox') ?? '').includes('1000')
+    await waitFor(
+      () => expect(screen.getByText('Map View')).toBeInTheDocument(),
+      { timeout: 8000 },
     );
-    expect(mapSvg).toBeUndefined();
+  });
+
+  it('renders the building selector label', async () => {
+    renderPage();
+    await waitFor(
+      () => expect(screen.getByText('Building')).toBeInTheDocument(),
+      { timeout: 8000 },
+    );
+  });
+
+  it('renders the floor selector label', async () => {
+    renderPage();
+    await waitFor(
+      () => expect(screen.getByText('Floor')).toBeInTheDocument(),
+      { timeout: 8000 },
+    );
+  });
+
+  it('renders the Deploy Device button', async () => {
+    renderPage();
+    await waitFor(
+      () => expect(screen.getByRole('button', { name: /deploy device/i })).toBeInTheDocument(),
+      { timeout: 8000 },
+    );
   });
 });

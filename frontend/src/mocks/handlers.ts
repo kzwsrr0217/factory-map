@@ -208,10 +208,40 @@ export const handlers = [
       },
     })),
   ),
+  rest.patch(`${API}/assets/:id`, (_req, res, ctx) =>
+    res(ctx.json({ success: true, data: { _id: 'asset-1' } })),
+  ),
   rest.delete(`${API}/assets/:id`, (_req, res, ctx) =>
     res(ctx.json({ success: true })),
   ),
   rest.post(`${API}/assets/:id/sync`, (_req, res, ctx) =>
     res(ctx.json({ success: true, message: 'Asset synced successfully' })),
+  ),
+
+  // Audit log
+  rest.get(`${API}/audit`, (_req, res, ctx) =>
+    res(ctx.json({ success: true, data: [], total: 0, page: 1, limit: 50 })),
+  ),
+
+  // Auth — sessions & password
+  rest.get(`${API}/auth/sessions`, (_req, res, ctx) =>
+    res(ctx.json({ success: true, data: [] })),
+  ),
+  rest.delete(`${API}/auth/sessions/:jti`, (_req, res, ctx) =>
+    res(ctx.json({ success: true })),
+  ),
+  rest.patch(`${API}/auth/password`, (_req, res, ctx) =>
+    res(ctx.json({ success: true })),
+  ),
+  rest.patch(`${API}/auth/profile`, (_req, res, ctx) =>
+    res(ctx.json({ success: true })),
+  ),
+
+  // Alerts actions
+  rest.put(`${API}/alerts/config`, (_req, res, ctx) =>
+    res(ctx.json({ success: true, data: {} })),
+  ),
+  rest.post(`${API}/alerts/test`, (_req, res, ctx) =>
+    res(ctx.json({ success: true, data: { sent: 0 } })),
   ),
 ];

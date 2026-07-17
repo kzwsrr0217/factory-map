@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import Card from '../components/common/Card';
 import Button from '../components/common/Button';
@@ -25,6 +25,8 @@ interface PortTooltip {
   y: number;
 }
 
+const EMPTY_ROOMS: NetworkRoom[] = [];
+
 const NetworkInfrastructure: React.FC = () => {
   const toast = useToast();
   const qc = useQueryClient();
@@ -38,6 +40,17 @@ const NetworkInfrastructure: React.FC = () => {
   const [panelPorts, setPanelPorts] = useState<Record<string, WallPort[]>>({});
   const [buildingAssets, setBuildingAssets] = useState<Asset[]>([]);
   const [rackAssets,     setRackAssets]     = useState<Asset[]>([]);
+
+  interface PortSearchResult {
+    wallPort: WallPort;
+    panel: PatchPanel;
+    rack: NetworkRack;
+    room: NetworkRoom;
+  }
+  const [allBuildingPorts, setAllBuildingPorts] = useState<PortSearchResult[]>([]);
+  const [portSearch, setPortSearch] = useState('');
+  const [portSearchFocused, setPortSearchFocused] = useState(false);
+  const portSearchRef = useRef<HTMLInputElement>(null);
   const [portTooltip, setPortTooltip] = useState<PortTooltip | null>(null);
   const tooltipRef = useRef<HTMLDivElement>(null);
   const [modal, setModal] = useState<ModalState>({ kind: 'none' });
@@ -52,12 +65,44 @@ const NetworkInfrastructure: React.FC = () => {
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
 
+  const [splitPct, setSplitPct] = useState<number>(() => {
+    const saved = localStorage.getItem('infra-split-pct');
+    return saved ? Math.max(20, Math.min(80, Number(saved))) : 55;
+  });
+  const splitContainerRef = useRef<HTMLDivElement>(null);
+  const isDragging = useRef(false);
+
+  const handleDividerMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    isDragging.current = true;
+    const onMouseMove = (ev: MouseEvent) => {
+      if (!isDragging.current || !splitContainerRef.current) return;
+      const rect = splitContainerRef.current.getBoundingClientRect();
+      const pct = Math.round(((ev.clientY - rect.top) / rect.height) * 100);
+      const clamped = Math.max(20, Math.min(80, pct));
+      setSplitPct(clamped);
+      localStorage.setItem('infra-split-pct', String(clamped));
+    };
+    const onMouseUp = () => {
+      isDragging.current = false;
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  }, []);
+
+  const handleSnapPct = useCallback((pct: number) => {
+    setSplitPct(pct);
+    localStorage.setItem('infra-split-pct', String(pct));
+  }, []);
+
   // Auto-select first building
   useEffect(() => {
     if (buildings.length > 0 && !selectedBuildingId) setSelectedBuildingId(buildings[0]._id);
   }, [buildings, selectedBuildingId]);
 
-  const { data: rooms = [] } = useNetworkRooms(
+  const { data: rooms = EMPTY_ROOMS } = useNetworkRooms(
     selectedBuildingId ? { building_id: selectedBuildingId } : undefined
   );
 
@@ -69,12 +114,35 @@ const NetworkInfrastructure: React.FC = () => {
     setSelectedRoomId(null);
     setSelectedRackId(null);
     setPanelPorts({});
+    setAllBuildingPorts([]);
+    setPortSearch('');
     if (selectedBuildingId) {
       assetService.getAssets().then(all => {
         setBuildingAssets(all.filter(a => a.hierarchy?.building_id === selectedBuildingId));
       }).catch(() => {});
     }
   }, [selectedBuildingId]);
+
+  // Load all wall ports for the building when rooms data changes
+  useEffect(() => {
+    if (rooms.length === 0) { setAllBuildingPorts([]); return; }
+    const tasks: Array<{ panelId: string; panel: PatchPanel; rack: NetworkRack; room: NetworkRoom }> = [];
+    rooms.forEach(room => {
+      room.racks.forEach(rack => {
+        rack.patch_panels.forEach(panel => {
+          tasks.push({ panelId: panel._id, panel, rack, room });
+        });
+      });
+    });
+    if (tasks.length === 0) { setAllBuildingPorts([]); return; }
+    Promise.all(tasks.map(t => networkService.getWallPorts({ patch_panel_id: t.panelId }))).then(results => {
+      const collected: PortSearchResult[] = [];
+      results.forEach((ports, i) => {
+        ports.forEach(wp => collected.push({ wallPort: wp, panel: tasks[i].panel, rack: tasks[i].rack, room: tasks[i].room }));
+      });
+      setAllBuildingPorts(collected);
+    }).catch(() => {});
+  }, [rooms]);
 
   // Load wall ports and rack assets when selected rack changes
   useEffect(() => {
@@ -90,6 +158,16 @@ const NetworkInfrastructure: React.FC = () => {
     }
     loadRackAssets(selectedRack._id);
   }, [selectedRack]);
+
+  const portSearchResults = portSearch.trim().length >= 2
+    ? allBuildingPorts.filter(r =>
+        r.wallPort.label.toLowerCase().includes(portSearch.toLowerCase()) ||
+        r.panel.name.toLowerCase().includes(portSearch.toLowerCase()) ||
+        r.rack.name.toLowerCase().includes(portSearch.toLowerCase()) ||
+        (r.wallPort.switch_port ?? '').toLowerCase().includes(portSearch.toLowerCase()) ||
+        (buildingAssets.find(a => a._id === r.wallPort.switch_asset_id)?.basic_info?.display_name ?? '').toLowerCase().includes(portSearch.toLowerCase())
+      ).slice(0, 12)
+    : [];
 
   const invalidateRooms = () => qc.invalidateQueries({ queryKey: networkKeys.rooms({ building_id: selectedBuildingId }) });
 
@@ -262,6 +340,45 @@ const NetworkInfrastructure: React.FC = () => {
           <select className={styles.buildingSelect} value={selectedBuildingId} onChange={e => setSelectedBuildingId(e.target.value)}>
             {buildings.map(b => <option key={b._id} value={b._id}>{b.name}</option>)}
           </select>
+          <div className={styles.portSearchWrap}>
+            <input
+              ref={portSearchRef}
+              className={styles.portSearchInput}
+              placeholder="Search wall port…"
+              value={portSearch}
+              onChange={e => setPortSearch(e.target.value)}
+              onFocus={() => setPortSearchFocused(true)}
+              onBlur={() => setTimeout(() => setPortSearchFocused(false), 150)}
+            />
+            {portSearch && (
+              <button className={styles.portSearchClear} onClick={() => { setPortSearch(''); portSearchRef.current?.focus(); }}>✕</button>
+            )}
+            {portSearchFocused && portSearchResults.length > 0 && (
+              <div className={styles.portSearchDropdown}>
+                {portSearchResults.map(r => {
+                  const switchAsset = buildingAssets.find(a => a._id === r.wallPort.switch_asset_id);
+                  return (
+                    <button
+                      key={r.wallPort._id}
+                      className={styles.portSearchItem}
+                      onMouseDown={() => {
+                        setSelectedRoomId(r.room._id);
+                        setSelectedRackId(r.rack._id);
+                        setPortSearch('');
+                      }}
+                    >
+                      <span className={styles.portSearchLabel}>{r.wallPort.label}</span>
+                      <span className={styles.portSearchPath}>
+                        {r.panel.name} port {r.wallPort.patch_port}
+                        {switchAsset ? ` → ${switchAsset.basic_info?.display_name}${r.wallPort.switch_port ? ` ${r.wallPort.switch_port}` : ''}` : ''}
+                        {' · '}{r.room.name}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
           <Button variant="primary" onClick={() => openModal({ kind: 'room' })}>+ Add Room</Button>
         </div>
       </div>
@@ -337,94 +454,112 @@ const NetworkInfrastructure: React.FC = () => {
         </div>
 
         {/* Patch panel detail view */}
-        <div className={styles.detailView}>
+        <div className={styles.detailView} ref={splitContainerRef}>
           {!selectedRack ? (
             <div className={styles.empty}>Select a rack to view patch panels</div>
           ) : (
             <>
-              <div className={styles.panelHeader}>
-                <h2>{selectedRack.name} — Patch Panels</h2>
-                <Button variant="secondary" size="sm" onClick={() => openModal({ kind: 'panel', rack: selectedRack })}>+ Add Panel</Button>
-              </div>
-              {selectedRack.patch_panels.length === 0 && <div className={styles.empty}>No patch panels in this rack.</div>}
-              <div className={styles.panelList}>
-                {selectedRack.patch_panels.map(panel => {
-                  const ports = panelPorts[panel._id] ?? [];
-                  const usedCount = ports.filter(w => w.patch_port != null).length;
-                  return (
-                    <Card key={panel._id} className={styles.panelCard}>
-                      <div className={styles.panelCardHeader}>
-                        <div className={styles.panelCardMeta}>
-                          <strong>{panel.name}</strong>
-                          {panel.u_position != null && <span className={styles.uLabel}>U{panel.u_position}</span>}
-                          <span className={`${styles.cableTag} ${styles[panel.cable_type]}`}>
-                            {panel.cable_type}
-                          </span>
-                          <span className={styles.portUsage}>
-                            {usedCount}/{panel.port_count} used
-                          </span>
-                        </div>
-                        <div className={styles.panelCardActions}>
-                          <button className={styles.iconBtn} onClick={() => openModal({ kind: 'panel', rack: selectedRack, panel })} title="Edit panel">✏️</button>
-                          <button className={styles.iconBtn} onClick={() => setDeleteTarget({ kind: 'panel', panel, rack: selectedRack })} title="Delete panel">🗑️</button>
-                        </div>
-                      </div>
-
-                      {panel.description && (
-                        <p className={styles.panelDesc}>{panel.description}</p>
-                      )}
-
-                      <div className={styles.portGrid}>
-                        {Array.from({ length: panel.port_count }, (_, i) => {
-                          const portNum = i + 1;
-                          const wp = ports.find(w => w.patch_port === portNum);
-                          return (
-                            <div
-                              key={portNum}
-                              className={`${styles.port} ${wp ? styles.portUsed : styles.portFree}`}
-                              title={wp ? `${wp.label} — click to edit` : `Port ${portNum} — click to assign wall port`}
-                              onMouseEnter={wp ? (e) => {
-                                e.stopPropagation();
-                                setPortTooltip({ port: wp, x: e.clientX, y: e.clientY });
-                              } : undefined}
-                              onMouseLeave={wp ? () => setPortTooltip(null) : undefined}
-                              onClick={e => {
-                                e.stopPropagation();
-                                setPortTooltip(null);
-                                openModal({ kind: 'wallport', panel, portNum, existing: wp });
-                              }}
-                            >
-                              {portNum}
-                            </div>
-                          );
-                        })}
-                      </div>
-
-                      {/* Port legend */}
-                      <div className={styles.portLegend}>
-                        <span className={`${styles.legendDot} ${styles.legendUsed}`} /> Connected
-                        <span className={`${styles.legendDot} ${styles.legendFree}`} /> Free
-                      </div>
-                    </Card>
-                  );
-                })}
-              </div>
-
-              {/* Rack devices diagram */}
-              <div className={styles.panelHeader} style={{ marginTop: 'var(--spacing-xl)' }}>
-                <h2>{selectedRack.name} — Rack Devices</h2>
-              </div>
-              {rackAssets.length === 0 ? (
-                <div className={styles.empty}>
-                  No rack-mounted assets yet. Set <strong>rack_id</strong> on an asset to place it here.
+              {/* Top pane: Patch Panels */}
+              <div className={styles.splitTop} style={{ flex: splitPct }}>
+                <div className={styles.panelHeader}>
+                  <h2>{selectedRack.name} — Patch Panels</h2>
+                  <Button variant="secondary" size="sm" onClick={() => openModal({ kind: 'panel', rack: selectedRack })}>+ Add Panel</Button>
                 </div>
-              ) : (
-                <RackDiagram
-                  rack={selectedRack}
-                  assets={rackAssets}
-                  onRefresh={() => loadRackAssets(selectedRack._id)}
-                />
-              )}
+                {selectedRack.patch_panels.length === 0 && <div className={styles.empty}>No patch panels in this rack.</div>}
+                <div className={styles.panelList}>
+                  {selectedRack.patch_panels.map(panel => {
+                    const ports = panelPorts[panel._id] ?? [];
+                    const usedCount = ports.filter(w => w.patch_port != null).length;
+                    return (
+                      <Card key={panel._id} className={styles.panelCard}>
+                        <div className={styles.panelCardHeader}>
+                          <div className={styles.panelCardMeta}>
+                            <strong>{panel.name}</strong>
+                            {panel.u_position != null && <span className={styles.uLabel}>U{panel.u_position}</span>}
+                            <span className={`${styles.cableTag} ${styles[panel.cable_type]}`}>
+                              {panel.cable_type}
+                            </span>
+                            <span className={styles.portUsage}>
+                              {usedCount}/{panel.port_count} used
+                            </span>
+                          </div>
+                          <div className={styles.panelCardActions}>
+                            <button className={styles.iconBtn} onClick={() => openModal({ kind: 'panel', rack: selectedRack, panel })} title="Edit panel">✏️</button>
+                            <button className={styles.iconBtn} onClick={() => setDeleteTarget({ kind: 'panel', panel, rack: selectedRack })} title="Delete panel">🗑️</button>
+                          </div>
+                        </div>
+
+                        {panel.description && (
+                          <p className={styles.panelDesc}>{panel.description}</p>
+                        )}
+
+                        <div className={styles.portGrid}>
+                          {Array.from({ length: panel.port_count }, (_, i) => {
+                            const portNum = i + 1;
+                            const wp = ports.find(w => w.patch_port === portNum);
+                            return (
+                              <div
+                                key={portNum}
+                                className={`${styles.port} ${wp ? styles.portUsed : styles.portFree}`}
+                                title={wp ? `${wp.label} — click to edit` : `Port ${portNum} — click to assign wall port`}
+                                onMouseEnter={wp ? (e) => {
+                                  e.stopPropagation();
+                                  setPortTooltip({ port: wp, x: e.clientX, y: e.clientY });
+                                } : undefined}
+                                onMouseLeave={wp ? () => setPortTooltip(null) : undefined}
+                                onClick={e => {
+                                  e.stopPropagation();
+                                  setPortTooltip(null);
+                                  openModal({ kind: 'wallport', panel, portNum, existing: wp });
+                                }}
+                              >
+                                {portNum}
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        <div className={styles.portLegend}>
+                          <span className={`${styles.legendDot} ${styles.legendUsed}`} /> Connected
+                          <span className={`${styles.legendDot} ${styles.legendFree}`} /> Free
+                        </div>
+                      </Card>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Draggable divider */}
+              <div className={styles.splitDivider} onMouseDown={handleDividerMouseDown}>
+                <div className={styles.splitGrip} />
+                <div className={styles.snapButtons}>
+                  {[25, 50, 75].map(p => (
+                    <button key={p} onMouseDown={e => e.stopPropagation()} onClick={() => handleSnapPct(p)}>
+                      {p}%
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Bottom pane: Rack Devices */}
+              <div className={styles.splitBottom} style={{ flex: 100 - splitPct }}>
+                <div className={styles.panelHeader}>
+                  <h2>{selectedRack.name} — Rack Devices</h2>
+                </div>
+                <div className={styles.rackDiagramWrap}>
+                  {rackAssets.length === 0 ? (
+                    <div className={styles.empty}>
+                      No rack-mounted assets yet. Set <strong>rack_id</strong> on an asset to place it here.
+                    </div>
+                  ) : (
+                    <RackDiagram
+                      rack={selectedRack}
+                      assets={rackAssets}
+                      onRefresh={() => loadRackAssets(selectedRack._id)}
+                    />
+                  )}
+                </div>
+              </div>
             </>
           )}
         </div>

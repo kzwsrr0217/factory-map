@@ -8,13 +8,15 @@
  *   Clicking an asset row opens AssetDetailsModal
  */
 import React, { useState, useMemo } from 'react';
-import { ChevronLeft, ChevronRight, AlertTriangle, Wrench, CalendarDays, Download } from 'lucide-react';
+import { ChevronLeft, ChevronRight, AlertTriangle, Wrench, CalendarDays, Download, List, LayoutGrid, CheckCircle, Printer } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
 import Card from '../components/common/Card';
 import Button from '../components/common/Button';
 import Badge from '../components/common/Badge';
 import AssetDetailsModal from '../components/asset/AssetDetailsModal';
-import { Asset } from '../services/asset.service';
-import { useAssets } from '../hooks/queries/useAssets';
+import { Asset, assetService } from '../services/asset.service';
+import { useAssets, assetKeys } from '../hooks/queries/useAssets';
+import { useFloors } from '../hooks/queries/useFloors';
 import { useToast } from '../contexts/ToastContext';
 import styles from '../styles/pages/Maintenance.module.css';
 
@@ -22,9 +24,14 @@ const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 const Maintenance: React.FC = () => {
   const { data: allAssets = [], isLoading: loading } = useAssets();
+  const { data: floors = [] } = useFloors();
   const assets = allAssets.filter((a: Asset) => a.maintenance?.next_date);
   const toast = useToast();
+  const qc = useQueryClient();
   const [today] = useState(() => new Date());
+  const [view, setView] = useState<'calendar' | 'list'>('calendar');
+  const [orderRange, setOrderRange] = useState<'overdue' | 'week' | 'month' | 'all'>('all');
+  const [markingDoneIds, setMarkingDoneIds] = useState<Set<string>>(new Set());
   const [viewYear, setViewYear] = useState(today.getFullYear());
   const [viewMonth, setViewMonth] = useState(today.getMonth()); // 0-based
   const [overdueOpen, setOverdueOpen] = useState(true);
@@ -114,6 +121,111 @@ const Maintenance: React.FC = () => {
     }).length;
   }, [assets, viewYear, viewMonth]);
 
+  const workOrders = useMemo(() => {
+    const todayTs = new Date(today).setHours(0, 0, 0, 0);
+    let list = [...assets];
+    if (orderRange === 'overdue') {
+      list = list.filter(a => new Date(a.maintenance!.next_date!).getTime() < todayTs);
+    } else if (orderRange === 'week') {
+      const weekLater = todayTs + 7 * 86400000;
+      list = list.filter(a => {
+        const ts = new Date(a.maintenance!.next_date!).getTime();
+        return ts >= todayTs && ts < weekLater;
+      });
+    } else if (orderRange === 'month') {
+      const monthLater = todayTs + 30 * 86400000;
+      list = list.filter(a => {
+        const ts = new Date(a.maintenance!.next_date!).getTime();
+        return ts >= todayTs && ts < monthLater;
+      });
+    }
+    return list.sort((a, b) => {
+      const at = new Date(a.maintenance!.next_date!).getTime();
+      const bt = new Date(b.maintenance!.next_date!).getTime();
+      return at - bt;
+    });
+  }, [assets, orderRange, today]);
+
+  const workOrdersByFloor = useMemo(() => {
+    const grouped = new Map<string, Asset[]>();
+    workOrders.forEach(a => {
+      const fid = a.hierarchy?.floor_id ?? '__unassigned__';
+      if (!grouped.has(fid)) grouped.set(fid, []);
+      grouped.get(fid)!.push(a);
+    });
+    return grouped;
+  }, [workOrders]);
+
+  const handleMarkDone = async (a: Asset) => {
+    if (!a._id || markingDoneIds.has(a._id)) return;
+    setMarkingDoneIds(prev => new Set([...prev, a._id]));
+    try {
+      const todayStr = new Date().toISOString().split('T')[0];
+      let nextStr: string | undefined;
+      if (a.maintenance?.interval_days) {
+        const next = new Date();
+        next.setDate(next.getDate() + a.maintenance.interval_days);
+        nextStr = next.toISOString().split('T')[0];
+      }
+      await assetService.updateAsset(a._id, { maintenance: { last_date: todayStr, next_date: nextStr } } as any);
+      qc.invalidateQueries({ queryKey: assetKeys.all });
+      toast.success(`Maintenance done: ${a.basic_info.display_name}`);
+    } catch {
+      toast.error('Failed to update maintenance');
+    } finally {
+      setMarkingDoneIds(prev => { const s = new Set(prev); s.delete(a._id); return s; });
+    }
+  };
+
+  const handlePrintWorkOrders = () => {
+    const todayStr = new Date().toLocaleDateString();
+    const rangeLabel: Record<typeof orderRange, string> = {
+      all: 'All scheduled', overdue: 'Overdue', week: 'Due this week', month: 'Due in 30 days',
+    };
+    const printWindow = window.open('', '_blank', 'width=900,height=700');
+    if (!printWindow) return;
+    const rows = Array.from(workOrdersByFloor.entries()).map(([fid, floorAssets]) => {
+      const floorObj = floors.find(f => f._id === fid);
+      const floorLabel = floorObj ? floorObj.name : 'Unassigned';
+      const assetRows = floorAssets.map(a => {
+        const isOvd = new Date(a.maintenance!.next_date!).getTime() < Date.now();
+        return `<tr>
+          <td>${a.basic_info.display_name}</td>
+          <td>${a.basic_info.type ?? ''}</td>
+          <td style="color:${isOvd ? '#dc2626' : 'inherit'}">${new Date(a.maintenance!.next_date!).toLocaleDateString()}</td>
+          <td>${a.maintenance?.last_date ? new Date(a.maintenance.last_date).toLocaleDateString() : '—'}</td>
+          <td>${a.assigned_person?.full_name ?? '—'}</td>
+          <td style="color:${isOvd ? '#dc2626' : '#d97706'}">${isOvd ? 'OVERDUE' : 'Upcoming'}</td>
+          <td style="text-align:center">☐</td>
+        </tr>`;
+      }).join('');
+      return `<tr><td colspan="7" style="background:#f3f4f6;font-weight:700;padding:8px 12px;border-top:2px solid #d1d5db">${floorLabel} (${floorAssets.length})</td></tr>${assetRows}`;
+    }).join('');
+
+    printWindow.document.write(`<!DOCTYPE html><html><head><title>Maintenance Work Orders</title>
+<style>
+  body{font-family:Arial,sans-serif;font-size:12px;color:#111;margin:24px}
+  h1{font-size:18px;margin:0 0 4px}
+  .meta{font-size:11px;color:#6b7280;margin-bottom:16px}
+  table{width:100%;border-collapse:collapse}
+  th{background:#1d4ed8;color:#fff;padding:6px 10px;text-align:left;font-size:11px;text-transform:uppercase}
+  td{padding:5px 10px;border-bottom:1px solid #e5e7eb;font-size:11px}
+  tr:hover td{background:#f9fafb}
+  @media print{body{margin:0} .no-print{display:none}}
+</style></head><body>
+<h1>Maintenance Work Orders</h1>
+<div class="meta">Printed: ${todayStr} &nbsp;·&nbsp; Filter: ${rangeLabel[orderRange]} &nbsp;·&nbsp; ${workOrders.length} tasks</div>
+<table>
+  <thead><tr>
+    <th>Asset</th><th>Type</th><th>Due Date</th><th>Last Done</th><th>Assigned To</th><th>Status</th><th style="width:50px">Done ✓</th>
+  </tr></thead>
+  <tbody>${rows}</tbody>
+</table>
+<script>window.onload=()=>window.print()</` + `</script>
+</body></html>`);
+    printWindow.document.close();
+  };
+
   if (loading) {
     return (
       <div className={styles.page}>
@@ -127,17 +239,113 @@ const Maintenance: React.FC = () => {
     <div className={styles.page}>
       <div className={styles.header}>
         <div>
-          <h1>Maintenance Calendar</h1>
+          <h1>Maintenance {view === 'list' ? 'Work Orders' : 'Calendar'}</h1>
           <p className={styles.subtitle}>
             {assets.length} asset{assets.length !== 1 ? 's' : ''} with scheduled maintenance
             {overdue.length > 0 && ` · `}
             {overdue.length > 0 && <span className={styles.overdueCount}>{overdue.length} overdue</span>}
           </p>
         </div>
+        <div className={styles.headerActions}>
+          {view === 'list' && (
+            <select
+              className={styles.rangeSelect}
+              value={orderRange}
+              onChange={e => setOrderRange(e.target.value as typeof orderRange)}
+            >
+              <option value="all">All scheduled</option>
+              <option value="overdue">Overdue only</option>
+              <option value="week">Due this week</option>
+              <option value="month">Due in 30 days</option>
+            </select>
+          )}
+          {view === 'list' && workOrders.length > 0 && (
+            <Button variant="outline" size="sm" onClick={handlePrintWorkOrders}>
+              <Printer size={13} style={{ marginRight: 4 }} />Print
+            </Button>
+          )}
+          <div className={styles.viewToggle}>
+            <button
+              className={`${styles.viewBtn} ${view === 'calendar' ? styles.viewBtnActive : ''}`}
+              onClick={() => setView('calendar')}
+              title="Calendar view"
+            >
+              <LayoutGrid size={15} />
+            </button>
+            <button
+              className={`${styles.viewBtn} ${view === 'list' ? styles.viewBtnActive : ''}`}
+              onClick={() => setView('list')}
+              title="Work orders list"
+            >
+              <List size={15} />
+            </button>
+          </div>
+        </div>
       </div>
 
-      {/* Overdue section */}
-      {overdue.length > 0 && (
+      {/* Work orders list view */}
+      {view === 'list' && (
+        <div className={styles.workOrderList}>
+          {workOrders.length === 0 ? (
+            <Card padding="lg">
+              <p style={{ color: 'var(--color-gray-500)', textAlign: 'center', fontStyle: 'italic' }}>
+                No maintenance tasks match the selected range.
+              </p>
+            </Card>
+          ) : (
+            Array.from(workOrdersByFloor.entries()).map(([fid, floorAssets]) => {
+              const floorObj = floors.find(f => f._id === fid);
+              const floorLabel = floorObj ? floorObj.name : 'Unassigned / No Floor';
+              return (
+                <div key={fid} className={styles.workOrderGroup}>
+                  <div className={styles.workOrderFloorHeader}>
+                    <span>{floorLabel}</span>
+                    <span className={styles.workOrderFloorCount}>{floorAssets.length} task{floorAssets.length !== 1 ? 's' : ''}</span>
+                  </div>
+                  {floorAssets.map(a => {
+                    const isOverdueItem = new Date(a.maintenance!.next_date!).getTime() < new Date().setHours(0, 0, 0, 0);
+                    const isDone = markingDoneIds.has(a._id);
+                    return (
+                      <div key={a._id} className={styles.workOrderItem}>
+                        <div className={styles.workOrderInfo}>
+                          <button className={styles.workOrderName} onClick={() => setViewAsset(a)}>
+                            {a.basic_info.display_name}
+                          </button>
+                          <span className={styles.workOrderMeta}>{a.basic_info.type}</span>
+                          {a.assigned_person?.full_name && (
+                            <span className={styles.workOrderMeta}>· {a.assigned_person.full_name}</span>
+                          )}
+                        </div>
+                        <div className={styles.workOrderRight}>
+                          <span className={styles.workOrderDate} style={{ color: isOverdueItem ? '#dc2626' : undefined }}>
+                            {new Date(a.maintenance!.next_date!).toLocaleDateString()}
+                          </span>
+                          {isOverdueItem
+                            ? <Badge variant="error" size="sm">Overdue</Badge>
+                            : <Badge variant="warning" size="sm">Upcoming</Badge>
+                          }
+                          <button
+                            className={styles.markDoneBtn}
+                            onClick={() => handleMarkDone(a)}
+                            disabled={isDone}
+                            title="Mark maintenance done"
+                          >
+                            <CheckCircle size={14} />
+                            {isDone ? 'Saving…' : 'Mark Done'}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })
+          )}
+        </div>
+      )}
+
+      {/* Calendar view */}
+      {view === 'calendar' && overdue.length > 0 && (
         <Card padding="lg" className={styles.overdueCard}>
           <button
             className={styles.overdueToggle}
@@ -169,7 +377,7 @@ const Maintenance: React.FC = () => {
       )}
 
       {/* Calendar */}
-      <Card padding="lg">
+      {view === 'calendar' && <Card padding="lg">
         {/* Nav */}
         <div className={styles.calNav}>
           <div className={styles.calNavLeft}>
@@ -253,7 +461,7 @@ const Maintenance: React.FC = () => {
             );
           })}
         </div>
-      </Card>
+      </Card>}
 
       {/* Asset details modal */}
       {viewAsset && (

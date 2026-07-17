@@ -46,12 +46,14 @@ const makeAsset = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
+jest.setTimeout(15000);
+
 beforeAll(() => server.listen({ onUnhandledRequest: 'warn' }));
 afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
 
 function renderDashboard() {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false, gcTime: 0 } } });
   return render(
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>

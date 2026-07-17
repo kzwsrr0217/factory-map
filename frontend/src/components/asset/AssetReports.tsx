@@ -1,24 +1,11 @@
 /**
- * AssetReports.tsx — Aggregated statistics and ITSM-diff report panel.
+ * AssetReports.tsx — Aggregated statistics and report panel.
  *
  * Can render either as a full-screen Modal (default) or inline (`inline` prop)
  * for embedding inside the Reports page without a backdrop overlay.
- *
- * Report sections:
- *   Overview         — total assets, ITSM-managed count, assets by status and
- *                      type (bar-style percentage breakdowns).
- *   Connections      — total connections, average per asset, most-connected
- *                      asset, and a breakdown by connection type.
- *   Maintenance      — assets needing maintenance, with warranty-expired count
- *                      and upcoming expiries (next 30 days).
- *   Location         — placed vs unplaced counts, assets per building/floor.
- *   ITSM Sync        — assets with pending ITSM snapshots (itsm_snapshot ≠ null)
- *                      grouped by field differences; accept/dismiss actions.
- *
- * All data is fetched fresh on open (`isOpen` or `inline` mount) via parallel
- * Promise.all calls to `assetService`, `hierarchyService`, and `floorService`.
  */
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
   PieChart, Pie, Legend,
@@ -138,26 +125,54 @@ function buildTopoLayout(
   return pos;
 }
 
-const TopologyView: React.FC<{ assets: Asset[] }> = ({ assets }) => {
+const TopologyView: React.FC<{ assets: Asset[]; floors: Floor[] }> = ({ assets, floors }) => {
   const svgRef = useRef<SVGSVGElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ sx: number; sy: number; vx: number; vy: number } | null>(null);
   const [vp, setVp] = useState({ x: 0, y: 0, scale: 1 });
   const [hoverId, setHoverId] = useState<string | null>(null);
+  const [typeFilter, setTypeFilter] = useState('');
+  const [floorFilter, setFloorFilter] = useState('');
+  const [showIsolated, setShowIsolated] = useState(false);
 
-  const { nodes, edges, layout } = useMemo(() => {
+  const availableTypes = useMemo(() =>
+    Array.from(new Set(assets.map(a => a.basic_info?.type).filter((t): t is string => !!t))).sort(),
+    [assets]
+  );
+
+  const availableFloorIds = useMemo(() =>
+    Array.from(new Set(assets.map(a => a.hierarchy?.floor_id).filter((id): id is string => !!id))),
+    [assets]
+  );
+
+  const { nodes, edges, layout, isolatedCount } = useMemo(() => {
+    const preFiltered = assets.filter(a => {
+      if (typeFilter && a.basic_info?.type !== typeFilter) return false;
+      if (floorFilter && a.hierarchy?.floor_id !== floorFilter) return false;
+      return true;
+    });
+
     const connectedIds = new Set<string>();
-    assets.forEach((a) => {
+    preFiltered.forEach((a) => {
       if (a.connections?.length) {
         connectedIds.add(a._id);
-        a.connections.forEach((c) => connectedIds.add(c.connected_asset_id));
+        a.connections.forEach((c) => {
+          if (preFiltered.some(p => p._id === c.connected_asset_id)) {
+            connectedIds.add(c.connected_asset_id);
+          }
+        });
       }
     });
-    const nodes = assets.filter((a) => connectedIds.has(a._id));
+
+    const isolatedCount = preFiltered.filter(a => !connectedIds.has(a._id)).length;
+    const displayNodes = showIsolated ? preFiltered : preFiltered.filter(a => connectedIds.has(a._id));
+    const displayIds = new Set(displayNodes.map(n => n._id));
+
     const edgeSet = new Set<string>();
     const edges: { s: string; t: string; type: string }[] = [];
-    assets.forEach((a) => {
+    preFiltered.forEach((a) => {
       a.connections?.forEach((c) => {
+        if (!displayIds.has(a._id) || !displayIds.has(c.connected_asset_id)) return;
         const key = [a._id, c.connected_asset_id].sort().join('|');
         if (!edgeSet.has(key)) {
           edgeSet.add(key);
@@ -165,9 +180,10 @@ const TopologyView: React.FC<{ assets: Asset[] }> = ({ assets }) => {
         }
       });
     });
-    const layout = buildTopoLayout(nodes, edges);
-    return { nodes, edges, layout };
-  }, [assets]);
+
+    const layout = buildTopoLayout(displayNodes, edges);
+    return { nodes: displayNodes, edges, layout, isolatedCount };
+  }, [assets, typeFilter, floorFilter, showIsolated]);
 
   useEffect(() => {
     const wrap = wrapRef.current;
@@ -230,10 +246,21 @@ const TopologyView: React.FC<{ assets: Asset[] }> = ({ assets }) => {
     setVp({ x: (width - VW * scale) / 2, y: (height - VH * scale) / 2, scale });
   }, []);
 
-  if (nodes.length === 0) {
+  if (nodes.length === 0 && !showIsolated && isolatedCount === 0) {
     return (
       <div className={styles.placeholder}>
         <p>No connections found. Connect assets on the map to see the topology graph.</p>
+      </div>
+    );
+  }
+
+  if (nodes.length === 0 && !showIsolated && isolatedCount > 0) {
+    return (
+      <div className={styles.placeholder}>
+        <p>No connected assets match the current filter ({isolatedCount} isolated).</p>
+        <button className={styles.showAllBtn} onClick={() => setShowIsolated(true)}>
+          Show isolated assets
+        </button>
       </div>
     );
   }
@@ -250,6 +277,33 @@ const TopologyView: React.FC<{ assets: Asset[] }> = ({ assets }) => {
         <p className={styles.topologyHint}>
           {nodes.length} nodes · {edges.length} edges · {uniqueNodeTypes.length} types — scroll to zoom, drag to pan
         </p>
+        <div className={styles.topologyFilters}>
+          <select
+            value={typeFilter}
+            onChange={e => { setTypeFilter(e.target.value); setHoverId(null); }}
+            className={styles.topoFilter}
+          >
+            <option value="">All types</option>
+            {availableTypes.map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
+          <select
+            value={floorFilter}
+            onChange={e => { setFloorFilter(e.target.value); setHoverId(null); }}
+            className={styles.topoFilter}
+          >
+            <option value="">All floors</option>
+            {availableFloorIds.map(id => {
+              const f = floors.find(fl => fl._id === id);
+              return <option key={id} value={id}>{f?.name ?? id}</option>;
+            })}
+          </select>
+          <button
+            className={`${styles.topoBtn} ${showIsolated ? styles.topoBtnActive : ''}`}
+            onClick={() => setShowIsolated(v => !v)}
+          >
+            {showIsolated ? 'Hide isolated' : `Isolated (${isolatedCount})`}
+          </button>
+        </div>
         <div className={styles.topologyControls}>
           <button className={styles.topoBtn} onClick={() => setVp((p) => ({ ...p, scale: Math.min(10, p.scale * 1.25) }))}>+</button>
           <span className={styles.topoZoomLabel}>{Math.round(vp.scale * 100)}%</span>
@@ -285,7 +339,8 @@ const TopologyView: React.FC<{ assets: Asset[] }> = ({ assets }) => {
               const colorIdx = typeIndex.get(n.basic_info?.type ?? 'other') ?? 0;
               const color = TOPO_TYPE_COLORS[colorIdx % TOPO_TYPE_COLORS.length];
               const degree = degreeMap.get(n._id) ?? 0;
-              const r = 8 + Math.min(degree, 12) * 0.8;
+              const isIsolated = degree === 0;
+              const r = isIsolated ? 5 : 8 + Math.min(degree, 12) * 0.8;
               const isHovered = n._id === hoverId;
               const isDimmed = hoverConnIds !== null && !hoverConnIds.has(n._id);
               const showLabel = degree >= 5 || isHovered;
@@ -299,7 +354,7 @@ const TopologyView: React.FC<{ assets: Asset[] }> = ({ assets }) => {
                   )}
                   <circle cx={p.x} cy={p.y} r={r}
                     fill={color} stroke="var(--color-bg-secondary)" strokeWidth="2"
-                    opacity={isDimmed ? 0.12 : 1} />
+                    opacity={isDimmed ? 0.12 : isIsolated ? 0.5 : 1} />
                   {showLabel && (
                     <text x={p.x} y={p.y + r + 12} textAnchor="middle" fontSize="10"
                       fill="var(--color-text-primary)"
@@ -357,7 +412,6 @@ const TopologyView: React.FC<{ assets: Asset[] }> = ({ assets }) => {
 interface AssetReportsProps {
   isOpen: boolean;
   onClose: () => void;
-  /** When true, renders content directly without a Modal wrapper */
   inline?: boolean;
 }
 
@@ -380,7 +434,7 @@ interface ReportData {
   };
   locationStats: {
     assetsByBuilding: Record<string, { name: string; count: number }>;
-    assetsByFloor: Record<string, { name: string; count: number }>;
+    assetsByFloor: Record<string, { name: string; count: number; building_id?: string }>;
   };
 }
 
@@ -398,10 +452,16 @@ const downloadCSV = (rows: string[][], filename: string) => {
 type ReportTab = 'overview' | 'connections' | 'maintenance' | 'locations' | 'topology';
 
 const AssetReports: React.FC<AssetReportsProps> = ({ isOpen, onClose, inline = false }) => {
+  const navigate = useNavigate();
   const [reportData, setReportData] = useState<ReportData | null>(null);
   const [allAssets, setAllAssets] = useState<Asset[]>([]);
+  const [allFloors, setAllFloors] = useState<Floor[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedTab, setSelectedTab] = useState<ReportTab>('overview');
+  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+  const [autoRefreshMins, setAutoRefreshMins] = useState(0);
+  const [maintenanceDays, setMaintenanceDays] = useState(30);
+  const [showAllFlagged, setShowAllFlagged] = useState(false);
 
   const generateReport = useCallback(async () => {
     setLoading(true);
@@ -452,7 +512,6 @@ const AssetReports: React.FC<AssetReportsProps> = ({ isOpen, onClose, inline = f
         const type = asset.basic_info?.type ?? 'untyped';
         report.assetsByType[type] = (report.assetsByType[type] ?? 0) + 1;
 
-        // Connections
         const connCount = asset.connections?.length ?? 0;
         report.connectionStats.totalConnections += connCount;
         asset.connections?.forEach((c) => {
@@ -466,7 +525,6 @@ const AssetReports: React.FC<AssetReportsProps> = ({ isOpen, onClose, inline = f
           report.connectionStats.mostConnectedAsset = asset;
         }
 
-        // Maintenance
         const flagged =
           (asset.maintenance?.next_date && new Date(asset.maintenance.next_date).getTime() < now) ||
           asset.custom_fields?.physical_condition === 'Poor' ||
@@ -489,7 +547,6 @@ const AssetReports: React.FC<AssetReportsProps> = ({ isOpen, onClose, inline = f
         }
         if (flagged) report.maintenanceStats.flagged.push(asset);
 
-        // Locations — resolve real names
         const bId = asset.hierarchy?.building_id;
         if (bId) {
           if (!report.locationStats.assetsByBuilding[bId]) {
@@ -507,6 +564,7 @@ const AssetReports: React.FC<AssetReportsProps> = ({ isOpen, onClose, inline = f
             report.locationStats.assetsByFloor[fId] = {
               name: floorMap.get(fId) ?? `Floor …${fId.slice(-6)}`,
               count: 0,
+              building_id: asset.hierarchy?.building_id ?? undefined,
             };
           }
           report.locationStats.assetsByFloor[fId].count++;
@@ -518,6 +576,8 @@ const AssetReports: React.FC<AssetReportsProps> = ({ isOpen, onClose, inline = f
 
       setReportData(report);
       setAllAssets(assets);
+      setAllFloors(floors);
+      setLastUpdated(new Date().toLocaleTimeString());
     } catch (err) {
       console.error('Error generating report:', err);
     } finally {
@@ -528,6 +588,69 @@ const AssetReports: React.FC<AssetReportsProps> = ({ isOpen, onClose, inline = f
   useEffect(() => {
     if (isOpen || inline) generateReport();
   }, [isOpen, inline, generateReport]);
+
+  useEffect(() => {
+    if (!autoRefreshMins) return;
+    const id = setInterval(() => generateReport(), autoRefreshMins * 60_000);
+    return () => clearInterval(id);
+  }, [autoRefreshMins, generateReport]);
+
+  // ── Print ────────────────────────────────────────────────────
+  const handlePrint = () => {
+    if (!reportData) return;
+    const now = new Date();
+    const flagged = reportData.maintenanceStats.flagged;
+    const bEntries = Object.values(reportData.locationStats.assetsByBuilding).sort((a, b) => b.count - a.count);
+
+    const html = [
+      '<!DOCTYPE html><html><head><title>Asset Report</title><style>',
+      'body{font-family:Arial,sans-serif;padding:30px;color:#111}',
+      'h1{font-size:22px;margin-bottom:4px}',
+      'h2{font-size:16px;margin:24px 0 8px;border-bottom:1px solid #ddd;padding-bottom:4px}',
+      'table{border-collapse:collapse;width:100%;font-size:13px;margin-bottom:16px}',
+      'th{background:#f5f5f5;text-align:left;padding:6px 10px;border:1px solid #ddd}',
+      'td{padding:6px 10px;border:1px solid #ddd}',
+      '.meta{color:#666;font-size:12px;margin-bottom:24px}',
+      '@page{margin:20mm}',
+      '</style></head><body>',
+      `<h1>Factory Map — Asset Report</h1>`,
+      `<p class="meta">Generated: ${now.toLocaleString()}</p>`,
+      '<h2>Overview</h2>',
+      '<table><tr><th>Metric</th><th>Value</th></tr>',
+      `<tr><td>Total Assets</td><td>${reportData.totalAssets}</td></tr>`,
+      `<tr><td>ITSM Managed</td><td>${reportData.itsmManaged}</td></tr>`,
+      `<tr><td>Total Connections</td><td>${reportData.connectionStats.totalConnections}</td></tr>`,
+      `<tr><td>Avg Connections/Asset</td><td>${reportData.connectionStats.averageConnectionsPerAsset.toFixed(1)}</td></tr>`,
+      `<tr><td>Needs Maintenance (next 30d)</td><td>${reportData.maintenanceStats.needsMaintenance}</td></tr>`,
+      `<tr><td>Overdue Maintenance</td><td>${reportData.maintenanceStats.overdueMaintenance}</td></tr>`,
+      '</table>',
+      `<h2>Assets Requiring Attention (${flagged.length})</h2>`,
+      flagged.length === 0 ? '<p>No flagged assets.</p>' : [
+        '<table><tr><th>Asset</th><th>Type</th><th>Status</th><th>Next Maintenance</th><th>Condition</th></tr>',
+        ...flagged.map(a => [
+          '<tr>',
+          `<td>${a.basic_info?.display_name ?? ''}</td>`,
+          `<td>${a.basic_info?.type ?? ''}</td>`,
+          `<td>${a.basic_info?.status ?? ''}</td>`,
+          `<td>${a.maintenance?.next_date ? new Date(a.maintenance.next_date).toLocaleDateString() : '—'}</td>`,
+          `<td>${a.custom_fields?.physical_condition ?? '—'}</td>`,
+          '</tr>',
+        ].join('')),
+        '</table>',
+      ].join(''),
+      '<h2>By Building</h2>',
+      '<table><tr><th>Building</th><th>Assets</th></tr>',
+      ...bEntries.map(b => `<tr><td>${b.name}</td><td>${b.count}</td></tr>`),
+      '</table>',
+      '</body></html>',
+    ].join('');
+
+    const w = window.open('', '_blank', 'width=900,height=700');
+    if (!w) return;
+    w.document.write(html);
+    w.document.close();
+    w.print();
+  };
 
   // ── CSV exports ──────────────────────────────────────────────
   const exportCSV = () => {
@@ -693,7 +816,10 @@ const AssetReports: React.FC<AssetReportsProps> = ({ isOpen, onClose, inline = f
         {reportData.connectionStats.mostConnectedAsset && (
           <Card padding="lg" style={{ marginTop: 16 }}>
             <h4 className={styles.chartCard}>Most Connected Asset</h4>
-            <div className={styles.mostConnected}>
+            <div
+              className={`${styles.mostConnected} ${styles.mostConnectedClickable}`}
+              onClick={() => navigate(`/assets/${reportData.connectionStats.mostConnectedAsset!._id}`)}
+            >
               <div className={styles.assetInfo}>
                 <h5>{reportData.connectionStats.mostConnectedAsset.basic_info?.display_name}</h5>
                 <p>{reportData.connectionStats.mostConnectedAsset.basic_info?.manufacturer} {reportData.connectionStats.mostConnectedAsset.basic_info?.model}</p>
@@ -730,50 +856,101 @@ const AssetReports: React.FC<AssetReportsProps> = ({ isOpen, onClose, inline = f
   const renderMaintenance = () => {
     if (!reportData) return null;
     const now = Date.now();
+    const windowMs = maintenanceDays * 86400_000;
+
+    const needs = allAssets.filter(a => {
+      if (!a.maintenance?.next_date) return false;
+      const t = new Date(a.maintenance.next_date).getTime();
+      return t >= now && t - now <= windowMs;
+    }).length;
+
+    const overdue = allAssets.filter(a => {
+      if (!a.maintenance?.next_date) return false;
+      return new Date(a.maintenance.next_date).getTime() < now;
+    }).length;
+
+    const serviced = allAssets.filter(a => {
+      if (!a.maintenance?.last_date) return false;
+      return now - new Date(a.maintenance.last_date).getTime() <= windowMs;
+    }).length;
+
+    const flagged = allAssets.filter(a =>
+      (a.maintenance?.next_date && new Date(a.maintenance.next_date).getTime() < now) ||
+      a.custom_fields?.physical_condition === 'Poor' ||
+      a.basic_info?.status === 'maintenance' ||
+      a.basic_info?.status === 'inactive'
+    );
+
+    const visibleFlagged = showAllFlagged ? flagged : flagged.slice(0, 20);
+
     return (
       <div className={styles.reportContent}>
+        <div className={styles.maintenanceFilters}>
+          <span className={styles.maintenanceFilterLabel}>Window:</span>
+          {[7, 30, 60, 90, 180].map(d => (
+            <button
+              key={d}
+              className={`${styles.windowBtn} ${maintenanceDays === d ? styles.windowBtnActive : ''}`}
+              onClick={() => setMaintenanceDays(d)}
+            >
+              {d}d
+            </button>
+          ))}
+        </div>
+
         <Card padding="lg">
           <h4 className={styles.chartCard}>Maintenance Overview</h4>
           <div className={styles.maintenanceStats}>
             <div className={styles.maintenanceItem}>
-              <span>Needs maintenance (next 30 days)</span>
-              <Badge variant="warning">{reportData.maintenanceStats.needsMaintenance}</Badge>
+              <span>Needs maintenance (next {maintenanceDays} days)</span>
+              <Badge variant="warning">{needs}</Badge>
             </div>
             <div className={styles.maintenanceItem}>
               <span>Overdue</span>
-              <Badge variant="error">{reportData.maintenanceStats.overdueMaintenance}</Badge>
+              <Badge variant="error">{overdue}</Badge>
             </div>
             <div className={styles.maintenanceItem}>
-              <span>Serviced in last 30 days</span>
-              <Badge variant="success">{reportData.maintenanceStats.recentlyServiced}</Badge>
+              <span>Serviced in last {maintenanceDays} days</span>
+              <Badge variant="success">{serviced}</Badge>
             </div>
           </div>
         </Card>
 
         <Card padding="lg" style={{ marginTop: 16 }}>
           <h4 className={styles.chartCard}>Assets Requiring Attention</h4>
-          {reportData.maintenanceStats.flagged.length === 0 ? (
+          {flagged.length === 0 ? (
             <p className={styles.emptyText}>All assets are in good condition.</p>
           ) : (
-            <div className={styles.attentionList}>
-              {reportData.maintenanceStats.flagged.slice(0, 20).map((asset) => {
-                const overdue = asset.maintenance?.next_date && new Date(asset.maintenance.next_date).getTime() < now;
-                return (
-                  <div key={asset._id} className={styles.attentionItem}>
-                    <div className={styles.attentionInfo}>
-                      <strong>{asset.basic_info?.display_name}</strong>
-                      <span>{asset.basic_info?.type ?? '—'}</span>
+            <>
+              <div className={styles.attentionList}>
+                {visibleFlagged.map((asset) => {
+                  const isOverdue = asset.maintenance?.next_date && new Date(asset.maintenance.next_date).getTime() < now;
+                  return (
+                    <div
+                      key={asset._id}
+                      className={`${styles.attentionItem} ${styles.attentionItemClickable}`}
+                      onClick={() => navigate(`/assets/${asset._id}`)}
+                    >
+                      <div className={styles.attentionInfo}>
+                        <strong>{asset.basic_info?.display_name}</strong>
+                        <span>{asset.basic_info?.type ?? '—'}</span>
+                      </div>
+                      <div className={styles.attentionBadges}>
+                        {asset.basic_info?.status === 'maintenance' && <Badge variant="warning">Maintenance</Badge>}
+                        {asset.basic_info?.status === 'inactive' && <Badge variant="error">Inactive</Badge>}
+                        {asset.custom_fields?.physical_condition === 'Poor' && <Badge variant="error">Poor Condition</Badge>}
+                        {isOverdue && <Badge variant="error">Overdue</Badge>}
+                      </div>
                     </div>
-                    <div className={styles.attentionBadges}>
-                      {asset.basic_info?.status === 'maintenance' && <Badge variant="warning">Maintenance</Badge>}
-                      {asset.basic_info?.status === 'inactive' && <Badge variant="error">Inactive</Badge>}
-                      {asset.custom_fields?.physical_condition === 'Poor' && <Badge variant="error">Poor Condition</Badge>}
-                      {overdue && <Badge variant="error">Overdue</Badge>}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+                  );
+                })}
+              </div>
+              {flagged.length > 20 && (
+                <button className={styles.showAllBtn} onClick={() => setShowAllFlagged(v => !v)}>
+                  {showAllFlagged ? 'Show fewer' : `Show all ${flagged.length} assets`}
+                </button>
+              )}
+            </>
           )}
         </Card>
       </div>
@@ -782,8 +959,12 @@ const AssetReports: React.FC<AssetReportsProps> = ({ isOpen, onClose, inline = f
 
   const renderLocations = () => {
     if (!reportData) return null;
-    const bEntries = Object.values(reportData.locationStats.assetsByBuilding).sort((a, b) => b.count - a.count);
-    const fEntries = Object.values(reportData.locationStats.assetsByFloor).sort((a, b) => b.count - a.count);
+    const bEntries = Object.entries(reportData.locationStats.assetsByBuilding)
+      .map(([id, b]) => ({ ...b, id }))
+      .sort((a, b) => b.count - a.count);
+    const fEntries = Object.entries(reportData.locationStats.assetsByFloor)
+      .map(([id, f]) => ({ ...f, id }))
+      .sort((a, b) => b.count - a.count);
     const maxCount = Math.max(...bEntries.map((e) => e.count), ...fEntries.map((e) => e.count), 1);
 
     return (
@@ -811,7 +992,11 @@ const AssetReports: React.FC<AssetReportsProps> = ({ isOpen, onClose, inline = f
           ) : (
             <div className={styles.statusChart}>
               {fEntries.map((f) => (
-                <div key={f.name} className={styles.statusItem}>
+                <div
+                  key={f.id}
+                  className={`${styles.statusItem} ${f.building_id ? styles.statusItemClickable : ''}`}
+                  onClick={() => f.building_id && navigate(`/map?building=${f.building_id}&floor=${f.id}`)}
+                >
                   <span className={styles.statusLabel}>{f.name}</span>
                   <div className={styles.statusBar}>
                     <div className={styles.statusFill} style={{ width: `${(f.count / maxCount) * 100}%`, background: 'var(--color-success, #22c55e)' }} />
@@ -830,7 +1015,7 @@ const AssetReports: React.FC<AssetReportsProps> = ({ isOpen, onClose, inline = f
             <div className={styles.heatmapGrid}>
               {bEntries.map((b) => (
                 <div
-                  key={b.name}
+                  key={b.id}
                   className={styles.heatmapCell}
                   style={{ '--heat': b.count / maxCount } as React.CSSProperties}
                   title={`${b.count} assets`}
@@ -846,10 +1031,11 @@ const AssetReports: React.FC<AssetReportsProps> = ({ isOpen, onClose, inline = f
                 <div className={styles.heatmapGrid}>
                   {fEntries.slice(0, 12).map((f) => (
                     <div
-                      key={f.name}
-                      className={styles.heatmapCell}
+                      key={f.id}
+                      className={`${styles.heatmapCell} ${f.building_id ? styles.heatmapCellClickable : ''}`}
                       style={{ '--heat': f.count / maxCount } as React.CSSProperties}
-                      title={`${f.count} assets`}
+                      title={`${f.count} assets — click to view on map`}
+                      onClick={() => f.building_id && navigate(`/map?building=${f.building_id}&floor=${f.id}`)}
                     >
                       <span className={styles.heatmapCellLabel}>{f.name}</span>
                       <span className={styles.heatmapCellCount}>{f.count}</span>
@@ -870,7 +1056,7 @@ const AssetReports: React.FC<AssetReportsProps> = ({ isOpen, onClose, inline = f
   };
 
   const renderTopology = () => {
-    return <TopologyView assets={allAssets} />;
+    return <TopologyView assets={allAssets} floors={allFloors} />;
   };
 
   const renderContent = () => {
@@ -897,9 +1083,23 @@ const AssetReports: React.FC<AssetReportsProps> = ({ isOpen, onClose, inline = f
           </Button>
         ))}
       </div>
-      <div style={{ display: 'flex', gap: 8 }}>
+      <div className={styles.headerActions}>
+        {lastUpdated && <span className={styles.lastUpdated}>Updated {lastUpdated}</span>}
+        <select
+          value={autoRefreshMins}
+          onChange={e => setAutoRefreshMins(Number(e.target.value))}
+          className={styles.autoRefreshSelect}
+          title="Auto-refresh interval"
+        >
+          <option value={0}>No auto-refresh</option>
+          <option value={5}>Every 5 min</option>
+          <option value={10}>Every 10 min</option>
+        </select>
+        <Button variant="outline" size="sm" onClick={handlePrint} disabled={loading || !reportData}>
+          🖨 Print
+        </Button>
         <Button variant="outline" size="sm" onClick={exportCSV} disabled={loading || !reportData}>
-          ⬇ Export CSV
+          ⬇ CSV
         </Button>
         <Button variant="outline" size="sm" onClick={generateReport} disabled={loading}>
           {loading ? 'Loading…' : 'Refresh'}

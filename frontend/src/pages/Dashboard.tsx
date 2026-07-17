@@ -40,6 +40,7 @@ import { useAssets, assetKeys } from '../hooks/queries/useAssets';
 import { useBuildings } from '../hooks/queries/useBuildings';
 import { useFloors } from '../hooks/queries/useFloors';
 import { useWorkareas } from '../hooks/queries/useWorkareas';
+import { useAuditLog } from '../hooks/queries/useAuditLog';
 import styles from '../styles/pages/Dashboard.module.css';
 
 const Dashboard: React.FC = () => {
@@ -49,6 +50,7 @@ const Dashboard: React.FC = () => {
   const { data: buildings = [] } = useBuildings();
   const { data: floors = [] } = useFloors();
   const { data: workareas = [] } = useWorkareas();
+  const { data: recentActivity } = useAuditLog({ limit: 8, offset: 0 });
   const assets = useMemo(() => rawAssets.filter((a: Asset) => a.basic_info && a.itsm), [rawAssets]);
   const [searchQuery, setSearchQuery] = useState(() => localStorage.getItem('db_search') ?? '');
   const [filterOpen, setFilterOpen] = useState(false);
@@ -64,6 +66,12 @@ const Dashboard: React.FC = () => {
   const [bulkMoveOpen, setBulkMoveOpen] = useState(false);
   const [maintenanceFilter, setMaintenanceFilter] = useState<'overdue' | 'upcoming' | null>(
     () => (localStorage.getItem('db_maint') as 'overdue' | 'upcoming' | null) ?? null
+  );
+  const [quickStatusFilter, setQuickStatusFilter] = useState<'active' | 'maintenance' | null>(
+    () => (localStorage.getItem('db_qstatus') as 'active' | 'maintenance' | null) ?? null
+  );
+  const [assignedToFilter, setAssignedToFilter] = useState(
+    () => localStorage.getItem('db_assigned') ?? ''
   );
   const [viewAsset, setViewAsset] = useState<Asset | null>(null);
   const [page, setPage] = useState(1);
@@ -138,10 +146,12 @@ const Dashboard: React.FC = () => {
     if (maintenanceFilter === 'overdue') filtered = filtered.filter(a => a.maintenance?.next_date && new Date(a.maintenance.next_date).getTime() < t);
     else if (maintenanceFilter === 'upcoming') filtered = filtered.filter(a => { if (!a.maintenance?.next_date) return false; const ts = new Date(a.maintenance.next_date).getTime(); return ts >= t && ts - t < td; });
     if (conflictFilter) filtered = filtered.filter(a => a.itsm?.source_of_truth === 'local' && !!(a as any).itsm_snapshot?.display_name);
+    if (quickStatusFilter) filtered = filtered.filter(a => a.basic_info?.status === quickStatusFilter);
+    if (assignedToFilter) filtered = filtered.filter(a => a.assigned_person?.full_name === assignedToFilter);
     return filtered;
-  }, [assets, searchQuery, filters, maintenanceFilter, conflictFilter]);
+  }, [assets, searchQuery, filters, maintenanceFilter, conflictFilter, quickStatusFilter, assignedToFilter]);
 
-  useEffect(() => { setPage(1); }, [searchQuery, filters, maintenanceFilter, conflictFilter]);
+  useEffect(() => { setPage(1); }, [searchQuery, filters, maintenanceFilter, conflictFilter, quickStatusFilter, assignedToFilter]);
 
   const handleApplyFilters = (newFilters: FilterCriteria) => {
     setFilters(newFilters);
@@ -364,6 +374,14 @@ const Dashboard: React.FC = () => {
     else localStorage.removeItem('db_maint');
   }, [maintenanceFilter]);
   useEffect(() => { localStorage.setItem('db_conflict', String(conflictFilter)); }, [conflictFilter]);
+  useEffect(() => {
+    if (quickStatusFilter) localStorage.setItem('db_qstatus', quickStatusFilter);
+    else localStorage.removeItem('db_qstatus');
+  }, [quickStatusFilter]);
+  useEffect(() => {
+    if (assignedToFilter) localStorage.setItem('db_assigned', assignedToFilter);
+    else localStorage.removeItem('db_assigned');
+  }, [assignedToFilter]);
   useEffect(() => { localStorage.setItem('db_view', viewMode); }, [viewMode]);
   useEffect(() => { localStorage.setItem('db_sort', sortField); }, [sortField]);
   useEffect(() => { localStorage.setItem('db_sort_dir', sortDir); }, [sortDir]);
@@ -437,6 +455,12 @@ const Dashboard: React.FC = () => {
     active: assets.filter((a) => a.basic_info?.status === 'active').length,
     maintenance: assets.filter((a) => a.basic_info?.status === 'maintenance').length,
   };
+
+  const assignedPersons = useMemo(() => {
+    const names = new Set<string>();
+    assets.forEach(a => { if (a.assigned_person?.full_name) names.add(a.assigned_person.full_name); });
+    return Array.from(names).sort();
+  }, [assets]);
 
   const maintenanceStats = assets.reduce(
     (acc, a) => {
@@ -548,21 +572,29 @@ const Dashboard: React.FC = () => {
           </div>
         </Card>
 
-        <Card padding="lg" className={styles.statCard}>
+        <button
+          className={`${styles.statCard} ${styles.statCardBtn} ${quickStatusFilter === 'active' ? styles.statCardActive : ''}`}
+          onClick={() => setQuickStatusFilter(f => f === 'active' ? null : 'active')}
+          title="Click to filter active assets"
+        >
           <div className={styles.statIcon}><Activity size={36} color="#10b981" /></div>
           <div className={styles.statContent}>
             <div className={styles.statValue}>{stats.active}</div>
             <div className={styles.statLabel}>Active</div>
           </div>
-        </Card>
+        </button>
 
-        <Card padding="lg" className={styles.statCard}>
+        <button
+          className={`${styles.statCard} ${styles.statCardBtn} ${quickStatusFilter === 'maintenance' ? styles.statCardActive : ''}`}
+          onClick={() => setQuickStatusFilter(f => f === 'maintenance' ? null : 'maintenance')}
+          title="Click to filter assets in maintenance"
+        >
           <div className={styles.statIcon}><Wrench size={36} color="#f59e0b" /></div>
           <div className={styles.statContent}>
             <div className={styles.statValue}>{stats.maintenance}</div>
             <div className={styles.statLabel}>In Maintenance</div>
           </div>
-        </Card>
+        </button>
 
         <Card padding="lg" className={styles.statCard}>
           <div className={styles.statIcon}><Building2 size={36} color="var(--color-primary)" /></div>
@@ -596,6 +628,30 @@ const Dashboard: React.FC = () => {
           </div>
         </button>
       </div>
+
+      {/* Recent activity strip */}
+      {recentActivity && recentActivity.data.length > 0 && (
+        <div className={styles.activityStrip}>
+          <span className={styles.activityTitle}>Recent activity</span>
+          <div className={styles.activityList}>
+            {recentActivity.data.map(entry => {
+              const age = Date.now() - new Date(entry.timestamp).getTime();
+              const ago = age < 60000 ? 'just now'
+                : age < 3600000 ? `${Math.floor(age / 60000)}m ago`
+                : age < 86400000 ? `${Math.floor(age / 3600000)}h ago`
+                : `${Math.floor(age / 86400000)}d ago`;
+              return (
+                <span key={entry._id} className={styles.activityItem} title={new Date(entry.timestamp).toLocaleString()}>
+                  <strong>{entry.username}</strong>
+                  {' '}{entry.action}
+                  {entry.entity_type !== 'auth' && <em> {entry.entity_type}</em>}
+                  <span className={styles.activityAgo}>{ago}</span>
+                </span>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* ITSM sync result card */}
       {itsmSyncResult && (
@@ -741,6 +797,18 @@ const Dashboard: React.FC = () => {
             onChange={setSearchQuery}
             placeholder="Search assets by name, tag, serial number..."
           />
+          {assignedPersons.length > 0 && (
+            <select
+              className={styles.personSelect}
+              value={assignedToFilter}
+              onChange={e => setAssignedToFilter(e.target.value)}
+            >
+              <option value="">All assignees</option>
+              {assignedPersons.map(name => (
+                <option key={name} value={name}>{name}</option>
+              ))}
+            </select>
+          )}
           <div className={styles.searchActions}>
             <Button
               variant={activeFilterCount > 0 ? 'primary' : 'outline'}

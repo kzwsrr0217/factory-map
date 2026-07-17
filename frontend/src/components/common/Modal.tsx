@@ -13,6 +13,7 @@
  *             contains Cancel / Submit buttons.
  */
 import React, { useEffect } from 'react';
+import ReactDOM from 'react-dom';
 import styles from '../../styles/components/Modal.module.css';
 
 interface ModalProps {
@@ -53,7 +54,7 @@ const Modal: React.FC<ModalProps> = ({
 
   if (!isOpen) return null;
 
-  return (
+  return ReactDOM.createPortal(
     <div className={styles.overlay} onClick={onClose}>
       <div
         className={`${styles.modal} ${styles[width]}`}
@@ -72,7 +73,8 @@ const Modal: React.FC<ModalProps> = ({
 
         {footer && <div className={styles.footer}>{footer}</div>}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 };
 

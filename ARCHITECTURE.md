@@ -163,7 +163,7 @@ POST/PATCH/DELETE request
 
 ### 5. Global search — client-side inverted index
 
-`searchIndex.ts` builds a prefix-token inverted index over all loaded assets on the client. `GlobalSearch.tsx` (Ctrl+K) queries this index — no server round-trip after initial load.
+`searchIndex.ts` builds a prefix-token inverted index over all loaded assets on the client. `GlobalSearch.tsx` (opened via the header search button or Ctrl+K) queries this index — no server round-trip after initial load.
 
 ### 6. Custom DOM event bus
 
@@ -234,7 +234,7 @@ Interactive Swagger UI is available at **`http://localhost:4000/api/docs`** (or 
 ### Backend
 
 - **Framework**: Jest + Supertest
-- **Test suites**: `auth.test.ts`, `assets.test.ts`, `buildings.test.ts`, `itsm.test.ts`
+- **Test suites** (20): `auth.test.ts`, `auth.extended.test.ts`, `auth.lockout.test.ts`, `session-revocation.test.ts`, `assets.test.ts`, `asset-connections.test.ts`, `asset-extras.test.ts`, `assets-filtering.test.ts`, `buildings.test.ts`, `floors.test.ts`, `workareas.test.ts`, `sections.test.ts`, `workstations.test.ts`, `network.test.ts`, `audit.test.ts`, `itsm.test.ts`, `users.test.ts`, `rbac.test.ts`, `alerts.test.ts`, `error-handling.test.ts`
 - **DB**: tests run against the same Docker MSSQL instance; suites truncate relevant tables in `beforeAll`
 - **Isolation**: `--runInBand` (sequential) prevents cross-suite DB state conflicts
 - **Port conflict prevention**: `NODE_ENV=test` is set via `setupFiles` (before any module import) so `server.ts` skips `startServer()` during tests
@@ -247,7 +247,7 @@ docker exec factory-map-backend npm test
 ### Frontend
 
 - **Framework**: React Testing Library + MSW (Mock Service Worker) for API mocking
-- **Test suites**: `GlobalSearch.test.tsx`, `AssetFormModal.test.tsx`, `Login.test.tsx`
+- **Test suites** (15): `Alerts`, `AssetDetails`, `AssetFormModal`, `AssetReports`, `AuditLog`, `BuildingDetails`, `CommandPalette`, `Dashboard`, `GlobalSearch`, `Login`, `Maintenance`, `MapView`, `NetworkInfrastructure`, `Settings`, `UserManagement`
 - **MSW handlers**: `src/mocks/handlers.ts` + `src/mocks/server.ts`
 
 ```bash
@@ -259,7 +259,7 @@ cd frontend && npm test -- --watchAll=false
 - **Framework**: `@playwright/test`
 - **Config**: `playwright.config.ts` — `baseURL: http://localhost:5174`, `workers: 1`, `retries: 1`
 - **Auth**: `globalSetup` logs in once and saves session to `e2e/.auth/user.json`; test files inherit `storageState` so only auth tests use a fresh session
-- **Test suites**: `auth.spec.ts`, `buildings.spec.ts`, `assets.spec.ts`, `map.spec.ts`, `dashboard.spec.ts`, `alerts.spec.ts`
+- **Test suites** (12): `auth.spec.ts`, `buildings.spec.ts`, `assets.spec.ts`, `asset-detail.spec.ts`, `map.spec.ts`, `dashboard.spec.ts`, `alerts.spec.ts`, `audit.spec.ts`, `maintenance.spec.ts`, `network.spec.ts`, `reports.spec.ts`, `settings.spec.ts`
 
 ```bash
 # Requires the full stack running (frontend on 5174, backend on 4000)

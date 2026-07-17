@@ -199,9 +199,10 @@ const MapView: React.FC = () => {
       const paramBuilding = searchParams.get('building');
       const paramFloor    = searchParams.get('floor');
       const targetBuilding = buildingsData.find(b => b._id === paramBuilding) ?? buildingsData[0];
+      const buildingFloors = floorsData.filter(f => f.building_id === targetBuilding?._id);
       const targetFloor    = paramFloor
         ? floorsData.find(f => f._id === paramFloor)
-        : floorsData.find(f => f.building_id === targetBuilding?._id);
+        : (buildingFloors.find(f => f.floor_number > 0) ?? buildingFloors[0]);
       if (targetBuilding) setSelectedBuildingId(targetBuilding._id);
       if (targetFloor)    setSelectedFloorId(targetFloor._id);
     } catch (error) {
@@ -284,8 +285,9 @@ const MapView: React.FC = () => {
 
   const handleBuildingChange = (value: string) => {
     setSelectedBuildingId(value);
-    const floorInBuilding = floors.find((floor) => floor.building_id === value);
-    setSelectedFloorId(floorInBuilding?._id || '');
+    const buildingFloors = floors.filter((floor) => floor.building_id === value);
+    const defaultFloor = buildingFloors.find(f => f.floor_number > 0) ?? buildingFloors[0];
+    setSelectedFloorId(defaultFloor?._id || '');
   };
 
   const handleFloorChange = (value: string) => {

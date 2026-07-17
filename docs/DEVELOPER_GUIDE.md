@@ -201,8 +201,11 @@ factory-map/
 │       │   ├── useAssetLookups.ts         # Fetches distinct field values for autocomplete
 │       │   ├── useAssets.ts               # Asset list with optional floor filter
 │       │   ├── useHierarchy.ts            # Buildings + floors with reload trigger
+│       │   ├── useMaintenanceCounts.ts    # Overdue / due-soon counts for Dashboard
 │       │   ├── usePersonSuggestions.ts    # Extracts person list from loaded assets
-│       │   └── useSocket.ts              # Shared socket singleton + typed event binding
+│       │   ├── useSocket.ts              # Shared socket singleton + typed event binding
+│       │   └── queries/                   # React Query hooks: useAlerts, useAssets, useAuditLog,
+│       │                                  #   useBuildings, useFloors, useNetwork, useUsers, useWorkareas
 │       ├── pages/                         # One file per route
 │       ├── components/                    # Reusable and feature components
 │       ├── services/                      # Thin wrappers over axios api instance
@@ -212,13 +215,20 @@ factory-map/
 │           ├── searchIndex.ts             # Inverted prefix index for instant search
 │           └── settings.ts               # App settings with localStorage persistence
 │
-├── e2e/                                   # Playwright end-to-end tests
+├── e2e/                                   # Playwright end-to-end tests (12 spec files)
 │   ├── auth.spec.ts                       # Login, logout, protected routes
 │   ├── buildings.spec.ts                  # Building CRUD
 │   ├── assets.spec.ts                     # Asset CRUD
+│   ├── asset-detail.spec.ts               # Single-asset page
 │   ├── map.spec.ts                        # Floor map / SVG rendering + layer controls
 │   ├── dashboard.spec.ts                  # Dashboard stats + sidebar nav
 │   ├── alerts.spec.ts                     # Alert config + scheduled alerts
+│   ├── audit.spec.ts                      # Audit log filters + pagination
+│   ├── maintenance.spec.ts                # Maintenance calendar
+│   ├── network.spec.ts                    # Network infrastructure rooms/racks
+│   ├── reports.spec.ts                    # Asset reports tabs
+│   ├── settings.spec.ts                   # User settings + password change
+│   ├── global-setup.ts                    # Playwright globalSetup (one-time login)
 │   └── helpers.ts                         # Shared login helpers + token cache
 ├── playwright.config.ts                   # Playwright config (baseURL, workers, retries, storageState)
 ├── docs/                                  # Documentation (this directory)
@@ -587,13 +597,27 @@ cd backend && npm test
 - `--forceExit` — closes the TypeORM connection pool that keeps the event loop alive
 - `NODE_ENV=test` is set via `setupFiles: ["<rootDir>/src/__tests__/helpers/jestEnv.ts"]` — this runs **before** any module import, preventing `server.ts` from calling `startServer()` and binding the port
 
-Test suites:
+Test suites (20 suites):
 - `src/__tests__/auth.test.ts` — register, login, invalid credentials, token refresh
+- `src/__tests__/auth.extended.test.ts` — password policy, role changes, profile update, token expiry
+- `src/__tests__/auth.lockout.test.ts` — account lockout (423), locked-account rejects correct password, pagination safety cap, Zod 400 validation
+- `src/__tests__/session-revocation.test.ts` — logout invalidates token, concurrent session limits
 - `src/__tests__/assets.test.ts` — CRUD, bulk-create, connections, `wall_port_id` assign/clear
+- `src/__tests__/asset-connections.test.ts` — create/delete connections, bidirectional propagation, port fields
+- `src/__tests__/asset-extras.test.ts` — work items, software, tags, QR code endpoint
+- `src/__tests__/assets-filtering.test.ts` — filter by status, type, building, floor, search query
 - `src/__tests__/buildings.test.ts` — CRUD, cascade checks
+- `src/__tests__/floors.test.ts` — CRUD, building FK, floor number uniqueness
+- `src/__tests__/workareas.test.ts` — CRUD, floor FK
+- `src/__tests__/sections.test.ts` — CRUD, workarea FK
+- `src/__tests__/workstations.test.ts` — CRUD, section FK
+- `src/__tests__/network.test.ts` — rooms/racks/patch panels/wall ports CRUD; `cable_type` round-trip; asset `wall_port_id` FK assign + null-clear
+- `src/__tests__/audit.test.ts` — create/update/delete writes AuditLog rows with diffs
 - `src/__tests__/itsm.test.ts` — hardware search, sync (mock mode)
-- `src/__tests__/network.test.ts` — rooms/racks/patch panels/wall ports CRUD; `cable_type` copper/fiber/mixed round-trip; asset `wall_port_id` FK assign + null-clear
-- `src/__tests__/auth.lockout.test.ts` — account lockout (423), locked-account rejects correct password, pagination safety cap (`meta.limit`/`meta.truncated`), Zod 400 validation for assets + buildings
+- `src/__tests__/users.test.ts` — admin CRUD, self-update, role guard
+- `src/__tests__/rbac.test.ts` — viewer/operator/admin permission matrix for key endpoints
+- `src/__tests__/alerts.test.ts` — config GET/PUT, test trigger, scheduled alerts CRUD
+- `src/__tests__/error-handling.test.ts` — 404 on unknown routes, malformed JSON, missing auth
 
 ### Frontend
 
@@ -603,10 +627,21 @@ cd frontend && npm test -- --watchAll=false
 
 MSW (`src/mocks/server.ts` + `src/mocks/handlers.ts`) intercepts all `/api/*` requests so tests run without a live backend.
 
-Test files:
+Test files (14 suites):
 - `src/__tests__/Login.test.tsx` — form render, submit dispatches auth
-- `src/__tests__/NetworkInfrastructure.test.tsx` — building selector, MDF/IDF room cards, Add Room modal, cable_type badge labels
 - `src/__tests__/GlobalSearch.test.tsx` — search index, debounce, result click, cache invalidation
+- `src/__tests__/Dashboard.test.tsx` — stat cards, overdue/due-soon filter toggles
+- `src/__tests__/AssetDetails.test.tsx` — asset name, hierarchy, overflow menu, ITSM sync
+- `src/__tests__/AssetFormModal.test.tsx` — required field validation, create/update flow
+- `src/__tests__/AssetReports.test.tsx` — all five tabs, header controls, topology filters
+- `src/__tests__/AuditLog.test.tsx` — filter panel, empty state, pagination
+- `src/__tests__/BuildingDetails.test.tsx` — building name, floor cards, error state
+- `src/__tests__/Maintenance.test.tsx` — calendar, overdue panel, collapse toggle, view switch
+- `src/__tests__/MapView.test.tsx` — building/floor selectors, search, deploy button
+- `src/__tests__/NetworkInfrastructure.test.tsx` — building selector, room list, Add Room
+- `src/__tests__/Settings.test.tsx` — appearance, password validation, sessions
+- `src/__tests__/Alerts.test.tsx` — config form, test trigger, scheduled alerts
+- `src/__tests__/UserManagement.test.tsx` — user list, create form, role options
 
 ### E2E (Playwright)
 
@@ -626,13 +661,19 @@ npx playwright test e2e/auth.spec.ts  # Single suite
 
 **Session bootstrap** (`e2e/global-setup.ts`): logs in once via the API, stores the session in `e2e/.auth/user.json` so every test file starts already authenticated. Only `auth.spec.ts` clears the state to test the actual login form.
 
-**Suites**:
+**Suites** (12 spec files):
 - `auth.spec.ts` — login page renders, wrong password, correct credentials, protected-route redirect, logout
 - `buildings.spec.ts` — list renders, seed buildings present, create dialog, full create/cleanup
 - `assets.spec.ts` — list renders, create asset, card navigates to detail page
+- `asset-detail.spec.ts` — asset detail page, tab navigation, overflow menu
 - `map.spec.ts` — floor selector, SVG map container (`[class*="mapContainer"]`), layer controls, wall-ports toggle
 - `dashboard.spec.ts` — stat cards, sidebar links, global search overlay
 - `alerts.spec.ts` — config form, Teams section, scheduled alerts section, alert history table
+- `audit.spec.ts` — audit log filters, pagination, entry list
+- `maintenance.spec.ts` — calendar renders, overdue badge, month navigation
+- `network.spec.ts` — building selector, room list, rack diagram
+- `reports.spec.ts` — all tabs (Overview/Connections/Maintenance/Locations/Topology)
+- `settings.spec.ts` — theme toggle, password form, sessions table
 
 **Key patterns**:
 - FloorMap renders SVG (not `<canvas>`); check for `[class*="mapContainer"]` or `[class*="controlButton"]`

@@ -38,14 +38,14 @@ const Header: React.FC<HeaderProps> = ({ onSidebarToggle }) => {
         || e.target instanceof HTMLTextAreaElement
         || (e.target as HTMLElement)?.isContentEditable;
 
-      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
-        e.preventDefault();
-        setSearchOpen(true);
-        return;
-      }
       if ((e.ctrlKey || e.metaKey) && e.key === 'n') {
         e.preventDefault();
         window.dispatchEvent(new CustomEvent('app:new-asset'));
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault();
+        setSearchOpen(v => !v);
         return;
       }
       if (e.key === '?' && !inInput && !e.ctrlKey && !e.metaKey) {

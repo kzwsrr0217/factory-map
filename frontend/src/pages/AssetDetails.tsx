@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import QRCode from 'qrcode';
-import { RefreshCw, QrCode, Tag, AlertTriangle, MoreVertical, CheckCircle } from 'lucide-react';
+import { RefreshCw, QrCode, Tag, AlertTriangle, MoreVertical, CheckCircle, MapPin, History, UserRoundCog } from 'lucide-react';
 import Card from '../components/common/Card';
 import Button from '../components/common/Button';
 import Badge from '../components/common/Badge';
@@ -16,10 +16,18 @@ import { useToast } from '../contexts/ToastContext';
 import { getAssetIcon, getAssetTypeLabel } from '../utils/assetTypes';
 import styles from '../styles/pages/AssetDetails.module.css';
 import AssetFormModal from '../components/asset/AssetFormModal';
+import { useAuditLog } from '../hooks/queries/useAuditLog';
+import { AuditEntry } from '../services/audit.service';
 
 const CONN_TYPE_OPTIONS = [
   'ethernet','fiber','network','power','usb','serial','bluetooth','wifi','dependency','peer','other',
 ];
+
+const formatHistoryVal = (v: unknown): string => {
+  if (v === null || v === undefined) return '—';
+  if (typeof v === 'object') return JSON.stringify(v);
+  return String(v);
+};
 
 const statusVariant = (s?: string): 'success' | 'warning' | 'error' | 'neutral' => {
   if (s === 'active')                          return 'success';
@@ -46,6 +54,12 @@ const AssetDetails: React.FC = () => {
   const [menuOpen, setMenuOpen]       = useState(false);
   const [markingDone, setMarkingDone] = useState(false);
   const [qrDataUrl, setQrDataUrl]     = useState<string | null>(null);
+  const [activeTab, setActiveTab]     = useState<'details' | 'history'>('details');
+  const [showTransfer, setShowTransfer] = useState(false);
+  const [transferName, setTransferName] = useState('');
+  const [transferId, setTransferId]   = useState('');
+  const [transferNotes, setTransferNotes] = useState('');
+  const [transferring, setTransferring] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const toast = useToast();
 
@@ -59,6 +73,9 @@ const AssetDetails: React.FC = () => {
   const [connBidi, setConnBidi]           = useState(true);
   const [addingConn, setAddingConn]       = useState(false);
   const [showAddConn, setShowAddConn]     = useState(false);
+
+  const { data: auditData } = useAuditLog({ document_id: id, limit: 50 });
+  const auditEntries: AuditEntry[] = auditData?.data ?? [];
 
   const loadAssetDetails = useCallback(async (assetId: string) => {
     try {
@@ -183,6 +200,26 @@ const AssetDetails: React.FC = () => {
       toast.error('Failed to update maintenance');
     } finally {
       setMarkingDone(false);
+    }
+  };
+
+  const handleTransfer = async () => {
+    if (!asset || !id || !transferName.trim()) return;
+    setTransferring(true);
+    try {
+      await assetService.updateAsset(id, {
+        assigned_person: { full_name: transferName.trim(), person_id: transferId.trim() || transferName.trim() },
+      } as any);
+      toast.success(`Asset transferred to ${transferName.trim()}`);
+      setShowTransfer(false);
+      setTransferName('');
+      setTransferId('');
+      setTransferNotes('');
+      loadAssetDetails(id);
+    } catch {
+      toast.error('Transfer failed');
+    } finally {
+      setTransferring(false);
     }
   };
 
@@ -330,6 +367,19 @@ const AssetDetails: React.FC = () => {
             <Tag size={15} style={{ marginRight: 6 }} />
             Print Label
           </Button>
+          {floor && !asset.hierarchy?.rack_id && (
+            <Button
+              variant="outline"
+              onClick={() => navigate(`/map?building=${asset.hierarchy?.building_id}&floor=${asset.hierarchy?.floor_id}`)}
+            >
+              <MapPin size={15} style={{ marginRight: 6 }} />
+              Show on Map
+            </Button>
+          )}
+          <Button variant="outline" onClick={() => setShowTransfer(v => !v)}>
+            <UserRoundCog size={15} style={{ marginRight: 6 }} />
+            Transfer
+          </Button>
           <Button variant="outline" onClick={() => setFormOpen(true)}>Edit</Button>
 
           {/* Overflow menu — Delete lives here */}
@@ -354,6 +404,56 @@ const AssetDetails: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Transfer panel */}
+      {showTransfer && (
+        <div className={styles.transferPanel}>
+          <div className={styles.transferHeader}>
+            <strong>Transfer Asset</strong>
+            {asset.assigned_person && (
+              <span className={styles.transferFrom}>
+                Currently assigned to: <em>{asset.assigned_person.full_name}</em>
+              </span>
+            )}
+          </div>
+          <div className={styles.transferFields}>
+            <div className={styles.transferField}>
+              <label>New owner name <span style={{ color: 'var(--color-danger)' }}>*</span></label>
+              <input
+                className={styles.transferInput}
+                value={transferName}
+                onChange={e => setTransferName(e.target.value)}
+                placeholder="Full name"
+                autoFocus
+              />
+            </div>
+            <div className={styles.transferField}>
+              <label>Employee / person ID</label>
+              <input
+                className={styles.transferInput}
+                value={transferId}
+                onChange={e => setTransferId(e.target.value)}
+                placeholder="e.g. EMP-00123"
+              />
+            </div>
+            <div className={styles.transferField}>
+              <label>Notes</label>
+              <input
+                className={styles.transferInput}
+                value={transferNotes}
+                onChange={e => setTransferNotes(e.target.value)}
+                placeholder="Reason for transfer (optional)"
+              />
+            </div>
+          </div>
+          <div className={styles.transferActions}>
+            <Button variant="primary" onClick={handleTransfer} loading={transferring} disabled={!transferName.trim()}>
+              Confirm Transfer
+            </Button>
+            <Button variant="outline" onClick={() => setShowTransfer(false)}>Cancel</Button>
+          </div>
+        </div>
+      )}
 
       <ConfirmDialog
         isOpen={confirmOpen}
@@ -413,7 +513,59 @@ const AssetDetails: React.FC = () => {
         )}
       </Card>
 
-      <div className={styles.contentGrid}>
+      <div className={styles.tabNav}>
+        <button
+          className={`${styles.tabBtn} ${activeTab === 'details' ? styles.tabBtnActive : ''}`}
+          onClick={() => setActiveTab('details')}
+        >
+          Details
+        </button>
+        <button
+          className={`${styles.tabBtn} ${activeTab === 'history' ? styles.tabBtnActive : ''}`}
+          onClick={() => setActiveTab('history')}
+        >
+          <History size={14} style={{ marginRight: 5 }} />
+          Change History
+        </button>
+      </div>
+
+      {activeTab === 'history' && (
+        <div className={styles.historyPanel}>
+          {auditEntries.length === 0 ? (
+            <p className={styles.emptyHistory}>No change history recorded for this asset yet.</p>
+          ) : (
+            <ul className={styles.historyList}>
+              {auditEntries.map(entry => {
+                const changes = entry.diff ?? entry.changes;
+                return (
+                  <li key={entry._id} className={styles.historyEntry}>
+                    <div className={styles.historyMeta}>
+                      <strong>{entry.username}</strong>
+                      {' '}{entry.action}
+                      <span className={styles.historyTime}>{new Date(entry.timestamp).toLocaleString()}</span>
+                      {entry.ip_address && <span className={styles.historyTime}>· IP: {entry.ip_address}</span>}
+                    </div>
+                    {entry.action === 'update' && changes && (
+                      <div className={styles.historyDiff}>
+                        {Object.entries(changes).map(([field, d]) => (
+                          <div key={field} className={styles.historyDiffRow}>
+                            <span className={styles.historyField}>{field}</span>
+                            <span className={styles.historyOld}>{formatHistoryVal(d.old)}</span>
+                            <span className={styles.historyArrow}>→</span>
+                            <span className={styles.historyNew}>{formatHistoryVal(d.new)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {activeTab === 'details' && <div className={styles.contentGrid}>
         {/* Left Column */}
         <div className={styles.leftColumn}>
           {/* Basic Information */}
@@ -834,7 +986,7 @@ const AssetDetails: React.FC = () => {
             </Card>
           )}
         </div>
-      </div>
+      </div>}
 
       {/* Modals — always at root of return, never inside a column */}
       <AssetFormModal

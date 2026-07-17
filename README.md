@@ -91,13 +91,20 @@ http://localhost:4000/api/docs
 
 ```
 factory-map/
-├── e2e/                           # Playwright end-to-end tests
+├── e2e/                           # Playwright end-to-end tests (12 spec files)
 │   ├── auth.spec.ts               # Login, logout, protected routes
 │   ├── buildings.spec.ts          # Building CRUD
 │   ├── assets.spec.ts             # Asset CRUD
+│   ├── asset-detail.spec.ts       # Asset detail page
 │   ├── map.spec.ts                # Floor map / SVG rendering
 │   ├── dashboard.spec.ts          # Dashboard stats + sidebar
 │   ├── alerts.spec.ts             # Alert config + scheduled alerts
+│   ├── audit.spec.ts              # Audit log
+│   ├── maintenance.spec.ts        # Maintenance calendar
+│   ├── network.spec.ts            # Network infrastructure
+│   ├── reports.spec.ts            # Asset reports
+│   ├── settings.spec.ts           # User settings
+│   ├── global-setup.ts            # One-time login + session save
 │   └── helpers.ts                 # Shared login helpers + token cache
 ├── playwright.config.ts           # Playwright config (baseURL, workers, retries, storageState)
 ├── backend/src/

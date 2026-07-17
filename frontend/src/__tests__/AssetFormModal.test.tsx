@@ -69,7 +69,7 @@ function renderModal(props: {
   onSuccess?: () => void;
   onClose?: () => void;
 }) {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false, gcTime: 0 } } });
   return render(
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>

@@ -13,7 +13,8 @@ test.describe('Authentication', () => {
 
   test('wrong password shows an error', async ({ page }) => {
     await page.goto('/login');
-    await page.fill('input[name="username"], input[type="text"]', ADMIN.username);
+    // Use a non-existent user to avoid rate-limiting the real admin account
+    await page.fill('input[name="username"], input[type="text"]', 'nonexistent_test_user_xyz');
     await page.fill('input[type="password"]', 'wrongpassword999');
     await page.click('button[type="submit"]');
     await expect(page.locator('body')).toContainText(
