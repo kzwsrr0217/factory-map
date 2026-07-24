@@ -8,8 +8,14 @@
  * that part of the model is a later, frontend-dependent phase — see
  * docs/DATA_MODEL_MIGRATION.md).
  *
- * No live IFS/Databricks connection exists yet — populated by hand via the
- * seed script only, same constraint as MasterAsset.
+ * Column set verified against shopfloor_visualizer's real IFS export
+ * (`ifs-ingest/get_workcenters.py` + `production_lines.json`): the source
+ * rows carry `Contract` (= site) and `Description`. `contract` is stored
+ * **optional** so a plain `{code, description}` seed row still works, but an
+ * IFS import can populate it. `code` maps to the export's `ProductionLine`.
+ *
+ * Populated by `backend/src/scripts/import-master-data.ts` against exported
+ * JSON today; a live IFS call later only touches that script.
  */
 import { Entity, PrimaryColumn, Column } from 'typeorm';
 
@@ -21,7 +27,12 @@ export class ProductionLine {
   @Column({ type: 'nvarchar', length: 500, nullable: true })
   description!: string | null;
 
+  // IFS `Contract` — the site this line belongs to (e.g. 'MMAG'). Optional:
+  // reference data seeded by hand omits it; an IFS import fills it.
+  @Column({ name: 'contract', type: 'nvarchar', length: 20, nullable: true })
+  contract!: string | null;
+
   toApiResponse() {
-    return { code: this.code, description: this.description };
+    return { code: this.code, description: this.description, contract: this.contract };
   }
 }

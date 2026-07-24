@@ -800,6 +800,34 @@ Note: the bulk sync no longer touches `AssetSoftware` rows (an earlier version
 deleted them without re-creating — software lists are only populated by the
 per-asset `syncAsset` path, which resolves `installed_software`).
 
+## IFS/CMDB Master-Data Import
+
+Separate from ITSM (Alemba) reconcile above: the **read-only IFS/CMDB master
+data** (`master_assets`, `production_lines`, `work_centers`, `entity_kinds`)
+is populated by `backend/src/scripts/import-master-data.ts`
+(`npm run import:master -- <dir>`), which reads the **exact JSON shapes**
+shopfloor_visualizer's own ingest scripts produce — so factorymap can eat the
+same export:
+
+| File | Source (his script) | → factorymap table |
+|---|---|---|
+| `masterData.json` | `databricks-ingest/ingest-mmag-machines.py` | `master_assets` (machine rows) |
+| `OTAssetData.json` | `databricks-ingest/ingest-mmag-ot-assets.py` | `master_assets` (OT/IT rows) |
+| `production_lines.json` | `ifs-ingest/get_workcenters.py` | `production_lines` |
+| `workcenters.json` | `ifs-ingest/get_workcenters.py` | `work_centers` |
+| `entity_kinds.json` | his `data/entity_kinds.json` | `entity_kinds` |
+
+The two `master_assets` shapes are **merged by `ifs_id`** into one row; an OT
+asset's `parent_id` becomes `ifs_machine_id`, which is how a device hangs under
+its physical machine (the same Object-ID/parent join his app uses — see
+`Asset.master_ifs_id` → `MasterAsset.ifs_id`, and `MasterAsset.ifs_machine_id`
+→ the parent machine). The import is **idempotent** (upsert by key) and
+**layout-safe** (never touches `Asset` positions/connections/hierarchy — a
+dropped row just surfaces its asset on the Orphaned Assets page). All columns
+beyond the original minimal set are nullable, so a partial export still
+imports. Swapping in a live Databricks/IFS pull later only changes the file
+reads in this one script; nothing downstream changes.
+
 ---
 
 ## Real-Time Updates

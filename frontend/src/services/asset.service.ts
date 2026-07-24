@@ -62,11 +62,18 @@ export interface AssetMasterData {
   ifs_site: string | null;
   ifs_operational_status: string | null;
   ifs_machine_id: string | null;
+  ifs_machine_part_no: string | null;
   ifs_machine_part_description: string | null;
   ifs_production_line_id: string | null;
   ifs_workcenter_id: string | null;
   ifs_workcenter_description: string | null;
   ifs_cost_center: string | null;
+  // OT-asset-shape extras (present on IT/network devices — see MasterAsset.entity.ts)
+  ifs_part_no: string | null;
+  ifs_part_description: string | null;
+  ifs_serial_state: string | null;
+  ifs_operational_condition: string | null;
+  ifs_server_path: string | null;
   cmdb_id: string | null;
   cmdb_status: string | null;
   cmdb_mac_address: string | null;
@@ -74,6 +81,8 @@ export interface AssetMasterData {
   cmdb_os: string | null;
   cmdb_os_version: string | null;
   cmdb_manufacturer: string | null;
+  cmdb_model: string | null;
+  cmdb_serial_number: string | null;
   cmdb_received_date: string | null;
 }
 
