@@ -21,6 +21,9 @@ export interface WorkArea {
     width: number;
     height: number;
   };
+  // Soft join to ProductionLine.code (organizational hierarchy, IFS-aligned) —
+  // see backend/src/entities/WorkArea.entity.ts. Null/absent if unassigned.
+  production_line_code?: string | null;
   metadata?: {
     supervisor?: string;
     capacity?: number;

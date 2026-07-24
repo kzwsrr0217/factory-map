@@ -11,7 +11,14 @@ export const assetKeys = {
 export function useAssets() {
   return useQuery({
     queryKey: assetKeys.all,
-    queryFn: assetService.getAssets,
+    queryFn: () => assetService.getAssets(),
+  });
+}
+
+export function useOrphanedAssets() {
+  return useQuery({
+    queryKey: ['assets', 'orphaned'] as const,
+    queryFn: assetService.getOrphanedAssets,
   });
 }
 

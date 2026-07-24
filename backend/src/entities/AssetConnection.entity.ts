@@ -2,16 +2,24 @@
  * AssetConnection.entity.ts — Physical or logical connection between two assets.
  *
  * Each row represents a directed link from `asset_id` → `connected_asset_id`.
- * When `bidirectional = true` (the default), the UI displays the connection on
- * both assets. However, the database stores only one row; the reverse connection
- * is implied by the bidirectional flag rather than duplicated.
+ * When `bidirectional = true`, asset.controller.ts addConnection() creates a
+ * second, mirrored row (connected_asset_id → asset_id) so the link shows up
+ * — and can be edited/removed — from either asset's own connections list.
+ * `pair_id` is a shared UUID stamped on both rows of a bidirectional pair (or
+ * left null for a one-way connection) so update/remove can find and act on
+ * both sides together without re-deriving the pair from asset ids alone —
+ * multiple distinct connections can exist between the same two assets (e.g.
+ * two physical cables), so (asset_id, connected_asset_id) is no longer a
+ * unique identifier; each row's own `id` is.
  *
  * `patch_panel` is stored as a simple-json object and records the physical
  * cable routing: which patch panel port and which switch port the link uses.
  * This is critical for network troubleshooting and documentation.
  *
  * CASCADE DELETE is set on the FK so that deleting an asset automatically
- * removes all of its connection rows.
+ * removes all of its own outgoing connection rows. Rows where this asset is
+ * only the `connected_asset_id` (an inbound reference with no FK) are cleaned
+ * up explicitly in deleteAsset() — see asset.controller.ts.
  */
 import {
   Entity,
@@ -20,10 +28,12 @@ import {
   CreateDateColumn,
   ManyToOne,
   JoinColumn,
+  Index,
 } from 'typeorm';
 import { Asset } from './Asset.entity';
 
 @Entity('asset_connections')
+@Index('IDX_asset_connections_pair_id', ['pair_id'], { where: 'pair_id IS NOT NULL' })
 export class AssetConnection {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
@@ -61,6 +71,9 @@ export class AssetConnection {
 
   @Column({ name: 'target_port', type: 'nvarchar', length: 50, nullable: true })
   target_port!: string | null;
+
+  @Column({ name: 'pair_id', type: 'nvarchar', length: 36, nullable: true })
+  pair_id!: string | null;
 
   @CreateDateColumn({ name: 'created_at' })
   created_at!: Date;

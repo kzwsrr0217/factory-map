@@ -192,6 +192,7 @@ import {
   getAssetById,
   getAssetLookups,
   getMaintenanceCounts,
+  getAssetOtChildren,
   createAsset,
   bulkCreateAssets,
   updateAsset,
@@ -200,6 +201,7 @@ import {
   addConnection,
   updateConnection,
   removeConnection,
+  replaceAsset,
 } from '../controllers/asset.controller';
 import { auditLog, captureAuditBefore } from '../middleware/audit.middleware';
 import { requireOperator } from '../middleware/auth.middleware';
@@ -214,6 +216,7 @@ router.get('/',                    getAllAssets);
 router.get('/lookups',             getAssetLookups);
 router.get('/maintenance-counts',  getMaintenanceCounts);
 router.get('/:id',                 getAssetById);
+router.get('/:id/ot-children',     getAssetOtChildren);
 
 // Write — operator or admin only
 router.post('/',    requireOperator, validate(AssetCreateSchema), auditLog('asset'), createAsset);
@@ -233,9 +236,13 @@ router.delete('/:id',
 );
 router.post('/:id/sync', requireOperator, syncAssetFromITSM);
 
-router.post('/:id/connections',                    requireOperator, addConnection);
-router.patch('/:id/connections/:connectedAssetId', requireOperator, updateConnection);
-router.delete('/:id/connections/:connectedAssetId', requireOperator, removeConnection);
+router.post('/:id/connections',               requireOperator, addConnection);
+router.patch('/:id/connections/:connectionId', requireOperator, updateConnection);
+router.delete('/:id/connections/:connectionId', requireOperator, removeConnection);
+
+// Replace a broken/retired asset with another, transferring its map position,
+// hierarchy, wall-port assignment, and connections — see replaceAsset.
+router.post('/:id/replace', requireOperator, replaceAsset);
 
 // Work-item immediate notification — any authenticated operator/admin
 router.post('/:assetId/work-items/:itemId/notify', requireOperator, notifyTask);

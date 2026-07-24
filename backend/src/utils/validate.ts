@@ -95,6 +95,9 @@ export const AssetCreateSchema = z.object({
     workarea_id:   z.string().uuid().optional().nullable(),
     section_id:    z.string().uuid().optional().nullable(),
     workstation_id:z.string().uuid().optional().nullable(),
+    rack_id:       z.string().uuid().optional().nullable(),
+    u_position:    z.number().int().optional().nullable(),
+    rack_u_size:   z.number().int().min(1).optional(),
   }).optional(),
   location: z.object({
     coordinates: z.object({
@@ -104,6 +107,7 @@ export const AssetCreateSchema = z.object({
     rotation:    z.number().optional(),
     icon_type:   z.string().max(50).optional().nullable(),
     description: z.string().max(500).optional().nullable(),
+    footprint:   z.array(z.tuple([z.number(), z.number()])).optional().nullable(),
   }).optional(),
   custom_fields: z.object({
     physical_condition:   z.string().max(20).optional().nullable(),

@@ -53,8 +53,37 @@ export interface AssetHistoryEntry {
   created_at: string;
 }
 
+// Joined IFS/CMDB master data (see backend/src/entities/MasterAsset.entity.ts).
+// Populated only when the API call resolves the join (GET /assets/:id always;
+// GET /assets only with ?include_master=true) — absent (undefined) means "not
+// requested", null means "requested but no matching master row" (orphan).
+export interface AssetMasterData {
+  ifs_id: string;
+  ifs_site: string | null;
+  ifs_operational_status: string | null;
+  ifs_machine_id: string | null;
+  ifs_machine_part_description: string | null;
+  ifs_production_line_id: string | null;
+  ifs_workcenter_id: string | null;
+  ifs_workcenter_description: string | null;
+  ifs_cost_center: string | null;
+  cmdb_id: string | null;
+  cmdb_status: string | null;
+  cmdb_mac_address: string | null;
+  cmdb_catalog_item: string | null;
+  cmdb_os: string | null;
+  cmdb_os_version: string | null;
+  cmdb_manufacturer: string | null;
+  cmdb_received_date: string | null;
+}
+
 export interface Asset {
   _id: string;
+  // Soft join to MasterAsset.ifs_id (IFS/CMDB) — see AssetMasterData above.
+  master_ifs_id?: string | null;
+  master?: AssetMasterData | null;
+  // Soft join to EntityKind.value — see backend/src/entities/EntityKind.entity.ts.
+  entity_kind?: string | null;
   predecessor_id?: string | null;
   successor_id?: string | null;
   is_placed?: boolean;
@@ -151,6 +180,13 @@ export interface Asset {
     description: string | null;
   } | null;
   connections?: Array<{
+    // Each connection's own identity — never derive identity from
+    // (asset, connected_asset) since a pair can have several distinct
+    // connections (e.g. two physical cables). Bidirectional connections
+    // share `pair_id` across their two mirrored rows (see
+    // AssetConnection.entity.ts) so update/remove can act on both sides.
+    id: string;
+    pair_id?: string | null;
     connected_asset_id: string;
     connection_type: 'network' | 'power' | 'usb' | 'serial' | 'parallel' | 'bluetooth' | 'wifi' | 'ethernet' | 'fiber' | 'dependency' | 'parent-child' | 'peer' | 'other';
     description?: string;
@@ -172,6 +208,9 @@ export interface Asset {
     rotation?: number;  // ← HOZZÁADVA
     icon_type?: string;  // ← HOZZÁADVA
     description?: string;
+    // Optional footprint polygon (cm, centered on coordinates) — stored but
+    // not yet rendered on the map; see docs/DATA_MODEL_MIGRATION.md.
+    footprint?: Array<[number, number]> | null;
   };
   custom_fields?: {
     physical_condition?: 'Good' | 'Fair' | 'Poor';
@@ -205,8 +244,18 @@ const normalizeAsset = (a: Asset): Asset => ({
 
 export const assetService = {
   // Get all assets
-  getAssets: async (): Promise<Asset[]> => {
-    const response = await api.get('/assets');
+  getAssets: async (opts?: { include_master?: boolean }): Promise<Asset[]> => {
+    const response = await api.get('/assets', {
+      params: opts?.include_master ? { include_master: 'true' } : undefined,
+    });
+    return (response.data.data as Asset[]).map(normalizeAsset);
+  },
+
+  // Assets whose master_ifs_id points at a MasterAsset row that no longer
+  // resolves (see MasterAsset.entity.ts / attachMasterData) — filtered
+  // server-side, not fetched-then-filtered, so this stays cheap at scale.
+  getOrphanedAssets: async (): Promise<Asset[]> => {
+    const response = await api.get('/assets', { params: { orphaned: 'true' } });
     return (response.data.data as Asset[]).map(normalizeAsset);
   },
 
@@ -216,12 +265,23 @@ export const assetService = {
     return (response.data.data as Asset[]).map(normalizeAsset);
   },
 
-  // Get assets filtered by floor ID (includes connections for map rendering)
-  getAssetsByFloor: async (floorId: string): Promise<Asset[]> => {
+  // Get assets filtered by floor ID (includes connections for map rendering,
+  // and optionally the resolved master-data join so the map can flag
+  // orphaned assets — see getOrphanedAssets)
+  getAssetsByFloor: async (floorId: string, opts?: { include_master?: boolean }): Promise<Asset[]> => {
     const response = await api.get('/assets', {
-      params: { floor_id: floorId, include_connections: 'true' },
+      params: { floor_id: floorId, include_connections: 'true', ...(opts?.include_master ? { include_master: 'true' } : {}) },
     });
     return (response.data.data as Asset[]).map(normalizeAsset);
+  },
+
+  // IT-managed devices (IPCs, etc.) mounted on the physical machine this
+  // asset represents — see backend/src/entities/MasterAsset.entity.ts
+  // ifs_machine_id. Empty when the asset isn't IFS-joined or is itself an
+  // IT device rather than a machine.
+  getOtChildren: async (id: string): Promise<AssetMasterData[]> => {
+    const response = await api.get(`/assets/${id}/ot-children`);
+    return response.data.data as AssetMasterData[];
   },
 
   // Get asset by ID
@@ -279,7 +339,7 @@ export const assetService = {
     return response.data.data;
   },
 
-  updateConnection: async (assetId: string, connectedAssetId: string, connectionData: {
+  updateConnection: async (assetId: string, connectionId: string, connectionData: {
     connection_type: string;
     description?: string;
     label?: string;
@@ -289,12 +349,20 @@ export const assetService = {
     source_port?: string | null;
     target_port?: string | null;
   }): Promise<Asset> => {
-    const response = await api.patch(`/assets/${assetId}/connections/${connectedAssetId}`, connectionData);
+    const response = await api.patch(`/assets/${assetId}/connections/${connectionId}`, connectionData);
     return response.data.data;
   },
 
-  removeConnection: async (assetId: string, connectedAssetId: string): Promise<Asset> => {
-    const response = await api.delete(`/assets/${assetId}/connections/${connectedAssetId}`);
+  removeConnection: async (assetId: string, connectionId: string): Promise<Asset> => {
+    const response = await api.delete(`/assets/${assetId}/connections/${connectionId}`);
+    return response.data.data;
+  },
+
+  // Swaps a broken/retired asset for a replacement, transferring its map
+  // position, hierarchy, wall-port assignment, and connections — see
+  // asset.controller.ts replaceAsset.
+  replaceAsset: async (assetId: string, replacementId: string): Promise<{ old: Asset; new: Asset }> => {
+    const response = await api.post(`/assets/${assetId}/replace`, { replacement_id: replacementId });
     return response.data.data;
   },
 

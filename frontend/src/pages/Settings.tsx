@@ -15,6 +15,7 @@
  */
 import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
+import JSZip from 'jszip';
 import { Sun, Moon, Check, Monitor, Trash2 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -170,6 +171,44 @@ const Settings: React.FC = () => {
 
   const newPwStrength = getStrength(newPw);
 
+  // Exports factorymap's data as the JSON files shopfloor_visualizer reads
+  // from its data/ folder (see backend/src/controllers/export.controller.ts)
+  // — shopfloor_visualizer has no import API, so "import" there just means
+  // extracting this zip into that app's mvp-2d-demo/data/ directory.
+  const [exporting, setExporting] = useState(false);
+  const handleExportForShopfloorVisualizer = async () => {
+    setExporting(true);
+    try {
+      const res = await api.get<{ success: boolean; data: { files: Record<string, unknown>; svgFiles: Record<string, string> } }>(
+        '/export/shopfloor-visualizer'
+      );
+      const { files, svgFiles } = res.data.data;
+      const zip = new JSZip();
+      Object.entries(files).forEach(([name, content]) => {
+        zip.file(name, JSON.stringify(content, null, 2));
+      });
+      // Placed at the zip root (not under svg/) — sites.json's floorPlan.svgRef
+      // holds the bare filename (Floor.svg_ref's own convention), so the path
+      // referenced there must match where the file actually lands once
+      // extracted into shopfloor_visualizer's data/ folder.
+      Object.entries(svgFiles).forEach(([name, svgText]) => {
+        zip.file(name, svgText);
+      });
+      const blob = await zip.generateAsync({ type: 'blob' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `factorymap-export-${new Date().toISOString().slice(0, 10)}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success('Export ready — extract into shopfloor_visualizer\'s mvp-2d-demo/data/');
+    } catch {
+      toast.error('Export failed');
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <div className={styles.page}>
       <div className={styles.header}>
@@ -283,6 +322,31 @@ const Settings: React.FC = () => {
                 />
                 <span className={styles.toggleSlider} />
               </label>
+            </div>
+          </div>
+        </section>
+
+        {/* Data Interop — export for shopfloor_visualizer */}
+        <section className={styles.section}>
+          <h2 className={styles.sectionTitle}>Data Interop</h2>
+          <div className={styles.row}>
+            <div className={styles.rowLabel}>
+              <span className={styles.label}>Export for shopfloor_visualizer</span>
+              <span className={styles.hint}>
+                Downloads a .zip with masterData.json, OTAssetData.json, workcenters.json,
+                production_lines.json, entity_kinds.json, sites.json, example_features.json
+                and the referenced floor plan SVGs — extract into that app's
+                mvp-2d-demo/data/ folder to load this data there.
+              </span>
+            </div>
+            <div className={styles.rowControl}>
+              <button
+                className={styles.pwBtn}
+                onClick={handleExportForShopfloorVisualizer}
+                disabled={exporting}
+              >
+                {exporting ? 'Exporting…' : 'Export .zip'}
+              </button>
             </div>
           </div>
         </section>

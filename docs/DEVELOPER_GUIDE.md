@@ -297,6 +297,26 @@ Asset.wall_port_id → WallPort  (the physical jack the device is plugged into)
 | `PatchPanel` | `patch_panels` | `name`, `rack_id`, `u_position?`, `port_count` (default 24), `cable_type` (copper\|fiber\|mixed) |
 | `WallPort` | `wall_ports` | `label` (e.g. A-04), `floor_id`, `pos_x?`, `pos_y?`, `patch_panel_id?`, `patch_port?`, `switch_asset_id?`, `switch_port?` |
 
+**Delete guards**: `deleteRack`/`deleteRoom` (`network.controller.ts`) 400 if
+any `Asset.rack_id` still points into the rack (or, for a room, into any of
+its racks) — same asset-count-guard pattern as `deleteWorkArea`/
+`deleteSection`/`deleteFloor`. `deleteFloor`/`deleteBuilding` also 400 if a
+`NetworkRoom` still references them; `deleteBuilding` additionally re-checks
+`WallPort` count itself, because its own cascade deletes floors directly via
+the repository, bypassing `deleteFloor`'s guards.
+
+**Collision guard**: `findWallPortCollision` (`network.controller.ts`)
+rejects (409) a `WallPort` create/update that would share a
+(`patch_panel_id`, `patch_port`) or (`switch_asset_id`, `switch_port`) pair
+with another wall port — same principle as `findRackCollision` on `Asset`.
+
+**Replace endpoints**: `POST /network/racks/:id/replace` and
+`POST /network/patch-panels/:id/replace` (body: `{ replacement_id }`) move
+everything the old rack/panel held onto the replacement (patch panels +
+mounted assets, or wired wall ports, keeping U-positions/port numbers),
+409 on a collision, then delete the emptied-out old row. See
+`replaceRack`/`replacePatchPanel` in `network.controller.ts`.
+
 ### toApiResponse() pattern
 All entities expose a `toApiResponse()` method that maps the flat SQL columns to the nested JSON shape expected by the frontend. **Never read raw SQL column names in the frontend** — always use the API shape.
 
@@ -367,17 +387,19 @@ Similar CRUD, filtered by `section_id`.
 
 | Method | Path | Query params | Notes |
 |--------|------|-------------|-------|
-| GET | `/` | `floor_id, building_id, workarea_id, section_id, status, type, is_placed, q, page, limit` | Full-text search on display_name, serial, asset_tag, manufacturer, model, IP, hostname, person |
+| GET | `/` | `floor_id, building_id, workarea_id, section_id, status, type, is_placed, q, page, limit, include_connections, include_master, orphaned` | Full-text search on display_name, serial, asset_tag, manufacturer, model, IP, hostname, person. `orphaned=true` filters to assets with a `master_ifs_id` that no longer resolves to a `MasterAsset` row |
 | GET | `/lookups` | — | Distinct values for all autocomplete fields |
-| GET | `/:id` | — | Single asset with software + connections |
-| POST | `/` | — | Create; emits `asset:created` |
-| POST | `/bulk` | — | Bulk create (max 500); returns 207 multi-status |
-| PATCH | `/:id` | — | Update; cycle-checks predecessor/successor; tracks loc history |
-| DELETE | `/:id` | — | Delete; emits `asset:deleted` |
+| GET | `/maintenance-counts` | — | `{ overdue, due_soon }` — excludes replaced assets (`successor_id` set) |
+| GET | `/:id` | — | Single asset with software + connections; always resolves `master` (`null` if orphaned) |
+| POST | `/` | — | Create; emits `asset:created`; 422 on hierarchy mismatch or a future `maintenance.last_date`; 409 on rack U-position collision |
+| POST | `/bulk` | — | Bulk create (max 500); returns 207 multi-status. Unset hierarchy fields must be `null`/omitted, not `''` — an empty string fails the UUID validation for the whole batch |
+| PATCH | `/:id` | — | Update; cycle-checks predecessor/successor; tracks loc history; same 422/409 validation as create |
+| DELETE | `/:id` | — | Delete; emits `asset:deleted`; clears dangling `AssetConnection`/`predecessor_id`/`successor_id`/`WallPort.switch_asset_id` references |
+| POST | `/:id/replace` | — | `{ replacement_id }` — physical swap: the replacement inherits position, hierarchy, wall-port assignment, and every connection (including wall ports wired to it if the old asset was a switch); the old asset is cleared to unplaced and kept via `predecessor_id`/`successor_id` |
 | POST | `/:id/sync` | — | Mock ITSM sync (updates status + software) |
-| POST | `/:id/connections` | — | Add connection (prevents duplicates) |
-| PATCH | `/:id/connections/:connId` | — | Update connection |
-| DELETE | `/:id/connections/:connId` | — | Remove connection (also removes reverse) |
+| POST | `/:id/connections` | — | Add connection; 422 on self-connection; prevents exact duplicates (same target + type + label) |
+| PATCH | `/:id/connections/:connId` | — | Update connection (by connection `id`, not target asset — supports multiple distinct connections to the same pair) |
+| DELETE | `/:id/connections/:connId` | — | Remove connection (also removes reverse, if bidirectional) |
 | POST | `/:id/work-items/:taskId/notify` | — | Send immediate alert for one work item; sets `alert_sent=true` |
 
 **Pagination**: when `page` and `limit` are provided, the response includes `{ data, meta: { page, limit, total, totalPages } }`. Without them, the response includes `{ data, meta: { limit: 1000, truncated: boolean } }` — up to 1000 assets are returned and `meta.truncated` is `true` if there are more. Explicit `limit` is capped at 500.
@@ -418,7 +440,7 @@ All write operations require operator or admin role.
 | GET | `/rooms/:id` | — | Single room with full rack/panel tree |
 | POST | `/rooms` | — | Create room (`name`, `building_id` required; `type` = idf\|mdf) |
 | PATCH | `/rooms/:id` | — | Update |
-| DELETE | `/rooms/:id` | — | Delete (cascades racks → patch panels → wall port links) |
+| DELETE | `/rooms/:id` | — | Delete (cascades racks → patch panels → wall port links); 400 if any asset is still mounted in one of its racks |
 
 #### Racks
 
@@ -428,7 +450,8 @@ All write operations require operator or admin role.
 | GET | `/racks/:id` | — | Single rack |
 | POST | `/racks` | — | Create (`name`, `network_room_id`, `u_count?`) |
 | PATCH | `/racks/:id` | — | Update |
-| DELETE | `/racks/:id` | — | Delete (cascades patch panels) |
+| DELETE | `/racks/:id` | — | Delete (cascades patch panels); 400 if any asset is still mounted (`rack_id`) |
+| POST | `/racks/:id/replace` | — | `{ replacement_id }` — move patch panels + mounted assets to the replacement rack, keeping U-positions; 409 on collision; deletes the emptied-out old rack |
 
 #### Patch Panels
 
@@ -438,7 +461,8 @@ All write operations require operator or admin role.
 | GET | `/patch-panels/:id` | — | Single patch panel |
 | POST | `/patch-panels` | — | Create (`name`, `rack_id`, `cable_type?` = copper\|fiber\|mixed) |
 | PATCH | `/patch-panels/:id` | — | Update |
-| DELETE | `/patch-panels/:id` | — | Delete |
+| DELETE | `/patch-panels/:id` | — | Delete (wall ports referencing it are set to `patch_panel_id: null`) |
+| POST | `/patch-panels/:id/replace` | — | `{ replacement_id }` — move wired wall ports to the replacement panel, keeping port numbers; 409 on collision; deletes the emptied-out old panel |
 
 #### Wall Ports
 
@@ -446,8 +470,8 @@ All write operations require operator or admin role.
 |--------|------|-------|-------------|
 | GET | `/wall-ports` | `floor_id?`, `patch_panel_id?` | List wall ports with resolved path info |
 | GET | `/wall-ports/:id` | — | Single wall port with full path |
-| POST | `/wall-ports` | — | Create (`label`, `floor_id` required; `pos_x/y`, `patch_panel_id`, `patch_port`, `switch_asset_id`, `switch_port` optional) |
-| PATCH | `/wall-ports/:id` | — | Update (reposition or re-cable) |
+| POST | `/wall-ports` | — | Create (`label`, `floor_id` required; `pos_x/y`, `patch_panel_id`, `patch_port`, `switch_asset_id`, `switch_port` optional); 409 if the `(patch_panel_id, patch_port)` or `(switch_asset_id, switch_port)` pair is already assigned to another wall port |
+| PATCH | `/wall-ports/:id` | — | Update (reposition or re-cable); same 409 collision check as create, excluding itself |
 | DELETE | `/wall-ports/:id` | — | Delete |
 
 ### Users `/api/users` (admin only)
@@ -501,7 +525,13 @@ ThemeProvider          — light/dark theme, persisted to localStorage
 | `operator` | viewer + create/edit assets, manage connections, upload floor plans |
 | `admin` | operator + user management, delete buildings/floors, system settings |
 
-Use `useAuth()` and check `isAdmin` / `isOperator` to gate UI actions.
+Use `useAuth()` and check `isAdmin` / `isOperator` to gate UI actions — but
+this is a UX nicety only. The actual boundary is server-side
+(`requireOperator`/`requireAdmin` middleware on every mutating route);
+verified live that a `viewer` token gets `403` directly from the API on
+every write/delete/admin endpoint, not just a hidden button, so there's no
+need to duplicate that check defensively in a controller that's already
+behind the middleware.
 
 ### Custom Hooks
 
@@ -534,6 +564,20 @@ All API calls go through service objects (plain objects, not classes) in `src/se
 ```typescript
 // Example
 const asset = await assetService.updateAsset(id, payload);
+```
+
+### Surfacing API errors
+
+Every controller error response is `{ success: false, error: string }` with
+a specific reason. Use `getApiErrorMessage(err, fallback)`
+(`src/utils/apiError.ts`) in `catch` blocks that show a toast, instead of
+`err.message` (which on an Axios error is the generic "Request failed with
+status code 409" — it throws away the actual backend reason):
+
+```typescript
+} catch (err) {
+  toast.error(getApiErrorMessage(err, 'Failed to delete rack'));
+}
 ```
 
 ### Global Search

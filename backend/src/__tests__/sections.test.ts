@@ -211,3 +211,39 @@ describe('DELETE /api/sections/:id', () => {
     expect(res.status).toBe(404);
   });
 });
+
+// ── workcenter_code (organizational hierarchy, see WorkCenter.entity.ts) ─────
+
+describe('Section workcenter_code', () => {
+  let sectionId: string;
+
+  beforeAll(async () => {
+    const res = await request(app)
+      .post('/api/sections')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ workarea_id: workAreaId, name: 'WC-linked Section', workcenter_code: 'test-wc-001' });
+    sectionId = res.body.data._id;
+  });
+
+  it('persists workcenter_code on create', async () => {
+    const res = await request(app)
+      .get(`/api/sections/${sectionId}`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.workcenter_code).toBe('test-wc-001');
+  });
+
+  it('is orphan-safe: a non-existent workcenter_code does not block the update or delete the section', async () => {
+    const patchRes = await request(app)
+      .patch(`/api/sections/${sectionId}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ workcenter_code: 'nonexistent-wc-code' });
+    expect(patchRes.status).toBe(200);
+    expect(patchRes.body.data.workcenter_code).toBe('nonexistent-wc-code');
+
+    const getRes = await request(app)
+      .get(`/api/sections/${sectionId}`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(getRes.status).toBe(200);
+  });
+});

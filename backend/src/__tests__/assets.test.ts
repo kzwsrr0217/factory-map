@@ -5,6 +5,9 @@
  *   { basic_info: { display_name: '...' }, location: { building_id: '...' } }
  */
 import request from 'supertest';
+import { AppDataSource } from '../config/database';
+import { MasterAsset } from '../entities/MasterAsset.entity';
+import { EntityKind } from '../entities/EntityKind.entity';
 import { setupTests } from './helpers/testApp';
 
 let app: any; // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -114,5 +117,137 @@ describe('DELETE /api/assets/:id', () => {
       .delete(`/api/assets/${createdId}`)
       .set('Authorization', `Bearer ${token}`);
     expect(res.status).toBe(200);
+  });
+});
+
+// ── Master data join (MasterAsset, see MasterAsset.entity.ts) + entity_kind ──
+// No live IFS/Databricks connection — MasterAsset rows are inserted directly
+// via the repository, mirroring how the seed script populates it.
+
+describe('Asset master_ifs_id join and entity_kind', () => {
+  const IFS_ID = `test_ifs_${Date.now()}`;
+  let assetId: string;
+
+  beforeAll(async () => {
+    await AppDataSource.getRepository(MasterAsset).save(
+      AppDataSource.getRepository(MasterAsset).create({
+        ifs_id: IFS_ID,
+        ifs_site: 'TESTSITE',
+        cmdb_status: 'Deployed',
+        cmdb_id: 'HWA00000',
+      })
+    );
+
+    const res = await request(app)
+      .post('/api/assets')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        basic_info: { display_name: '__test_master_join_asset__' },
+        master_ifs_id: IFS_ID,
+        entity_kind: 'shopfloorCockpit',
+      });
+    assetId = res.body.data._id;
+  });
+
+  afterAll(async () => {
+    if (assetId) await request(app).delete(`/api/assets/${assetId}`).set('Authorization', `Bearer ${token}`);
+    await AppDataSource.getRepository(MasterAsset).delete({ ifs_id: IFS_ID });
+  });
+
+  it('resolves the joined master data and entity_kind on GET /api/assets/:id', async () => {
+    const res = await request(app).get(`/api/assets/${assetId}`).set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.master_ifs_id).toBe(IFS_ID);
+    expect(res.body.data.entity_kind).toBe('shopfloorCockpit');
+    expect(res.body.data.master).not.toBeNull();
+    expect(res.body.data.master.ifs_id).toBe(IFS_ID);
+    expect(res.body.data.master.cmdb_status).toBe('Deployed');
+  });
+
+  it('resolves the joined master data via GET /api/assets?include_master=true', async () => {
+    const res = await request(app)
+      .get(`/api/assets?q=__test_master_join_asset__&include_master=true`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    const found = res.body.data.find((a: { _id: string }) => a._id === assetId);
+    expect(found).toBeDefined();
+    expect(found.master?.ifs_id).toBe(IFS_ID);
+  });
+
+  it('does not delete the asset when master_ifs_id points to a non-existent MasterAsset row (orphan-safe)', async () => {
+    const patchRes = await request(app)
+      .patch(`/api/assets/${assetId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ master_ifs_id: 'nonexistent-orphan-ifs-id' });
+    expect(patchRes.status).toBe(200);
+
+    const getRes = await request(app).get(`/api/assets/${assetId}`).set('Authorization', `Bearer ${token}`);
+    expect(getRes.status).toBe(200);
+    expect(getRes.body.data.master_ifs_id).toBe('nonexistent-orphan-ifs-id');
+    expect(getRes.body.data.master).toBeNull();
+  });
+});
+
+// ── Footprint pre-fill from EntityKind (see asset.controller.ts
+// fillFootprintFromEntityKind) — mirrors shopfloor_visualizer's
+// objectTypeTemplates convention (FR-6b): first placement only.
+
+describe('Asset footprint pre-fill from EntityKind', () => {
+  const EK_VALUE = `test_footprint_kind_${Date.now()}`;
+  const FOOTPRINT = [[-50, -20], [50, -20], [50, 20], [-50, 20]];
+  let assetId: string;
+
+  beforeAll(async () => {
+    await AppDataSource.getRepository(EntityKind).save(
+      AppDataSource.getRepository(EntityKind).create({
+        value: EK_VALUE, label: 'Footprint Test Kind', geometry_type: 'point', footprint: FOOTPRINT,
+      })
+    );
+  });
+
+  afterAll(async () => {
+    if (assetId) await request(app).delete(`/api/assets/${assetId}`).set('Authorization', `Bearer ${token}`);
+    await AppDataSource.getRepository(EntityKind).delete({ value: EK_VALUE });
+  });
+
+  it('does not fill a footprint for an unplaced asset', async () => {
+    const res = await request(app)
+      .post('/api/assets')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ basic_info: { display_name: '__test_footprint_unplaced__' }, entity_kind: EK_VALUE });
+    assetId = res.body.data._id;
+    expect(res.body.data.location.footprint).toBeNull();
+  });
+
+  it('fills the footprint from the EntityKind on first placement', async () => {
+    const res = await request(app)
+      .patch(`/api/assets/${assetId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ location: { coordinates: { x: 100, y: 200 } } });
+    expect(res.status).toBe(200);
+    expect(res.body.data.location.footprint).toEqual(FOOTPRINT);
+  });
+
+  it('does not overwrite the footprint on a later move', async () => {
+    const res = await request(app)
+      .patch(`/api/assets/${assetId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ location: { coordinates: { x: 150, y: 250 } } });
+    expect(res.status).toBe(200);
+    expect(res.body.data.location.footprint).toEqual(FOOTPRINT);
+  });
+
+  it('never overwrites an explicitly-set footprint', async () => {
+    const customFootprint = [[0, 0], [10, 0], [10, 10]];
+    const createRes = await request(app)
+      .post('/api/assets')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        basic_info: { display_name: '__test_footprint_explicit__' },
+        entity_kind: EK_VALUE,
+        location: { coordinates: { x: 1, y: 1 }, footprint: customFootprint },
+      });
+    expect(createRes.body.data.location.footprint).toEqual(customFootprint);
+    await request(app).delete(`/api/assets/${createRes.body.data._id}`).set('Authorization', `Bearer ${token}`);
   });
 });

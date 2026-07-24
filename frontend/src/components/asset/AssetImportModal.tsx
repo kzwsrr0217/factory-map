@@ -338,12 +338,15 @@ function rowToApiAsset(row: ParsedRow) {
       os_type:       row.os_type       || undefined,
       os_version:    row.os_version    || undefined,
     },
+    // Empty strings here would fail the backend's z.string().uuid()
+    // validation on hierarchy fields (an empty string is not a valid UUID),
+    // 400-ing the entire bulk import — must be null instead.
     hierarchy: {
-      building_id:    row._building_id    || '',
-      floor_id:       row._floor_id       || '',
-      workarea_id:    row._workarea_id    || '',
-      section_id:     row._section_id     || '',
-      workstation_id: row._workstation_id || '',
+      building_id:    row._building_id    || null,
+      floor_id:       row._floor_id       || null,
+      workarea_id:    row._workarea_id    || null,
+      section_id:     row._section_id     || null,
+      workstation_id: row._workstation_id || null,
     },
     location: { coordinates: { x: 0, y: 0 } },
     itsm: { hardware_asset_id: null, is_managed: false, last_synced: null, sync_status: 'never' as const },

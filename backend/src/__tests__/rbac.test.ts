@@ -3,13 +3,15 @@
  *
  * Actual RBAC in this app:
  *   - /api/users      — admin only (requireAdmin)
- *   - /api/assets     — GET open to all; POST/PATCH/DELETE require operator+
- *   - /api/buildings  — all authenticated (no role gate)
- *   - /api/audit      — all authenticated (no role gate)
+ *   - /api/assets, /api/buildings, /api/floors, /api/workareas, /api/sections,
+ *     /api/workstations, /api/network — GET open to all; POST/PATCH/DELETE
+ *     require operator+
+ *   - /api/audit      — all authenticated (no role gate; read-only)
  *
  * Verifies:
  *   - Unauthenticated → 401 on all protected routes
- *   - Viewer → can read assets/buildings/audit but cannot POST/PATCH/DELETE assets
+ *   - Viewer → can read assets/buildings/audit but cannot POST/PATCH/DELETE
+ *     assets or buildings
  *   - Viewer → cannot manage users (403)
  *   - Operator → can create/update assets but not manage users
  *   - Admin → full access
@@ -133,6 +135,14 @@ describe('Viewer role', () => {
 
   it('cannot access user management (403)', async () => {
     const res = await request(app).get('/api/users').set('Authorization', `Bearer ${viewerToken}`);
+    expect(res.status).toBe(403);
+  });
+
+  it('cannot create a building (403)', async () => {
+    const res = await request(app)
+      .post('/api/buildings')
+      .set('Authorization', `Bearer ${viewerToken}`)
+      .send({ name: `RBAC Viewer Building Attempt ${Date.now()}` });
     expect(res.status).toBe(403);
   });
 });

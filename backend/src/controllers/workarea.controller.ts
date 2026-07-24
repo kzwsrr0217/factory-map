@@ -5,15 +5,49 @@
  * properties that control where they are rendered on the floor map. If not
  * provided on creation, they default to (0, 0) with 150×100 dimensions.
  *
+ * `name` must be unique within a floor (not globally — the same name on a
+ * different floor is fine) — see the existence check in createWorkArea /
+ * updateWorkArea, matching the floor_number-within-a-building uniqueness
+ * check in floor.controller.ts.
+ *
  * Deletion cascades automatically via the Section and Workstation TypeORM
  * relations (cascade: true on WorkArea.sections), so no manual cascade
- * logic is needed here.
+ * logic is needed for those. Assets are a different story: `asset.workarea_id`
+ * is a soft join (no FK), so it needs an explicit guard — see deleteWorkArea,
+ * matching the same asset-count check building.controller.ts / floor
+ * deletion already do.
  */
 import { Request, Response, NextFunction } from 'express';
 import { AppDataSource } from '../config/database';
 import { WorkArea } from '../entities/WorkArea.entity';
+import { Asset } from '../entities/Asset.entity';
 
 const repo = () => AppDataSource.getRepository(WorkArea);
+
+// The map's drag-to-move handler recomputes an asset's workarea_id from its
+// new position (see frontend/src/utils/workareaGeometry.ts), but that only
+// fires when the ASSET is dragged. Moving or resizing the WORK AREA itself
+// left every asset's workarea_id exactly as it was — stale the moment an
+// asset that used to be inside the rectangle no longer is (or vice versa).
+// Re-derives every asset's membership on this floor from current geometry
+// whenever a work area's coordinates/dimensions actually change.
+async function recomputeAssetWorkareaMembership(floorId: string): Promise<void> {
+  const assetRepo = AppDataSource.getRepository(Asset);
+  const [workareas, assets] = await Promise.all([
+    repo().find({ where: { floor_id: floorId } }),
+    assetRepo.find({ where: { floor_id: floorId } }),
+  ]);
+  for (const asset of assets) {
+    const match = workareas.find((wa) => {
+      const wx = wa.coord_x ?? 0, wy = wa.coord_y ?? 0, ww = wa.dim_width ?? 150, wh = wa.dim_height ?? 100;
+      return asset.loc_x >= wx && asset.loc_x <= wx + ww && asset.loc_y >= wy && asset.loc_y <= wy + wh;
+    });
+    const newWorkareaId = match?.id ?? null;
+    if (asset.workarea_id !== newWorkareaId) {
+      await assetRepo.update({ id: asset.id }, { workarea_id: newWorkareaId });
+    }
+  }
+}
 
 export const getAllWorkAreas = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
@@ -38,8 +72,16 @@ export const createWorkArea = async (req: Request, res: Response, next: NextFunc
       floor_id: string; name: string; type?: string;
       coordinates?: { x: number; y: number };
       dimensions?: { width: number; height: number };
+      production_line_code?: string;
       metadata?: Record<string, unknown>;
     };
+
+    const existing = await repo().findOne({ where: { floor_id: body.floor_id, name: body.name } });
+    if (existing) {
+      res.status(400).json({ success: false, error: `A work area named "${body.name}" already exists on this floor` });
+      return;
+    }
+
     const area = repo().create({
       floor_id: body.floor_id,
       name: body.name,
@@ -48,6 +90,7 @@ export const createWorkArea = async (req: Request, res: Response, next: NextFunc
       coord_y: body.coordinates?.y ?? 0,
       dim_width: body.dimensions?.width ?? 150,
       dim_height: body.dimensions?.height ?? 100,
+      production_line_code: body.production_line_code ?? null,
       metadata: body.metadata ?? null,
     });
     await repo().save(area);
@@ -63,14 +106,28 @@ export const updateWorkArea = async (req: Request, res: Response, next: NextFunc
       name: string; type: string;
       coordinates: { x: number; y: number };
       dimensions: { width: number; height: number };
+      production_line_code: string;
       metadata: Record<string, unknown>;
     }>;
-    if (body.name !== undefined) area.name = body.name;
+    const geometryChanging = body.coordinates !== undefined || body.dimensions !== undefined;
+
+    if (body.name !== undefined && body.name !== area.name) {
+      const existing = await repo().findOne({ where: { floor_id: area.floor_id, name: body.name } });
+      if (existing) {
+        res.status(400).json({ success: false, error: `A work area named "${body.name}" already exists on this floor` });
+        return;
+      }
+      area.name = body.name;
+    }
     if (body.type !== undefined) area.type = body.type ?? null;
     if (body.coordinates !== undefined) { area.coord_x = body.coordinates.x; area.coord_y = body.coordinates.y; }
     if (body.dimensions !== undefined) { area.dim_width = body.dimensions.width; area.dim_height = body.dimensions.height; }
+    if (body.production_line_code !== undefined) area.production_line_code = body.production_line_code ?? null;
     if (body.metadata !== undefined) area.metadata = body.metadata ?? null;
     await repo().save(area);
+
+    if (geometryChanging) await recomputeAssetWorkareaMembership(area.floor_id);
+
     res.json({ success: true, data: area.toApiResponse() });
   } catch (error) { next(error); }
 };
@@ -79,6 +136,13 @@ export const deleteWorkArea = async (req: Request, res: Response, next: NextFunc
   try {
     const area = await repo().findOne({ where: { id: req.params.id } });
     if (!area) { res.status(404).json({ success: false, error: 'Work area not found' }); return; }
+
+    const assetCount = await AppDataSource.getRepository(Asset).count({ where: { workarea_id: req.params.id } });
+    if (assetCount > 0) {
+      res.status(400).json({ success: false, error: `Cannot delete work area with ${assetCount} asset(s). Please reassign or remove them first.` });
+      return;
+    }
+
     await repo().remove(area);
     res.json({ success: true, message: 'Work area deleted successfully' });
   } catch (error) { next(error); }

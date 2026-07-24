@@ -26,6 +26,10 @@ import userRoutes from './user.routes';
 import auditRoutes from './audit.routes';
 import alertRoutes from './alert.routes';
 import networkRoutes from './network.routes';
+import entityKindsRoutes from './entityKinds.routes';
+import productionLinesRoutes from './productionLines.routes';
+import workCentersRoutes from './workCenters.routes';
+import exportRoutes from './export.routes';
 import { authenticate } from '../middleware/auth.middleware';
 
 const router = Router();
@@ -47,5 +51,9 @@ router.use('/users', userRoutes);
 router.use('/audit', auditRoutes);
 router.use('/alerts', alertRoutes);
 router.use('/network', networkRoutes);
+router.use('/entity-kinds', entityKindsRoutes);
+router.use('/production-lines', productionLinesRoutes);
+router.use('/work-centers', workCentersRoutes);
+router.use('/export', exportRoutes);
 
 export default router;

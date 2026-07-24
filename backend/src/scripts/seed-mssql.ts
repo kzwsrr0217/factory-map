@@ -20,7 +20,12 @@ import { Building }       from '../entities/Building.entity';
 import { Floor }          from '../entities/Floor.entity';
 import { WorkArea }       from '../entities/WorkArea.entity';
 import { Section }        from '../entities/Section.entity';
+import { Workstation }    from '../entities/Workstation.entity';
 import { Asset }          from '../entities/Asset.entity';
+import { MasterAsset }    from '../entities/MasterAsset.entity';
+import { ProductionLine } from '../entities/ProductionLine.entity';
+import { WorkCenter }     from '../entities/WorkCenter.entity';
+import { EntityKind }     from '../entities/EntityKind.entity';
 import { AssetSoftware }  from '../entities/AssetSoftware.entity';
 import { AssetConnection } from '../entities/AssetConnection.entity';
 import { User }           from '../entities/User.entity';
@@ -39,6 +44,10 @@ async function seed() {
   console.log('\n🗑️  Clearing existing data...');
   const del = (t: string) =>
     AppDataSource.query(`IF OBJECT_ID(N'${t}',N'U') IS NOT NULL DELETE FROM [${t}]`);
+  await del('master_assets');
+  await del('work_centers');
+  await del('production_lines');
+  await del('entity_kinds');
   await del('asset_software');
   await del('asset_connections');
   await del('wall_ports');
@@ -62,6 +71,7 @@ async function seed() {
   const fRepo   = AppDataSource.getRepository(Floor);
   const waRepo  = AppDataSource.getRepository(WorkArea);
   const secRepo = AppDataSource.getRepository(Section);
+  const wsRepo  = AppDataSource.getRepository(Workstation);
   const aRepo   = AppDataSource.getRepository(Asset);
   const swRepo  = AppDataSource.getRepository(AssetSoftware);
   const cRepo   = AppDataSource.getRepository(AssetConnection);
@@ -70,6 +80,10 @@ async function seed() {
   const rkRepo  = AppDataSource.getRepository(NetworkRack);
   const ppRepo  = AppDataSource.getRepository(PatchPanel);
   const wpRepo  = AppDataSource.getRepository(WallPort);
+  const maRepo  = AppDataSource.getRepository(MasterAsset);
+  const plRepo  = AppDataSource.getRepository(ProductionLine);
+  const wcRepo  = AppDataSource.getRepository(WorkCenter);
+  const ekRepo  = AppDataSource.getRepository(EntityKind);
 
   // ── 2. Users ───────────────────────────────────────────────────────────────
   console.log('\n👤 Creating users...');
@@ -95,10 +109,32 @@ async function seed() {
   const groundFloor = await fRepo.save(fRepo.create({
     building_id: werk1.id, name: 'Ground Floor — Production', floor_number: 1,
     svg_background: null,
+    // Prototype layered SVG (see backend/src/floorplans/werk1-ground-floor.svg
+    // and docs/DATA_MODEL_MIGRATION.md phase 4) — no real meter conversion yet,
+    // hence scale_meters_per_unit: 1.
+    svg_ref: 'werk1-ground-floor.svg', scale_meters_per_unit: 1,
   }));
   const firstFloor = await fRepo.save(fRepo.create({
     building_id: werk1.id, name: 'First Floor — Management', floor_number: 2,
     svg_background: null,
+  }));
+
+  // ── 4b. Organizational hierarchy (ProductionLine / WorkCenter) ────────────
+  // Hand-seeded, no live IFS/Databricks connection — mirrors shopfloor_visualizer's
+  // workcenters.json/production_lines.json ingestion, but as reference tables here.
+  // Codes match the MasterAsset rows seeded below (ifs_production_line_id /
+  // ifs_workcenter_id) so the two layers agree with each other.
+  console.log('\n🏷️  Seeding organizational hierarchy (Production Line / Work Center)...');
+  await plRepo.save(plRepo.create({ code: '11101', description: 'Assembly Line A' }));
+  await wcRepo.save(wcRepo.create({ code: '30230', description: 'Assembly Line A — Stations', production_line_code: '11101' }));
+
+  // ── 4c. Entity kinds (map-placeable types, config data) ────────────────────
+  console.log('\n🧩 Seeding entity kinds...');
+  await ekRepo.save(ekRepo.create({ value: 'object', label: 'Object', geometry_type: 'point', default_color: '#2563eb' }));
+  await ekRepo.save(ekRepo.create({ value: 'infoSphere', label: 'Info Sphere', geometry_type: 'point', default_color: '#0d9488', exempt_from_orphan: true }));
+  await ekRepo.save(ekRepo.create({
+    value: 'shopfloorCockpit', label: 'Shopfloor Cockpit', geometry_type: 'point', default_color: '#dc2626',
+    rotatable: true, exempt_from_orphan: true, footprint: [[-50, -20], [50, -20], [50, 20], [-50, 20]],
   }));
 
   // ── 5. Work Areas ──────────────────────────────────────────────────────────
@@ -110,6 +146,7 @@ async function seed() {
   const wa_assemblyA = await waRepo.save(waRepo.create({
     floor_id: groundFloor.id, name: 'Assembly Line A',
     type: 'Production', coord_x: 50, coord_y: 50, dim_width: 420, dim_height: 220,
+    production_line_code: '11101',
   }));
   const wa_assemblyB = await waRepo.save(waRepo.create({
     floor_id: groundFloor.id, name: 'Assembly Line B',
@@ -130,8 +167,18 @@ async function seed() {
 
   // ── 6. Sections ────────────────────────────────────────────────────────────
   console.log('\n📦 Creating sections...');
-  const sec_a1 = await secRepo.save(secRepo.create({ workarea_id: wa_assemblyA.id, name: 'Station A1', coord_x: 60, coord_y: 60, capacity: 4 }));
-  const sec_a2 = await secRepo.save(secRepo.create({ workarea_id: wa_assemblyA.id, name: 'Station A2', coord_x: 240, coord_y: 60, capacity: 4 }));
+  const sec_a1 = await secRepo.save(secRepo.create({ workarea_id: wa_assemblyA.id, name: 'Station A1', coord_x: 60, coord_y: 60, capacity: 4, workcenter_code: '30230' }));
+  const sec_a2 = await secRepo.save(secRepo.create({ workarea_id: wa_assemblyA.id, name: 'Station A2', coord_x: 240, coord_y: 60, capacity: 4, workcenter_code: '30230' }));
+
+  // Workstations (physical desk/machine slots within a section — distinct
+  // from Asset, which is the IT/OT equipment placed at one). Positioned in
+  // the same 1000x800 world-coordinate space as WorkArea/Asset, near their
+  // section, so FloorMap.tsx has something real to render (see
+  // docs/DATA_MODEL_MIGRATION.md phase 5 — previously this table was never
+  // seeded at all).
+  await wsRepo.save(wsRepo.create({ section_id: sec_a1.id, name: 'TA-01', coord_x: 90, coord_y: 110, type: 'desk', status: 'active' }));
+  await wsRepo.save(wsRepo.create({ section_id: sec_a1.id, name: 'TA-02', coord_x: 150, coord_y: 110, type: 'desk', status: 'active' }));
+  await wsRepo.save(wsRepo.create({ section_id: sec_a2.id, name: 'TA-03', coord_x: 270, coord_y: 110, type: 'desk', status: 'maintenance' }));
   const sec_b1 = await secRepo.save(secRepo.create({ workarea_id: wa_assemblyB.id, name: 'Station B1', coord_x: 60, coord_y: 330, capacity: 4 }));
   const sec_b2 = await secRepo.save(secRepo.create({ workarea_id: wa_assemblyB.id, name: 'Station B2', coord_x: 240, coord_y: 330, capacity: 4 }));
 
@@ -267,6 +314,42 @@ async function seed() {
   const wp_ff_02 = await wpRepo.save(mkWp('WP-FF-02', firstFloor.id, 290, 90,  pp02.id, 2,  coreSwitch.id, 'Gi1/0/18'));
   const wp_ff_03 = await wpRepo.save(mkWp('WP-FF-03', firstFloor.id, 120, 360, pp02.id, 3,  coreSwitch.id, 'Gi1/0/19'));
 
+  // ── 9b. Master data (IFS/CMDB) ─────────────────────────────────────────────
+  // Hand-seeded, mirrors the real data.xlsx export's join shape — no live
+  // IFS/Databricks connection exists yet (pending access confirmation), so
+  // this table is only ever populated by hand here for now.
+  console.log('\n🏷️  Seeding IFS/CMDB master data...');
+
+  // Plain machine (ifs_id == ifs_machine_id, no IPC of its own).
+  await maRepo.save(maRepo.create({
+    ifs_id: '523026-3', ifs_site: 'WERK1', ifs_operational_status: 'In Operation',
+    ifs_machine_id: '523026-3', ifs_machine_part_description: 'Rivet Machine - 1.5kN',
+    ifs_production_line_id: '11101', ifs_workcenter_id: '30230',
+    ifs_workcenter_description: 'Assembly Line A', ifs_cost_center: '1102',
+  }));
+
+  // IPC mounted on the machine above (444444-* prefix, ifs_machine_id points
+  // back to it) — CMDB match found (cmdb_status: Deployed).
+  const ipcDeployed = await maRepo.save(maRepo.create({
+    ifs_id: '444444-501', ifs_site: 'WERK1', ifs_operational_status: 'In Operation',
+    ifs_machine_id: '523026-3', ifs_machine_part_description: 'Rivet Machine - 1.5kN',
+    ifs_production_line_id: '11101', ifs_workcenter_id: '30230',
+    ifs_workcenter_description: 'Assembly Line A', ifs_cost_center: '1102',
+    cmdb_id: 'HWA14820', cmdb_status: 'Deployed', cmdb_mac_address: '2C:94:64:00:86:79',
+    cmdb_catalog_item: 'IPC Small', cmdb_os: 'Windows 10 Enterprise LTSC', cmdb_os_version: '10.0 (17763)',
+    cmdb_manufacturer: 'IPC Small', cmdb_received_date: day(-800),
+  }));
+
+  // IPC with no CMDB match yet — this is the ~50% "MISSING" case the real
+  // export shows: IFS knows the IPC should exist, CMDB has no record.
+  const ipcMissing = await maRepo.save(maRepo.create({
+    ifs_id: '444444-502', ifs_site: 'WERK1', ifs_operational_status: 'In Operation',
+    ifs_machine_id: '523026-3', ifs_machine_part_description: 'Rivet Machine - 1.5kN',
+    ifs_production_line_id: '11101', ifs_workcenter_id: '30230',
+    ifs_workcenter_description: 'Assembly Line A', ifs_cost_center: '1102',
+    cmdb_status: 'MISSING',
+  }));
+
   // ── 10. Floor assets ───────────────────────────────────────────────────────
   console.log('\n💻 Creating floor assets...');
 
@@ -291,7 +374,7 @@ async function seed() {
   ));
   const hmi_a1 = await aRepo.save(mkFloor(
     'HMI-A1-001', 'hmi', groundFloor.id, wa_assemblyA.id, sec_a1.id, 180, 100, null,
-    { manufacturer: 'Siemens', model: 'SIMATIC HMI TP1200', serial_number: 'HMI001', ip_address: '10.0.1.150', asset_tag: 'TAG-0102', maint_next_date: day(45) }
+    { manufacturer: 'Siemens', model: 'SIMATIC HMI TP1200', serial_number: 'HMI001', ip_address: '10.0.1.150', asset_tag: 'TAG-0102', maint_next_date: day(45), master_ifs_id: ipcMissing.ifs_id }
   ));
 
   // Assembly Line A — Station A2
@@ -301,7 +384,7 @@ async function seed() {
   ));
   const plc_a2 = await aRepo.save(mkFloor(
     'PLC-A2-001', 'plc', groundFloor.id, wa_assemblyA.id, sec_a2.id, 360, 100, null,
-    { manufacturer: 'Siemens', model: 'S7-1500', serial_number: 'PLC001', ip_address: '10.0.1.200', asset_tag: 'TAG-0104', maint_next_date: day(-5) }
+    { manufacturer: 'Siemens', model: 'S7-1500', serial_number: 'PLC001', ip_address: '10.0.1.200', asset_tag: 'TAG-0104', maint_next_date: day(-5), master_ifs_id: ipcDeployed.ifs_id, entity_kind: 'shopfloorCockpit' }
   ));
 
   // Assembly Line B
@@ -416,6 +499,10 @@ async function seed() {
   console.log('  Wall ports: 6 × ground floor · 3 × first floor');
   console.log('  Rack assets: Core-Switch-01 (U1) · Server-01 (U4) · Server-02 (U7) · NAS-01 (U10) · UPS-01 (U40) · Access-Switch-01');
   console.log('  Floor assets: 11 (workstations, HMI, PLC, robot, laptop, printer, display, Mac)');
+  console.log('  Master data: 3 IFS/CMDB rows (machine + 2 IPCs, one CMDB "MISSING") — hand-seeded, no live IFS/Databricks call');
+  console.log('  Org hierarchy: 1 Production Line (11101) · 1 Work Center (30230) — linked to Assembly Line A / Station A1+A2');
+  console.log('  Entity kinds: object · infoSphere · shopfloorCockpit (PLC-A2-001 uses shopfloorCockpit)');
+  console.log('  Workstations: 3 (TA-01, TA-02 in Station A1, TA-03 in Station A2)');
   console.log('  Connections: 18 with source_port/target_port');
   console.log('  Users    : admin/Admin@1234 · operator/Operator@1234 · viewer/Viewer@1234');
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');

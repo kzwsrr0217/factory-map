@@ -17,6 +17,9 @@ export interface Section {
     x: number;
     y: number;
   };
+  // Soft join to WorkCenter.code (organizational hierarchy, IFS-aligned) —
+  // see backend/src/entities/Section.entity.ts. Null/absent if unassigned.
+  workcenter_code?: string | null;
   created_at?: string;
   updated_at?: string;
 }

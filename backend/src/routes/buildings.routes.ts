@@ -87,13 +87,14 @@ import {
   deleteBuilding,
 } from '../controllers/building.controller';
 import { validate, BuildingCreateSchema, BuildingUpdateSchema } from '../utils/validate';
+import { requireOperator } from '../middleware/auth.middleware';
 
 const router = Router();
 
 router.get('/', getAllBuildings);
 router.get('/:id', getBuildingById);
-router.post('/', validate(BuildingCreateSchema), createBuilding);
-router.patch('/:id', validate(BuildingUpdateSchema), updateBuilding);
-router.delete('/:id', deleteBuilding);
+router.post('/', requireOperator, validate(BuildingCreateSchema), createBuilding);
+router.patch('/:id', requireOperator, validate(BuildingUpdateSchema), updateBuilding);
+router.delete('/:id', requireOperator, deleteBuilding);
 
 export default router;

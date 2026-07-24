@@ -37,6 +37,21 @@
  *       201:
  *         description: Created floor
  *
+ * /floors/{id}/svg:
+ *   get:
+ *     tags: [Floors]
+ *     summary: Serve the floor plan file referenced by Floor.svg_ref
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         description: SVG file content
+ *       404:
+ *         description: Floor not found, no svg_ref set, or file missing on disk
+ *
  * /floors/{id}:
  *   get:
  *     tags: [Floors]
@@ -87,17 +102,20 @@ import { Router } from 'express';
 import {
   getAllFloors,
   getFloorById,
+  getFloorSvg,
   createFloor,
   updateFloor,
   deleteFloor,
 } from '../controllers/floor.controller';
+import { requireOperator } from '../middleware/auth.middleware';
 
 const router = Router();
 
 router.get('/', getAllFloors);
+router.get('/:id/svg', getFloorSvg);
 router.get('/:id', getFloorById);
-router.post('/', createFloor);
-router.patch('/:id', updateFloor);
-router.delete('/:id', deleteFloor);
+router.post('/', requireOperator, createFloor);
+router.patch('/:id', requireOperator, updateFloor);
+router.delete('/:id', requireOperator, deleteFloor);
 
 export default router;

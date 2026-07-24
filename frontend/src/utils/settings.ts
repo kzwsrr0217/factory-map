@@ -33,7 +33,9 @@ export const loadSettings = (): AppSettings => {
   try {
     const stored = localStorage.getItem(SETTINGS_KEY);
     if (stored) return { ...DEFAULTS, ...JSON.parse(stored) };
-  } catch { /* ignore */ }
+  } catch (error) {
+    console.warn('Stored appSettings is corrupted, falling back to defaults:', error);
+  }
   return { ...DEFAULTS };
 };
 

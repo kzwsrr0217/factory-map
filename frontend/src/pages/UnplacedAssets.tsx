@@ -36,7 +36,11 @@ const UnplacedAssets: React.FC = () => {
   const { data: buildings = [], isLoading: loadingBuildings } = useBuildings();
   const { data: allFloors = [], isLoading: loadingFloors } = useFloors();
   const loading = loadingAssets || loadingBuildings || loadingFloors;
-  const assets = allAssets.filter((a: Asset) => !a.is_placed);
+  // Exclude replaced assets (successor_id set, see replaceAsset) — a
+  // decommissioned device is unplaced on purpose and will never be placed
+  // again, so without this it nags forever alongside genuinely new,
+  // not-yet-placed equipment.
+  const assets = allAssets.filter((a: Asset) => !a.is_placed && !a.successor_id);
   const floors: Floor[] = allFloors;
 
   const grouped: GroupedEntry[] = React.useMemo(() => {

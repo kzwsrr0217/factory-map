@@ -254,3 +254,70 @@ describe('DELETE /api/floors/:id', () => {
     expect(res.status).toBe(404);
   });
 });
+
+// ── Floor plan file serving (svg_ref) ────────────────────────────────────────
+// See backend/src/controllers/floor.controller.ts getFloorSvg and
+// docs/DATA_MODEL_MIGRATION.md (phase 4/6) — files live under
+// backend/src/floorplans/, checked into the repo.
+
+describe('GET /api/floors/:id/svg', () => {
+  let floorWithSvgId: string;
+  let floorWithoutSvgId: string;
+
+  beforeAll(async () => {
+    const withSvg = await request(app)
+      .post('/api/floors')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ building_id: buildingId, floor_number: 70, name: 'Floor With SVG' });
+    floorWithSvgId = withSvg.body.data._id;
+    await request(app)
+      .patch(`/api/floors/${floorWithSvgId}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ svg_ref: 'werk1-ground-floor.svg', scale_meters_per_unit: 1 });
+
+    const withoutSvg = await request(app)
+      .post('/api/floors')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ building_id: buildingId, floor_number: 71, name: 'Floor Without SVG' });
+    floorWithoutSvgId = withoutSvg.body.data._id;
+  });
+
+  it('serves the SVG file content when svg_ref is set', async () => {
+    const res = await request(app)
+      .get(`/api/floors/${floorWithSvgId}/svg`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toMatch(/image\/svg\+xml/);
+    // superagent only populates res.text for 'text/*' content types — for
+    // 'image/svg+xml' the body arrives as a Buffer in res.body instead.
+    const body = res.text || (Buffer.isBuffer(res.body) ? res.body.toString('utf8') : '');
+    expect(body).toContain('<svg');
+    expect(body).toContain('work-centers');
+  });
+
+  it('returns 404 when the floor has no svg_ref', async () => {
+    const res = await request(app)
+      .get(`/api/floors/${floorWithoutSvgId}/svg`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(404);
+  });
+
+  it('returns 404 for a non-existent floor', async () => {
+    const res = await request(app)
+      .get('/api/floors/00000000-0000-0000-0000-000000000000/svg')
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(404);
+  });
+
+  it('rejects a path-traversal svg_ref instead of serving an arbitrary file', async () => {
+    await request(app)
+      .patch(`/api/floors/${floorWithSvgId}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ svg_ref: '../../../.env' });
+
+    const res = await request(app)
+      .get(`/api/floors/${floorWithSvgId}/svg`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(400);
+  });
+});

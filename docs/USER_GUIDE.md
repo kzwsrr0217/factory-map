@@ -13,21 +13,23 @@
    - [Asset Details](#asset-details)
    - [Creating an Asset](#creating-an-asset)
    - [Editing an Asset](#editing-an-asset)
+   - [Replacing an Asset](#replacing-an-asset)
    - [Asset Connections](#asset-connections)
    - [Work Items (To-Do Checklist)](#work-items)
    - [Importing Assets from CSV/Excel](#importing-assets)
-9. [Global Search](#global-search)
-10. [Network Graph](#network-graph)
-11. [Network Infrastructure](#network-infrastructure)
-12. [Maintenance Calendar](#maintenance-calendar)
-13. [ITSM Reconcile](#itsm-reconcile)
-14. [Alerts (Admins only)](#alerts)
-15. [Reports](#reports)
-16. [Audit Log](#audit-log)
-17. [Settings](#settings)
-18. [User Management (Admins only)](#user-management)
-19. [Keyboard Shortcuts](#keyboard-shortcuts)
-20. [Tips & Best Practices](#tips--best-practices)
+9. [Unplaced & Orphaned Assets](#unplaced--orphaned-assets)
+10. [Global Search](#global-search)
+11. [Network Graph](#network-graph)
+12. [Network Infrastructure](#network-infrastructure)
+13. [Maintenance Calendar](#maintenance-calendar)
+14. [ITSM Reconcile](#itsm-reconcile)
+15. [Alerts (Admins only)](#alerts)
+16. [Reports](#reports)
+17. [Audit Log](#audit-log)
+18. [Settings](#settings)
+19. [User Management (Admins only)](#user-management)
+20. [Keyboard Shortcuts](#keyboard-shortcuts)
+21. [Tips & Best Practices](#tips--best-practices)
 
 ---
 
@@ -336,6 +338,33 @@ All changes are recorded in the Audit Log.
 
 ---
 
+### Replacing an Asset
+
+When a device physically fails or is swapped out, use **Replace** instead of
+deleting the old one and creating a new one by hand — it moves everything the
+old asset held onto the replacement in one step:
+
+1. Open the broken/old asset's details panel and click **Replace**
+2. Pick the replacement asset (an existing, ideally unplaced, asset record)
+3. Confirm
+
+The replacement inherits the old asset's map position, hierarchy (building/
+floor/work area/section/workstation, or rack + U-position), and physical wall
+port assignment, and **every connection** the old asset had (both directions)
+is re-pointed at the replacement — including, if the old asset was itself a
+switch, every wall port wired into one of its ports. The old asset is cleared
+to unplaced (it no longer occupies its old spot or rack slot) but is **not
+deleted** — it stays in the system for history, and Reports, the Maintenance
+Calendar, ITSM Reconcile, and the maintenance-alert emails all automatically
+stop counting it once it's been replaced, so it won't keep showing up as if
+it were still in service.
+
+The same **Replace** action is available for rack cabinets and patch panels
+on the [Network Infrastructure](#network-infrastructure) page, for the same
+"physically swapped the unit" scenario.
+
+---
+
 ### Asset Connections
 
 Connections represent physical or logical links between devices:
@@ -413,6 +442,31 @@ Click the **bell** icon next to a work item to send an immediate email/Teams not
 
 #### Bulk import via script (IT admin)
 For large imports (e.g., from an Excel spreadsheet), use the Python import scripts in the `uploads/` directory. Contact your system administrator.
+
+---
+
+## Unplaced & Orphaned Assets
+
+Two dedicated pages catch assets that need attention but don't show up in the
+normal building/floor browsing views.
+
+### Unplaced Assets
+The **Unplaced Assets** page lists every asset without map coordinates —
+newly created devices still sitting in a box, or an asset that was moved off
+a floor plan. Assets are grouped by building/floor so you can jump straight
+to the right floor map and place them. A replaced (retired) asset is **not**
+shown here even though it's technically unplaced — it's been superseded on
+purpose and will never need placing again.
+
+### Orphaned Assets
+The **Orphaned Assets** page lists assets whose external master-data link
+(IFS/CMDB) no longer resolves — the source record was deleted or renamed on
+a re-import. Factory Map never deletes the asset itself just because the
+external link broke; the device may still be sitting right there in the
+rack. The page flags it so someone can investigate and either fix the source
+record or re-link the asset to the correct one. The moment the source data
+resolves again (or the record reappears under the same ID), the asset
+disappears from this list automatically — no manual "un-orphan" step needed.
 
 ---
 
@@ -507,6 +561,38 @@ Wall ports represent the physical face plates mounted on walls or desks. They ap
 2. In the **Network** section, choose the **Wall Port** from the dropdown
 3. Save — the asset now shows its complete physical cable path in its details panel and on the floor map trace
 
+### Deletion guards
+
+You can't delete a rack, room, floor, or building while it still holds
+mounted assets, wall ports, or network rooms — the app blocks the deletion
+with a message telling you exactly what's still in the way (e.g. "Cannot
+delete rack with 3 mounted asset(s)"), instead of silently leaving those
+assets pointing at nothing. Reassign or remove the contents first, or use
+**Replace** (below) if you're physically swapping the unit rather than
+removing it for good.
+
+Two wall ports also can't be assigned to the same patch-panel port or the
+same switch port at the same time — the app rejects the second assignment,
+since a physical port can only terminate one cable.
+
+### Replacing a rack or patch panel (operator/admin)
+
+When a cabinet or patch-panel cassette is physically swapped out, use
+**Replace** (the 🔁 button next to a rack or panel, shown whenever another
+one exists to replace it with) instead of manually reassigning every
+mounted device or wired port:
+
+1. Click 🔁 next to the rack or panel being swapped out
+2. Choose the replacement (an existing rack in the same room, or panel in the
+   same rack)
+3. Confirm
+
+Every patch panel and mounted asset in the old rack — or every wall port
+wired into the old panel — moves to the replacement, keeping the same
+U-positions/port numbers. The now-empty old rack/panel is then removed. If
+the replacement is already occupied at one of those U-positions/ports, the
+replace is rejected instead of silently overlapping two devices.
+
 ---
 
 ## Maintenance Calendar
@@ -529,6 +615,11 @@ A collapsible **Overdue assets** panel appears above the calendar listing all as
 ### Exporting
 If the current month has any scheduled assets, a **CSV** button appears in the calendar header. Clicking it downloads a spreadsheet of that month's assets including name, type, status, maintenance dates, assigned person, serial number, and IP address.
 
+> A [replaced](#replacing-an-asset) asset never appears on this calendar or in
+> the overdue list, even if its old maintenance date is technically in the
+> past — it's been superseded by its replacement, which carries its own
+> schedule going forward.
+
 ---
 
 ## ITSM Reconcile
@@ -542,7 +633,10 @@ Opening the page shows every asset that is linked to an ITSM record
 (`hardware_asset_id`), together with its last check result: **Not checked**,
 **In sync**, **Differences**, or **Missing in ITSM**. This list and the summary
 cards at the top come from the local database — no ITSM traffic is generated by
-just opening the page.
+just opening the page. A [replaced](#replacing-an-asset) asset drops off this
+list automatically — there's no reason to keep reconciling a decommissioned
+device, and the ITSM sync job never overwrites its fields back to "active"
+either.
 
 ### Checking an asset (operator/admin)
 Click **Check ITSM** on an asset. This performs exactly **one** ITSM lookup for
@@ -620,6 +714,11 @@ The Reports page provides:
 - Assets by type (pie chart / count)
 - Assets by status
 - Assets with open work items
+
+All totals and counts exclude [replaced](#replacing-an-asset) assets — a
+decommissioned device stops counting toward the fleet total, maintenance
+figures, or location breakdowns the moment its replacement takes over, so
+the numbers reflect what's actually deployed today.
 
 ### ITSM Sync
 - Click **Sync All from ITSM** to pull the latest hardware data from the ITSM system

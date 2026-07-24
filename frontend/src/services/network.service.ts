@@ -97,6 +97,10 @@ export const networkService = {
   deleteRack: async (id: string): Promise<void> => {
     await api.delete(`/network/racks/${id}`);
   },
+  replaceRack: async (id: string, replacementId: string): Promise<NetworkRack> => {
+    const res = await api.post(`/network/racks/${id}/replace`, { replacement_id: replacementId });
+    return res.data.data;
+  },
 
   // Patch Panels
   getPatchPanels: async (rack_id?: string): Promise<PatchPanel[]> => {
@@ -113,6 +117,10 @@ export const networkService = {
   },
   deletePatchPanel: async (id: string): Promise<void> => {
     await api.delete(`/network/patch-panels/${id}`);
+  },
+  replacePatchPanel: async (id: string, replacementId: string): Promise<PatchPanel> => {
+    const res = await api.post(`/network/patch-panels/${id}/replace`, { replacement_id: replacementId });
+    return res.data.data;
   },
 
   // Wall Ports

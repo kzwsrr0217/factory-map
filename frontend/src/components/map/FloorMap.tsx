@@ -35,9 +35,15 @@ import { createPortal } from 'react-dom';
 import { WorkArea } from '../../services/workarea.service';
 import { Asset } from '../../services/asset.service';
 import { WallPort } from '../../services/network.service';
+import { Workstation } from '../../services/workstation.service';
 import Tooltip from '../common/Tooltip';
 import ConfirmDialog from '../common/ConfirmDialog';
 import { getAssetIcon, ASSET_TYPE_MAP } from '../../utils/assetTypes';
+import { entityKindService, EntityKind } from '../../services/entityKind.service';
+import { workCenterService, WorkCenter } from '../../services/workCenter.service';
+import { productionLineService, ProductionLine } from '../../services/productionLine.service';
+import { floorService } from '../../services/floor.service';
+import { parseFloorPlanSvg, NamedShape } from '../../utils/svgFloorPlan';
 import styles from '../../styles/components/FloorMap.module.css';
 
 // ── Module-level pure helpers (no component state dependency) ─────────────────
@@ -46,14 +52,42 @@ function getAssetStatus(asset: Asset): string {
   return asset.basic_info.status || 'unknown';
 }
 
+// Shared with workstationColor() below — both map a status string to a
+// marker color; kept as one source of truth for the colors the two status
+// vocabularies have in common so they can't drift out of sync.
+const STATUS_COLOR_ACTIVE = '#10b981';
+const STATUS_COLOR_MAINTENANCE = '#f59e0b';
+const STATUS_COLOR_INACTIVE = '#9ca3af';
+const STATUS_COLOR_UNKNOWN = '#6b7280';
+
 function getAssetColor(asset: Asset): string {
   const status = getAssetStatus(asset);
-  if (status === 'Decommissioned' || status === 'Retired' || status === 'retired') return '#9ca3af';
+  if (status === 'Decommissioned' || status === 'Retired' || status === 'retired') return STATUS_COLOR_INACTIVE;
   switch (status) {
-    case 'active':      return '#10b981';
-    case 'maintenance': return '#f59e0b';
+    case 'active':      return STATUS_COLOR_ACTIVE;
+    case 'maintenance': return STATUS_COLOR_MAINTENANCE;
     case 'offline':     return '#ef4444';
-    default:            return '#6b7280';
+    default:            return STATUS_COLOR_UNKNOWN;
+  }
+}
+
+// Deterministic hash → color for a Production Line code (see
+// WorkArea.production_line_code, backend/src/entities/WorkArea.entity.ts).
+// Mirrors shopfloor_visualizer's render.js productionLineColor(): same code
+// always gets the same color, no lookup/DB round-trip needed.
+const PL_PALETTE = ['#2563eb', '#dc2626', '#16a34a', '#d97706', '#7c3aed', '#0891b2', '#db2777', '#65a30d', '#ea580c', '#4f46e5'];
+function productionLineColor(code: string): string {
+  let h = 0;
+  for (let i = 0; i < code.length; i++) h = (h * 31 + code.charCodeAt(i)) >>> 0;
+  return PL_PALETTE[h % PL_PALETTE.length];
+}
+
+function workstationColor(status?: string): string {
+  switch (status) {
+    case 'active':      return STATUS_COLOR_ACTIVE;
+    case 'maintenance': return STATUS_COLOR_MAINTENANCE;
+    case 'inactive':    return STATUS_COLOR_INACTIVE;
+    default:            return STATUS_COLOR_UNKNOWN;
   }
 }
 
@@ -73,6 +107,15 @@ function hasItsmConflict(asset: Asset): boolean {
   return !!(asset as any).itsm_snapshot?.display_name && asset.itsm?.source_of_truth === 'local';
 }
 
+// True when this asset references IFS/CMDB master data that no longer
+// resolves (see MasterAsset.entity.ts). Only meaningful when the caller
+// fetched assets with include_master=true — `master` stays `undefined`
+// (not `null`) otherwise, which this deliberately does NOT flag as orphaned
+// (see AssetDetailsModal's same undefined-vs-null distinction).
+function isOrphaned(asset: Asset): boolean {
+  return !!asset.master_ifs_id && asset.master === null;
+}
+
 // ── Memoized per-asset SVG marker — only re-renders when its own props change ─
 
 interface AssetMarkerProps {
@@ -85,6 +128,7 @@ interface AssetMarkerProps {
   scale: number; // 1/zoom — keeps the pin a constant on-screen size at any zoom
   dimmed: boolean; // faded because it doesn't match the active filter/search
   editable: boolean;
+  entityKindsByValue: Map<string, EntityKind>;
   onDragStart: (asset: Asset, e: React.MouseEvent) => void;
   onClick:     (asset: Asset, e: React.MouseEvent) => void;
   onHover:     (e: React.MouseEvent, content: React.ReactNode) => void;
@@ -93,14 +137,22 @@ interface AssetMarkerProps {
 
 const AssetMarker = React.memo(function AssetMarker({
   asset, isDragging, isHighlighted, isSelectedForConnection, isCrossFloor,
-  showLabels, scale, dimmed, editable, onDragStart, onClick, onHover, onHoverEnd,
+  showLabels, scale, dimmed, editable, entityKindsByValue, onDragStart, onClick, onHover, onHoverEnd,
 }: AssetMarkerProps) {
   const x = asset.location.coordinates.x;
   const y = asset.location.coordinates.y;
   const eolOs        = isEolOs(asset);
   const decomm       = isDecommissioned(asset);
   const itsmConflict = hasItsmConflict(asset);
+  const orphaned     = isOrphaned(asset);
   const isIsolated   = !asset.assigned_person && (!asset.connections || asset.connections.length === 0);
+  // Additive fallback: the entity kind's default_color only wins when the
+  // status-based color logic has nothing more specific to say (status is
+  // unrecognized/absent) — status color remains the primary signal.
+  const entityKind = entityKindsByValue.get(asset.entity_kind || 'object');
+  const markerColor = getAssetStatus(asset) === 'unknown' && entityKind?.default_color
+    ? entityKind.default_color
+    : getAssetColor(asset);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const cf = (asset as any).custom_fields;
   const objectId = cf?.object_id as string | undefined;
@@ -136,6 +188,10 @@ const AssetMarker = React.memo(function AssetMarker({
          getAssetStatus(asset) === 'offline' ? '🔴 Offline' : '⚪ Unknown'}
       </p>
       {itsmConflict && <p style={{ color: '#f59e0b', fontWeight: 'bold' }}>⚠ ITSM changes pending</p>}
+      {orphaned && <p style={{ color: '#ef4444', fontWeight: 'bold' }}>⚠ Orphaned — master data unavailable</p>}
+      {entityKind && entityKind.value !== 'object' && (
+        <p><span className={styles.label}>Kind:</span> {entityKind.label}</p>
+      )}
       {asset.maintenance?.next_date && new Date(asset.maintenance.next_date) < new Date() && (
         <p style={{ color: '#ef4444', fontWeight: 'bold' }}>⚠ Maintenance overdue</p>
       )}
@@ -148,6 +204,22 @@ const AssetMarker = React.memo(function AssetMarker({
   // size at any zoom level (no shrinking to dots / ballooning when zoomed).
   return (
     <g opacity={dimmed ? 0.22 : (decomm ? 0.45 : 1)} transform={`translate(${x} ${y}) scale(${scale})`}>
+      {asset.location.footprint && asset.location.footprint.length >= 3 && (
+        // Optional footprint polygon (cm, centered on the placement point) —
+        // pre-filled from the entity kind's default footprint on first
+        // placement (see asset.controller.ts fillFootprintFromEntityKind),
+        // mirrors shopfloor_visualizer's objectTypeTemplates convention.
+        <polygon
+          points={asset.location.footprint.map(([px, py]) => `${px},${py}`).join(' ')}
+          transform={`rotate(${asset.location.rotation ?? 0})`}
+          fill={markerColor}
+          fillOpacity={0.15}
+          stroke={markerColor}
+          strokeWidth={1.5}
+          strokeDasharray="4,2"
+          pointerEvents="none"
+        />
+      )}
       {isHighlighted && (
         <circle cx={0} cy={0} r="24" fill="none" stroke="#2563eb" strokeWidth="3" opacity="0.9" />
       )}
@@ -161,7 +233,7 @@ const AssetMarker = React.memo(function AssetMarker({
         cx={0}
         cy={0}
         r="15"
-        fill={getAssetColor(asset)}
+        fill={markerColor}
         stroke="#fff"
         strokeWidth="3"
         className={`${styles.asset} ${isDragging ? styles.dragging : ''}`}
@@ -213,10 +285,22 @@ const AssetMarker = React.memo(function AssetMarker({
           <circle cx={12} cy={-12} r="5" fill="#f97316" stroke="#fff" strokeWidth="1.5" />
         </g>
       )}
+      {orphaned && (
+        <g pointerEvents="none">
+          <circle cx={0} cy={-20} r="7" fill="#ef4444" stroke="#fff" strokeWidth="2" />
+          <text x={0} y={-16} textAnchor="middle" fill="#fff" fontSize="9" fontWeight="bold">!</text>
+        </g>
+      )}
       {isCrossFloor && (
         <g pointerEvents="none">
           <circle cx={-13} cy={13} r="7" fill="#06b6d4" stroke="#fff" strokeWidth="2" />
           <text x={-13} y={17} textAnchor="middle" fill="#fff" fontSize="8" fontWeight="bold">↕</text>
+        </g>
+      )}
+      {entityKind?.rotatable && (
+        <g pointerEvents="none">
+          <circle cx={13} cy={13} r="6" fill="#8b5cf6" stroke="#fff" strokeWidth="1.5" />
+          <text x={13} y={16} textAnchor="middle" fill="#fff" fontSize="8" fontWeight="bold">⟳</text>
         </g>
       )}
       {!decomm && asset.maintenance?.next_date && new Date(asset.maintenance.next_date) < new Date() && (
@@ -262,7 +346,7 @@ interface FloorMapProps {
   onAssetStatusChange?: (assetId: string, status: string) => void;
   onAssetEdit?: (asset: Asset) => void;
   onAssetClone?: (asset: Asset) => void;
-  onConnectionDelete?: (assetId: string, connectedAssetId: string) => void;
+  onConnectionDelete?: (assetId: string, connectionId: string) => void;
   activeConnectionTypes?: Set<string>;
   unplacedAssets?: Asset[];
   onPlaceUnplaced?: (assetId: string, x: number, y: number) => void;
@@ -272,6 +356,13 @@ interface FloorMapProps {
   onWallPortMove?: (portId: string, x: number, y: number) => void;
   onAssetTrace?: (asset: Asset) => void;
   floorName?: string;
+  // Prototype SVG-layer floor plan (see docs/DATA_MODEL_MIGRATION.md phase 4)
+  // — additive to the existing WorkArea rectangles, not a replacement.
+  floorId?: string;
+  floorSvgRef?: string | null;
+  // Physical workstation slots (see docs/DATA_MODEL_MIGRATION.md phase 5-6).
+  workstations?: Workstation[];
+  onWorkstationMove?: (workstationId: string, x: number, y: number) => void;
 }
 
 const GRID_SIZE = 50; // Grid snap size
@@ -315,9 +406,13 @@ const FloorMap: React.FC<FloorMapProps> = ({
   allAssets = [],
   onNavigateToAsset,
   wallPorts = [],
+  workstations = [],
+  onWorkstationMove,
   onWallPortMove,
   onAssetTrace,
   floorName,
+  floorId,
+  floorSvgRef,
 }) => {
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -325,7 +420,7 @@ const FloorMap: React.FC<FloorMapProps> = ({
   const pannedRef = useRef(false);
   
   const [dragging, setDragging] = useState<{
-    type: 'workarea' | 'asset' | 'resize' | 'pan' | 'wallport';
+    type: 'workarea' | 'asset' | 'resize' | 'pan' | 'wallport' | 'workstation';
     id: string;
     offsetX: number;
     offsetY: number;
@@ -340,9 +435,106 @@ const FloorMap: React.FC<FloorMapProps> = ({
   const [showMinimap, setShowMinimap] = useState(true);
   const [bgFitMode, setBgFitMode] = useState<'meet' | 'slice'>('meet');
   const [drawStart, setDrawStart] = useState<{ x: number; y: number } | null>(null);
+
+  // Entity kinds (see backend/src/entities/EntityKind.entity.ts) — fetched once,
+  // config-style reference data, no live IFS/Databricks call involved. Used by
+  // AssetMarker below as an additive fallback color/rotatable indicator, never
+  // overriding the existing status-based color logic (getAssetColor).
+  const [entityKinds, setEntityKinds] = useState<EntityKind[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    entityKindService.getEntityKinds().then((v) => { if (!cancelled) setEntityKinds(v); }).catch(() => { if (!cancelled) setEntityKinds([]); });
+    return () => { cancelled = true; };
+  }, []);
+  const entityKindsByValue = useMemo(
+    () => new Map(entityKinds.map((k) => [k.value, k])),
+    [entityKinds]
+  );
+
+  // Paint/stacking order for the canvas — deliberately NOT the same as the
+  // `workareas` prop's own order (that list is fetched name-ASC for readable
+  // dropdowns/lists elsewhere in the app). SVG paint order determines both
+  // what's drawn on top AND which overlapping shape catches the mouse, so
+  // sorting by name here would make a newly-created work area permanently
+  // stuck behind an alphabetically-earlier one it overlaps — unmovable
+  // without first relocating the other one out of the way. Oldest-first
+  // means the newest work area is always painted (and clickable) on top.
+  const workareasByPaintOrder = useMemo(() => {
+    return [...workareas].sort((a, b) => {
+      const at = a.created_at ? new Date(a.created_at).getTime() : 0;
+      const bt = b.created_at ? new Date(b.created_at).getTime() : 0;
+      return at - bt;
+    });
+  }, [workareas]);
+
+  // Same reasoning as workareasByPaintOrder above, for assets — the `assets`
+  // prop is fetched display_name-ASC (see asset.controller.ts getAllAssets),
+  // which has nothing to do with map position and would otherwise leave a
+  // freshly-placed asset unclickable if it lands on top of an
+  // alphabetically-earlier one.
+  const assetsByPaintOrder = useMemo(() => {
+    return [...assets].sort((a, b) => {
+      const at = a.created_at ? new Date(a.created_at).getTime() : 0;
+      const bt = b.created_at ? new Date(b.created_at).getTime() : 0;
+      return at - bt;
+    });
+  }, [assets]);
+
+  // Work centers (see backend/src/entities/WorkCenter.entity.ts) — fetched
+  // once, used below to resolve a work-center-layer shape's production line
+  // code for coloring (see productionLineColor() above). No live
+  // IFS/Databricks call.
+  const [workCenters, setWorkCenters] = useState<WorkCenter[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    workCenterService.getWorkCenters().then((v) => { if (!cancelled) setWorkCenters(v); }).catch(() => { if (!cancelled) setWorkCenters([]); });
+    return () => { cancelled = true; };
+  }, []);
+  const workCentersByCode = useMemo(
+    () => new Map(workCenters.map((w) => [w.code, w])),
+    [workCenters]
+  );
+
+  // Production lines (see backend/src/entities/ProductionLine.entity.ts) —
+  // fetched once, used to resolve a production-line-layer shape's
+  // description. No live IFS/Databricks call.
+  const [productionLines, setProductionLines] = useState<ProductionLine[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    productionLineService.getProductionLines().then((v) => { if (!cancelled) setProductionLines(v); }).catch(() => { if (!cancelled) setProductionLines([]); });
+    return () => { cancelled = true; };
+  }, []);
+  const productionLinesByCode = useMemo(
+    () => new Map(productionLines.map((p) => [p.code, p])),
+    [productionLines]
+  );
+
+  // Prototype SVG-layer floor plan (see docs/DATA_MODEL_MIGRATION.md phase
+  // 4-5) — additive to the WorkArea rectangles below, not a replacement.
+  // Fetched once per floor (keyed by floorId + floorSvgRef so switching
+  // floors re-fetches).
+  const [svgPlan, setSvgPlan] = useState<{ backgroundMarkup: string; viewBox: { x: number; y: number; width: number; height: number } | null; workCenterShapes: NamedShape[]; productionLineShapes: NamedShape[] } | null>(null);
+  useEffect(() => {
+    if (!floorId || !floorSvgRef) { setSvgPlan(null); return; }
+    let cancelled = false;
+    floorService.getFloorSvg(floorId)
+      .then((text) => { if (!cancelled) setSvgPlan(parseFloorPlanSvg(text)); })
+      .catch(() => { if (!cancelled) setSvgPlan(null); });
+    return () => { cancelled = true; };
+  }, [floorId, floorSvgRef]);
+
+  // Click-to-select for parsed SVG shapes (work-centers / production-lines) —
+  // clicking the same shape again deselects (same pattern as asset/workarea
+  // selection elsewhere in this file). Shown as a fixed popover, not just a
+  // hover tooltip.
+  const [shapePopover, setShapePopover] = useState<{ kind: 'workCenter' | 'productionLine'; code: string; screenX: number; screenY: number } | null>(null);
+
+  // Workstation click-to-select popover (view-mode only — dragging is
+  // handled separately via startDraggingWorkstation, see below).
+  const [workstationPopover, setWorkstationPopover] = useState<{ ws: Workstation; screenX: number; screenY: number } | null>(null);
   const [drawRect, setDrawRect] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const [popover, setPopover] = useState<{ asset: Asset; screenX: number; screenY: number } | null>(null);
-  const [connPopover, setConnPopover] = useState<{ assetId: string; connectedAssetId: string; label: string; screenX: number; screenY: number } | null>(null);
+  const [connPopover, setConnPopover] = useState<{ assetId: string; connectionId: string; label: string; screenX: number; screenY: number } | null>(null);
   const [wallPortPopover, setWallPortPopover] = useState<{ port: WallPort; screenX: number; screenY: number } | null>(null);
   const [pendingDeleteWorkareaId, setPendingDeleteWorkareaId] = useState<string | null>(null);
   const [showLabels, setShowLabels] = useState(true);
@@ -586,6 +778,10 @@ const FloorMap: React.FC<FloorMapProps> = ({
       const newX = snapToGridHelper(svgPoint.x - dragging.offsetX);
       const newY = snapToGridHelper(svgPoint.y - dragging.offsetY);
       onWallPortMove(dragging.id, Math.round(newX), Math.round(newY));
+    } else if (dragging.type === 'workstation' && onWorkstationMove && editable) {
+      const newX = snapToGridHelper(svgPoint.x - dragging.offsetX);
+      const newY = snapToGridHelper(svgPoint.y - dragging.offsetY);
+      onWorkstationMove(dragging.id, Math.round(newX), Math.round(newY));
     } else if (dragging.type === 'resize' && onWorkareaResize && editable) {
       const workarea = workareas.find((w) => w._id === dragging.id);
       if (!workarea) return;
@@ -1025,6 +1221,21 @@ const FloorMap: React.FC<FloorMapProps> = ({
     setDragging({ type: 'wallport', id: wp._id, offsetX: svgPoint.x - wp.pos_x, offsetY: svgPoint.y - wp.pos_y });
   };
 
+  const startDraggingWorkstation = (ws: Workstation, e: React.MouseEvent) => {
+    if (!editable) return;
+    e.stopPropagation();
+    hideTooltip();
+    const svg = svgRef.current;
+    if (!svg) return;
+    const point = svg.createSVGPoint();
+    point.x = e.clientX;
+    point.y = e.clientY;
+    const svgPoint = point.matrixTransform(svg.getScreenCTM()?.inverse());
+    const wx = ws.coordinates?.x ?? 0;
+    const wy = ws.coordinates?.y ?? 0;
+    setDragging({ type: 'workstation', id: ws._id, offsetX: svgPoint.x - wx, offsetY: svgPoint.y - wy });
+  };
+
   // Handle workarea click
   const handleWorkareaClickInternal = (workarea: WorkArea) => {
     if (editable) return;
@@ -1234,6 +1445,101 @@ const FloorMap: React.FC<FloorMapProps> = ({
           />
         )}
 
+        {/* Prototype SVG-layer floor plan (docs/DATA_MODEL_MIGRATION.md phase
+            4-5) — additive to the WorkArea rectangles below, never a
+            replacement. Background layers (outline/walls) render as parsed,
+            unmodified markup; production-lines render as dashed contours
+            (organizational boundary, may overlap several work centers) below
+            the work-centers fill (physical area) — both colored by the same
+            hash function as the WorkArea header band, so all three agree. */}
+        {svgPlan && (() => {
+          // Scale the source file's own viewBox (which the exporting tool may
+          // have authored at any size/origin — e.g. a Visio SVG export uses
+          // its own point-based coordinate space) to fit this canvas's fixed
+          // 1000x800 world, preserving aspect ratio (like
+          // preserveAspectRatio="xMidYMid meet"). No viewBox on the source
+          // file = assume it already matches this world (the hand-authored
+          // prototype does).
+          const vb = svgPlan.viewBox;
+          const scale = vb ? Math.min(1000 / vb.width, 800 / vb.height) : 1;
+          const tx = vb ? (1000 - vb.width * scale) / 2 - vb.x * scale : 0;
+          const ty = vb ? (800 - vb.height * scale) / 2 - vb.y * scale : 0;
+          return (
+          <g pointerEvents="none" opacity={0.9} transform={`translate(${tx} ${ty}) scale(${scale})`}>
+            <g dangerouslySetInnerHTML={{ __html: svgPlan.backgroundMarkup }} />
+            {svgPlan.productionLineShapes.map((shape) => {
+              const color = productionLineColor(shape.code);
+              const isSelected = shapePopover?.kind === 'productionLine' && shapePopover.code === shape.code;
+              return (
+                <g
+                  key={`pl-${shape.code}`}
+                  fill="none"
+                  stroke={color}
+                  strokeWidth={isSelected ? 5 : 3}
+                  strokeDasharray="10,6"
+                  // Only clickable outside edit/deploy/placement modes — those
+                  // need clicks/drags to fall through to the background rect
+                  // (pan, draw-select, asset placement), which this shape
+                  // otherwise sits on top of and would silently swallow.
+                  pointerEvents={editable || deployMode || placingAsset ? 'none' : 'all'}
+                  style={{ cursor: 'pointer' }}
+                  onMouseEnter={(e) =>
+                    showTooltip(e, <div><h4>🏷️ Production Line {shape.code}</h4>{productionLinesByCode.get(shape.code)?.description && (
+                      <p>{productionLinesByCode.get(shape.code)?.description}</p>
+                    )}</div>)
+                  }
+                  onMouseLeave={hideTooltip}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShapePopover((prev) =>
+                      prev?.kind === 'productionLine' && prev.code === shape.code
+                        ? null
+                        : { kind: 'productionLine', code: shape.code, screenX: e.clientX, screenY: e.clientY }
+                    );
+                  }}
+                  dangerouslySetInnerHTML={{ __html: shape.markup }}
+                />
+              );
+            })}
+            {svgPlan.workCenterShapes.map((shape) => {
+              const plCode = workCentersByCode.get(shape.code)?.production_line_code;
+              const color = plCode ? productionLineColor(plCode) : '#9ca3af';
+              const isSelected = shapePopover?.kind === 'workCenter' && shapePopover.code === shape.code;
+              return (
+                <g
+                  key={`wc-${shape.code}`}
+                  fill={color}
+                  fillOpacity={0.45}
+                  stroke={color}
+                  strokeWidth={isSelected ? 4 : 2}
+                  pointerEvents={editable || deployMode || placingAsset ? 'none' : 'all'}
+                  style={{ cursor: 'pointer' }}
+                  onMouseEnter={(e) =>
+                    showTooltip(
+                      e,
+                      <div>
+                        <h4>🏭 Work Center {shape.code}</h4>
+                        {plCode && <p><span className={styles.label}>Production Line:</span> {plCode}</p>}
+                      </div>
+                    )
+                  }
+                  onMouseLeave={hideTooltip}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShapePopover((prev) =>
+                      prev?.kind === 'workCenter' && prev.code === shape.code
+                        ? null
+                        : { kind: 'workCenter', code: shape.code, screenX: e.clientX, screenY: e.clientY }
+                    );
+                  }}
+                  dangerouslySetInnerHTML={{ __html: shape.markup }}
+                />
+              );
+            })}
+          </g>
+          );
+        })()}
+
         {/* Grid Background - ALWAYS render if layers.grid is true */}
         <defs>
           <pattern id="grid" width={GRID_SIZE} height={GRID_SIZE} patternUnits="userSpaceOnUse">
@@ -1256,7 +1562,7 @@ const FloorMap: React.FC<FloorMapProps> = ({
         )}
 
         {/* Work Areas */}
-        {layers.workareas && workareas.map((workarea) => {
+        {layers.workareas && workareasByPaintOrder.map((workarea) => {
           const x = workarea.coordinates?.x || 100;
           const y = workarea.coordinates?.y || 100;
           const width = workarea.dimensions?.width || 150;
@@ -1289,6 +1595,9 @@ const FloorMap: React.FC<FloorMapProps> = ({
                     <div>
                       <h4>🏭 {workarea.name}</h4>
                       {workarea.type && <p><span className={styles.label}>Type:</span> {workarea.type}</p>}
+                      {workarea.production_line_code && (
+                        <p><span className={styles.label}>Production Line:</span> {workarea.production_line_code}</p>
+                      )}
                       {workarea.metadata?.supervisor && (
                         <p><span className={styles.label}>Supervisor:</span> {workarea.metadata.supervisor}</p>
                       )}
@@ -1319,14 +1628,16 @@ const FloorMap: React.FC<FloorMapProps> = ({
                 />
               )}
 
-              {/* Header band — name stays at top so asset body is clear */}
+              {/* Header band — name stays at top so asset body is clear.
+                  Tinted by Production Line color when the work area is
+                  linked to one (production_line_code), else the default purple. */}
               <rect
                 x={x}
                 y={y}
                 width={width}
                 height={26}
-                fill="#7c3aed"
-                fillOpacity="0.18"
+                fill={workarea.production_line_code ? productionLineColor(workarea.production_line_code) : '#7c3aed'}
+                fillOpacity={workarea.production_line_code ? '0.28' : '0.18'}
                 rx="8"
                 pointerEvents="none"
               />
@@ -1368,7 +1679,7 @@ const FloorMap: React.FC<FloorMapProps> = ({
                 </text>
               )}
 
-              {workarea.type && (
+              {(workarea.type || workarea.production_line_code) && (
                 <text
                   x={x + width - 8}
                   y={y + 17}
@@ -1380,7 +1691,9 @@ const FloorMap: React.FC<FloorMapProps> = ({
                   strokeWidth="2"
                   paintOrder="stroke"
                 >
-                  {workarea.type}
+                  {[workarea.type, workarea.production_line_code ? `PL ${workarea.production_line_code}` : null]
+                    .filter(Boolean)
+                    .join(' · ')}
                 </text>
               )}
 
@@ -1496,7 +1809,7 @@ const FloorMap: React.FC<FloorMapProps> = ({
                     e.stopPropagation();
                     setConnPopover({
                       assetId: asset._id,
-                      connectedAssetId: connection.connected_asset_id,
+                      connectionId: connection.id,
                       label: connection.label || `${connection.connection_type}`,
                       screenX: e.clientX,
                       screenY: e.clientY,
@@ -1569,11 +1882,58 @@ const FloorMap: React.FC<FloorMapProps> = ({
           );
         })}
 
+        {/* Workstations (physical desk/machine slots — distinct from Asset,
+            the IT/OT equipment placed at one). Draggable in edit mode via
+            startDraggingWorkstation, same pattern as WallPort above. A small
+            diamond marker, colored by status, distinct from the Asset circle
+            and the WallPort jack icon above. */}
+        {workstations.map((ws) => {
+          const wx = ws.coordinates?.x ?? 0;
+          const wy = ws.coordinates?.y ?? 0;
+          const color = workstationColor(ws.status);
+          const isSelected = workstationPopover?.ws._id === ws._id;
+          const isDraggingWs = dragging?.type === 'workstation' && dragging.id === ws._id;
+          return (
+            <g
+              key={ws._id}
+              style={{ cursor: editable ? 'move' : 'pointer' }}
+              opacity={isDraggingWs ? 0.6 : 1}
+              transform={`translate(${wx} ${wy}) rotate(${ws.rotation ?? 0})`}
+              onMouseDown={editable ? (e) => startDraggingWorkstation(ws, e) : undefined}
+              onClick={editable ? undefined : (e) => {
+                e.stopPropagation();
+                setWorkstationPopover((prev) => (prev?.ws._id === ws._id ? null : { ws, screenX: e.clientX, screenY: e.clientY }));
+              }}
+              onMouseEnter={(e) => showTooltip(e,
+                <div>
+                  <h4>🪑 {ws.name}</h4>
+                  {ws.type && <p><span className={styles.label}>Type:</span> {ws.type}</p>}
+                  {ws.status && <p><span className={styles.label}>Status:</span> {ws.status}</p>}
+                </div>
+              )}
+              onMouseLeave={hideTooltip}
+            >
+              <polygon
+                points="0,-9 9,0 0,9 -9,0"
+                fill={color}
+                stroke="#fff"
+                strokeWidth={isSelected ? 3 : 1.5}
+              />
+              {showLabels && (
+                <text x={0} y={22} textAnchor="middle" fontSize="9" fontWeight="600"
+                  fill="#374151" stroke="white" strokeWidth="2" paintOrder="stroke" pointerEvents="none">
+                  {ws.name.length > 10 ? ws.name.slice(0, 9) + '…' : ws.name}
+                </text>
+              )}
+            </g>
+          );
+        })}
+
         {/* Assets — each rendered by a memoized AssetMarker so unrelated assets
               skip re-rendering during drags, highlights, and layer toggles.
               Viewport culling: skip assets outside the current viewBox (+100 px
               margin) so dense floors don't render off-screen SVG elements. */}
-        {layers.assets && assets.filter((asset) => {
+        {layers.assets && assetsByPaintOrder.filter((asset) => {
           if (dragging?.type === 'asset' && dragging.id === asset._id) return true;
           if (highlightedAssetId === asset._id) return true;
           if (selectedAssetsForConnection.includes(asset._id)) return true;
@@ -1599,6 +1959,7 @@ const FloorMap: React.FC<FloorMapProps> = ({
             scale={1 / zoom}
             dimmed={dimmed}
             editable={editable}
+            entityKindsByValue={entityKindsByValue}
             onDragStart={startDraggingAsset}
             onClick={handleAssetClickInternal}
             onHover={showTooltip}
@@ -1838,6 +2199,74 @@ const FloorMap: React.FC<FloorMapProps> = ({
         document.body
       )}
 
+      {/* SVG-layer shape popover (work-center / production-line — phase 5,
+          see docs/DATA_MODEL_MIGRATION.md) */}
+      {shapePopover && createPortal(
+        <>
+          <div style={{ position: 'fixed', inset: 0, zIndex: 199 }} onClick={() => setShapePopover(null)} />
+          <div
+            className={styles.popover}
+            style={{ position: 'fixed', left: shapePopover.screenX + 8, top: shapePopover.screenY - 8, zIndex: 200 }}
+          >
+            <div className={styles.popoverHeader}>
+              <span>
+                {shapePopover.kind === 'workCenter' ? '🏭 Work Center' : '🏷️ Production Line'} {shapePopover.code}
+              </span>
+              <button className={styles.popoverClose} onClick={() => setShapePopover(null)}>✕</button>
+            </div>
+            <div className={styles.popoverMeta}>
+              {shapePopover.kind === 'workCenter' ? (
+                <>
+                  <div className={styles.popoverMetaRow}>
+                    <span className={styles.popoverMetaLabel}>Description</span>
+                    <span className={styles.popoverMetaValue}>{workCentersByCode.get(shapePopover.code)?.description || '-'}</span>
+                  </div>
+                  <div className={styles.popoverMetaRow}>
+                    <span className={styles.popoverMetaLabel}>Production Line</span>
+                    <span className={styles.popoverMetaValue}>{workCentersByCode.get(shapePopover.code)?.production_line_code || '-'}</span>
+                  </div>
+                </>
+              ) : (
+                <div className={styles.popoverMetaRow}>
+                  <span className={styles.popoverMetaLabel}>Description</span>
+                  <span className={styles.popoverMetaValue}>{productionLinesByCode.get(shapePopover.code)?.description || '-'}</span>
+                </div>
+              )}
+            </div>
+          </div>
+        </>,
+        document.body
+      )}
+
+      {/* Workstation popover (phase 5, see docs/DATA_MODEL_MIGRATION.md) */}
+      {workstationPopover && createPortal(
+        <>
+          <div style={{ position: 'fixed', inset: 0, zIndex: 199 }} onClick={() => setWorkstationPopover(null)} />
+          <div
+            className={styles.popover}
+            style={{ position: 'fixed', left: workstationPopover.screenX + 8, top: workstationPopover.screenY - 8, zIndex: 200 }}
+          >
+            <div className={styles.popoverHeader}>
+              <span>🪑 {workstationPopover.ws.name}</span>
+              <button className={styles.popoverClose} onClick={() => setWorkstationPopover(null)}>✕</button>
+            </div>
+            <div className={styles.popoverMeta}>
+              {workstationPopover.ws.type && (
+                <div className={styles.popoverMetaRow}>
+                  <span className={styles.popoverMetaLabel}>Type</span>
+                  <span className={styles.popoverMetaValue}>{workstationPopover.ws.type}</span>
+                </div>
+              )}
+              <div className={styles.popoverMetaRow}>
+                <span className={styles.popoverMetaLabel}>Status</span>
+                <span className={styles.popoverMetaValue}>{workstationPopover.ws.status || 'active'}</span>
+              </div>
+            </div>
+          </div>
+        </>,
+        document.body
+      )}
+
       {/* Connection delete popover */}
       {connPopover && createPortal(
         <>
@@ -1854,7 +2283,7 @@ const FloorMap: React.FC<FloorMapProps> = ({
               className={styles.popoverAction}
               style={{ color: '#ef4444' }}
               onClick={() => {
-                onConnectionDelete?.(connPopover.assetId, connPopover.connectedAssetId);
+                onConnectionDelete?.(connPopover.assetId, connPopover.connectionId);
                 setConnPopover(null);
               }}
             >

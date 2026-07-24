@@ -94,13 +94,14 @@ import {
   updateWorkArea,
   deleteWorkArea,
 } from '../controllers/workarea.controller';
+import { requireOperator } from '../middleware/auth.middleware';
 
 const router = Router();
 
 router.get('/', getAllWorkAreas);
 router.get('/:id', getWorkAreaById);
-router.post('/', createWorkArea);
-router.patch('/:id', updateWorkArea);
-router.delete('/:id', deleteWorkArea);
+router.post('/', requireOperator, createWorkArea);
+router.patch('/:id', requireOperator, updateWorkArea);
+router.delete('/:id', requireOperator, deleteWorkArea);
 
 export default router;

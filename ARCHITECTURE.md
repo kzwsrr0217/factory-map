@@ -70,7 +70,19 @@ Building (1)
 Asset (N) — FK columns reference any level of the hierarchy
   ├── AssetSoftware (N)    — CASCADE DELETE
   ├── AssetConnection (N)  — CASCADE DELETE (also removes reverse connection)
+  ├── predecessor_id / successor_id — soft self-join, replacement lifecycle
+  ├── master_ifs_id     — soft join → MasterAsset (IFS/CMDB, read-only)
+  ├── entity_kind        — soft join → EntityKind (map-render config)
+  ├── rack_id / u_position — soft join → NetworkRack (rack-mounted assets)
   └── AuditLog entries     — stored via document_id; no FK constraint
+
+NetworkRoom (N) — building_id (FK), floor_id (soft join)
+  └── NetworkRack (N) — real FK, CASCADE
+        └── PatchPanel (N) — real FK, CASCADE
+              └── WallPort (N) — real FK (SET NULL); floor_id/switch_asset_id soft joins
+
+ProductionLine (N) ← WorkArea.production_line_code, WorkCenter.production_line_code (soft joins)
+WorkCenter (N)     ← Section.workcenter_code (soft join)
 
 AlertConfig (1 row, id = 'global') — email + Teams alert configuration
 AlertLog    (append-only)          — history of every sent alert
@@ -111,6 +123,74 @@ User        (N)                    — local + LDAP-provisioned accounts
 | `strength` | int | Signal/link strength (1–5) |
 | `patch_panel_name/port` | string | Patch panel routing |
 | `switch_name/port` | string | Switch routing |
+
+#### Network Infrastructure — NetworkRoom → NetworkRack → PatchPanel → WallPort
+
+A separate hierarchy from the spatial Building/Floor tree, modeling the
+physical wiring closets, not map-placeable objects (except `WallPort`, which
+has `pos_x`/`pos_y` and appears on the floor map):
+
+| Entity | Key columns | Relation to parent |
+|--------|-------------|---------------------|
+| `NetworkRoom` | `name`, `type` (`idf`/`mdf`), `building_id`, `floor_id` (nullable), `description`, `redundant_pair_id` | `building_id` required, real FK; `floor_id` optional, soft join |
+| `NetworkRack` | `name`, `network_room_id`, `u_count`, `description` | real FK to `NetworkRoom`, `onDelete: CASCADE` |
+| `PatchPanel` | `name`, `rack_id`, `u_position`, `port_count`, `cable_type`, `description` | real FK to `NetworkRack`, `onDelete: CASCADE` |
+| `WallPort` | `label`, `floor_id`, `pos_x`/`pos_y`, `patch_panel_id`, `patch_port`, `switch_asset_id`, `switch_port`, `description` | `patch_panel_id` real FK (`onDelete: SET NULL`); `floor_id`/`switch_asset_id` soft joins (no FK) |
+
+`Asset.rack_id`/`u_position`/`rack_u_size` is a **soft join** from the Asset
+side into `NetworkRack` — a rack-mounted asset (server, switch) references
+its rack without a matching FK back, mirroring every other soft-join
+convention in this schema.
+
+**Guarded deletion** (added to close orphan gaps found during a live-use-case
+audit): `deleteRack`/`deleteRoom` block with 400 if any `Asset.rack_id` still
+points into the rack (or, for a room, into any of its racks) — the real FK
+cascade would otherwise silently delete the rack/room out from under a
+still-mounted asset. `deleteFloor`/`deleteBuilding` likewise block if any
+`NetworkRoom`/`WallPort` still references them — `deleteBuilding`'s own
+hierarchy cascade deletes floors directly via the repository, bypassing
+`deleteFloor`'s guards, so it re-checks the same conditions itself rather
+than relying on the other controller's logic.
+
+**Collision guards**: two `WallPort`s cannot share the same
+(`patch_panel_id`, `patch_port`) or the same (`switch_asset_id`,
+`switch_port`) — a physical port can only terminate one cable
+(`findWallPortCollision` in `network.controller.ts`). Same principle as the
+pre-existing rack U-position collision check on `Asset` (`findRackCollision`
+in `asset.controller.ts`).
+
+**Physical-swap "replace" endpoints** (`POST /network/racks/:id/replace`,
+`POST /network/patch-panels/:id/replace`, mirroring the pre-existing
+`POST /assets/:id/replace`): when a cabinet or patch panel is physically
+swapped, this moves everything it held — mounted assets and patch panels for
+a rack, wired wall ports for a panel — to the replacement in one step
+(keeping U-positions/port numbers), rejects with 409 if that would collide
+with something already in the replacement, then removes the now-empty old
+shell. Unlike `Asset` (which keeps `predecessor_id`/`successor_id` for
+history), `NetworkRack`/`PatchPanel` have no identity fields worth preserving,
+so the old row is simply deleted once empty rather than retained.
+
+#### Master data & organizational hierarchy — MasterAsset, ProductionLine, WorkCenter, EntityKind
+
+Added to align factorymap's model with shopfloor_visualizer's IFS-primary
+approach (see `docs/DATA_MODEL_MIGRATION.md` for the full phase-by-phase
+history) — all are **soft joins**, so a reference that stops resolving
+(a re-import drops a row, a code is retyped) never cascades into deleting the
+asset/work area/section that pointed at it:
+
+| Entity | Key columns | Referenced (soft join) from |
+|--------|-------------|------------------------------|
+| `MasterAsset` | `ifs_id` (PK-like unique), `ifs_site`, `ifs_production_line_id`, `ifs_workcenter_id`, `ifs_machine_id`, `cmdb_id`, `cmdb_status`, … | `Asset.master_ifs_id` |
+| `ProductionLine` | `code` (PK), `description` | `WorkArea.production_line_code`, `WorkCenter.production_line_code` |
+| `WorkCenter` | `code` (PK), `description`, `production_line_code` | `Section.workcenter_code` |
+| `EntityKind` | `value` (PK), `label`, `geometry_type`, `default_color`, `rotatable`, `exempt_from_orphan`, `footprint` (polygon) | `Asset.entity_kind` |
+
+`GET /assets/:id` always resolves `master` (null if the join target is
+missing — the **orphaned** case surfaced on the dedicated Orphaned Assets
+page); `GET /assets?include_master=true` batches the same resolution for
+lists. `entity_kind` drives a map-marker color/rotatable-badge fallback only
+when the asset's own status-based color logic has nothing more specific to
+say — it never overrides a real status color.
 
 #### AlertConfig
 
@@ -209,6 +289,45 @@ POST/PATCH/DELETE request
 
 `Header.tsx` dispatches `new CustomEvent('app:new-asset')` on Ctrl+N. `Dashboard.tsx` listens for this event and opens the asset creation modal. This avoids threading state or callbacks through the component tree.
 
+### 7. Soft-join guarded deletes
+
+Almost every parent→child reference in this schema (`Asset.floor_id`,
+`Asset.rack_id`, `WallPort.patch_panel_id`'s siblings, `WorkArea.production_line_code`,
+…) is a plain column with no FK/cascade, by design — it keeps a re-import or
+retyped code from ever cascading into deleting real data. The cost of that
+design is that TypeORM/SQL can't enforce "don't delete a parent that still
+has children" for you; every parent-delete controller (`deleteBuilding`,
+`deleteFloor`, `deleteWorkArea`, `deleteSection`, `deleteRack`, `deleteRoom`,
+…) does its own `count()` guard against the soft-joined children and returns
+400 with a specific count-bearing message instead of deleting through. When a
+cascade deletes a child controller's own resource internally (e.g.
+`deleteBuilding` removing `Floor` rows directly via the repository, bypassing
+`deleteFloor`'s own guards), the parent's guard re-checks the grandchild
+conditions itself rather than assuming the child controller's logic ran.
+
+### 8. Lifecycle "replace" — physical swap without losing wiring
+
+`POST /assets/:id/replace`, `POST /network/racks/:id/replace`, and
+`POST /network/patch-panels/:id/replace` all follow the same shape: given a
+`replacement_id`, move everything the old row held (position, hierarchy,
+connections, mounted children, wired ports — whatever is soft-joined to it)
+onto the replacement, reject with 409 on any collision that transfer would
+create, then dispose of the old row (for `Asset`, "dispose" means clear to
+unplaced and keep it via `predecessor_id`/`successor_id` for audit history;
+`NetworkRack`/`PatchPanel` have no identity worth keeping, so the empty shell
+is deleted outright). This is the "I swapped the physical unit" workflow,
+distinct from plain delete ("I removed it and nothing replaces it").
+
+### 9. Surfacing real API error text (`getApiErrorMessage`)
+
+Every controller error response is `{ success: false, error: string }` with a
+specific, human-readable reason (a collision, a guarded-delete count, …).
+`frontend/src/utils/apiError.ts`'s `getApiErrorMessage(err, fallback)` pulls
+that string out of an Axios error's `response.data.error`; UI code should
+call it in every `catch` block that surfaces a toast, instead of
+`err.message` (which on an Axios error is just the generic "Request failed
+with status code 409" and throws away the actual reason the backend gave).
+
 ---
 
 ## Authentication & Authorization
@@ -228,6 +347,13 @@ POST/PATCH/DELETE request
 | `viewer` | Read-only: browse assets, maps, audit log, reports |
 | `operator` | viewer + create/edit assets, connections, floor plans, hierarchy |
 | `admin` | operator + user management, delete buildings/floors, alert config |
+
+Enforcement is server-side (`requireOperator`/`requireAdmin` middleware on
+every mutating route) — the frontend hiding a button is a UX nicety, not the
+actual boundary. Verified live: a `viewer` token gets `403 Operator or admin
+access required` from the API directly (not just a hidden button) on every
+write/delete endpoint tried, and `403 Admin access required` on user
+management, while read (`GET`) endpoints remain open to all three roles.
 
 ### Optional LDAP
 
@@ -308,6 +434,21 @@ npx playwright test --ui     # Interactive Playwright UI
 ```
 
 ---
+
+## Known Limitations
+
+- **No optimistic concurrency control.** No entity carries a version column;
+  two users editing the same record concurrently is last-write-wins (the
+  second save silently overwrites the first, no conflict is surfaced). Real
+  gap, not yet addressed — would need a version column + conditional update
+  on every mutating endpoint to fix properly.
+- **No in-app "network capacity" report** (e.g. free vs. occupied switch
+  ports per floor/building) — port occupancy is only visible per-panel in the
+  Network Infrastructure page, not aggregated.
+- **Orphaned-asset re-link is a manual field edit**, not a guided
+  search-and-relink wizard — `itsm.hardware_asset_id` (or `master_ifs_id`) can
+  be retargeted through the normal asset edit form, but there is no dedicated
+  "search ITSM/CMDB, pick the new record" flow on the Orphaned Assets page.
 
 ## Security Headers
 

@@ -18,7 +18,7 @@
  * environment variables only — never stored in the database.
  */
 import nodemailer from 'nodemailer';
-import { LessThanOrEqual } from 'typeorm';
+import { LessThanOrEqual, IsNull } from 'typeorm';
 import { AppDataSource } from '../../config/database';
 import { AlertConfig } from '../../entities/AlertConfig.entity';
 import { AlertLog } from '../../entities/AlertLog.entity';
@@ -397,9 +397,14 @@ export async function checkAndSend(): Promise<{
   const threshold = new Date(today);
   threshold.setDate(threshold.getDate() + cfg.days_before_alert);
 
+  // Excludes replaced assets (successor_id set, see replaceAsset) — without
+  // this a decommissioned device's stale maint_next_date or open work items
+  // would trigger real email/Teams notifications forever, long after the
+  // physical unit was swapped out.
   const assetRepo = AppDataSource.getRepository(Asset);
   const allAssets = await assetRepo.find({
     select: ['id', 'display_name', 'maint_next_date', 'work_items'],
+    where: { successor_id: IsNull() },
   });
 
   const upcoming: AlertAssetInfo[] = [];

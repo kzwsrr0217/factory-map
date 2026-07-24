@@ -9,14 +9,18 @@ Full-stack TypeScript application for tracking and visualizing IT assets in fact
 ### Core
 - **Hierarchical Asset Management** — Buildings → Floors → Work Areas → Sections → Workstations
 - **Interactive Floor Plans** — drag-and-drop asset positioning; cursor-anchored wheel zoom, touch pan/pinch, fit-to-content, keyboard navigation; constant-size pins with label decluttering; minimap, grid snap, shareable deep-link URLs, map export/print
-- **Asset Connections (Wire Mode)** — model physical/logical links between devices on the floor map
+- **Network Infrastructure** — IDF/MDF rooms → rack cabinets → patch panels → wall ports, with a clickable port grid and rack-elevation diagram; guarded deletes (can't delete a rack/room/floor/building still holding assets or wiring) and port-collision checks (two wall ports can't share the same patch-panel or switch port)
+- **Physical-swap "Replace"** — for assets, rack cabinets, and patch panels: swap the physical unit for a new one and every connection, mounted device, or wired port it held transfers automatically to the replacement (with a collision check), instead of losing the wiring or reassigning everything by hand
+- **Asset Connections (Wire Mode)** — model physical/logical links between devices on the floor map, including multiple connections per device (dual-NIC, multiple cables to the same switch)
 - **Network Topology Graph** — force-directed graph of all asset connections
+- **Master Data Join (IFS/CMDB)** — assets join read-only external master data by a stable ID; a missing/renamed source row never deletes the asset, it just surfaces on the **Orphaned Assets** page until resolved
+- **Unplaced / Orphaned Assets** — dedicated pages for assets not yet positioned on any floor, and assets whose external master-data link no longer resolves
 - **ITSM Integration (read-only)** — Alemba/Operaio View API adapter + mock adapter (22 realistic records); ITSM is the single source of truth and the app **never writes to ITSM**
-- **ITSM Reconcile** — per-asset, on-demand comparison against the ITSM source of truth; per-field **Accept** (copy ITSM value into the app) / **Ignore** (persisted) / **Remove link**, drift summary, full audit trail
+- **ITSM Reconcile** — per-asset, on-demand comparison against the ITSM source of truth; per-field **Accept** (copy ITSM value into the app) / **Ignore** (persisted) / **Remove link**, drift summary, full audit trail — replaced/retired assets are automatically excluded so a decommissioned device never re-appears via sync
 - **Global Search** — instant client-side prefix-indexed search across all assets (Ctrl+K)
 - **3-Step CSV Import Wizard** — validate, preview, and bulk-import assets
 - **Maintenance Calendar** — monthly calendar view of scheduled maintenance with CSV export
-- **Maintenance Alerts** — daily cron (07:00) sends email and/or Microsoft Teams notifications for overdue/upcoming maintenance
+- **Maintenance Alerts** — daily cron (07:00) sends email and/or Microsoft Teams notifications for overdue/upcoming maintenance (replaced/retired assets are excluded, and a future-dated "last serviced" entry is rejected)
 - **Scheduled One-Off Alerts** — create named reminders for any future date/time, delivered via email and/or Teams; hourly cron fires them at the right moment
 - **Work Item Alerts** — send an immediate targeted notification for any single asset work item (PATCH overdue/upcoming task); items automatically receive a UUID for reliable reference
 - **Audit Log** — immutable record of all create/update/delete operations with per-field diffs
@@ -25,7 +29,7 @@ Full-stack TypeScript application for tracking and visualizing IT assets in fact
 
 ### Technical
 - **JWT Authentication** — local login + optional LDAP/Active Directory
-- **RBAC** — three roles: `viewer`, `operator`, `admin`
+- **RBAC** — three roles: `viewer`, `operator`, `admin`; enforced server-side on every mutating endpoint (not just hidden buttons)
 - **Swagger/OpenAPI** — browsable, interactive API docs at `/api/docs`
 - **Automated Tests** — Jest + Supertest (backend), React Testing Library + MSW (frontend)
 - **Real-time Updates** — Socket.io pushes `asset:created/updated/deleted` events to all connected tabs
@@ -122,11 +126,19 @@ factory-map/
 │   │   ├── config.ts          # All env-var driven configuration
 │   │   ├── database.ts        # TypeORM DataSource + connectDatabase()
 │   │   └── swagger.ts         # swagger-jsdoc spec definition
-│   ├── controllers/           # asset, auth, building, floor, alert, itsm, section, user, …
+│   ├── controllers/           # asset, auth, building, floor, network, alert, itsm, section, user, …
 │   ├── entities/              # TypeORM entities
 │   │   ├── Asset.entity.ts
 │   │   ├── AssetConnection.entity.ts
 │   │   ├── AssetSoftware.entity.ts
+│   │   ├── MasterAsset.entity.ts       # cached read-only IFS/CMDB rows
+│   │   ├── ProductionLine.entity.ts
+│   │   ├── WorkCenter.entity.ts
+│   │   ├── EntityKind.entity.ts        # per-asset-type map-render config
+│   │   ├── NetworkRoom.entity.ts       # IDF/MDF closet
+│   │   ├── NetworkRack.entity.ts
+│   │   ├── PatchPanel.entity.ts
+│   │   ├── WallPort.entity.ts
 │   │   ├── AlertConfig.entity.ts
 │   │   ├── AlertLog.entity.ts
 │   │   ├── ScheduledAlert.entity.ts
@@ -167,6 +179,8 @@ factory-map/
 │   │   ├── AssetDetails.tsx   # Full-page asset view with QR code + print label
 │   │   ├── MapView.tsx        # Floor plan selector
 │   │   ├── UnplacedAssets.tsx # Assets not yet positioned on any floor
+│   │   ├── OrphanedAssets.tsx # Assets whose master-data link no longer resolves
+│   │   ├── NetworkInfrastructure.tsx # Rooms → racks → patch panels → wall ports, with replace
 │   │   ├── NetworkGraph.tsx   # Force-directed connection graph
 │   │   ├── Maintenance.tsx    # Monthly maintenance calendar
 │   │   ├── ItsmReconcile.tsx  # Read-only ITSM reconcile — per-field accept/ignore
@@ -242,6 +256,8 @@ E2E tests run against the live app (`http://localhost:5174` frontend + `http://l
 | Document | Contents |
 |----------|----------|
 | [ARCHITECTURE.md](ARCHITECTURE.md) | System diagram, data model, design patterns |
+| [docs/DATA_STRUCTURE.md](docs/DATA_STRUCTURE.md) | Entity/table reference, mapped against shopfloor_visualizer's data model for comparison |
+| [docs/DATA_MODEL_MIGRATION.md](docs/DATA_MODEL_MIGRATION.md) | Phase-by-phase history of how the data model evolved, with verification notes |
 | [docs/ADMIN_GUIDE.md](docs/ADMIN_GUIDE.md) | Installation, all env vars, user management, backup, production |
 | [docs/DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md) | API reference, code conventions, adding features |
 | [docs/USER_GUIDE.md](docs/USER_GUIDE.md) | End-user walkthrough of every page and feature |
