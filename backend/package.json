@@ -12,6 +12,7 @@
     "seed": "ts-node src/scripts/seed-mssql.ts",
     "seed:itsm": "ts-node src/scripts/seed-itsm-links.ts",
     "seed:docker": "docker-compose exec backend npm run seed",
+    "import:master": "ts-node src/scripts/import-master-data.ts",
     "test": "jest --runInBand --forceExit --passWithNoTests",
     "test:watch": "jest --watch",
     "migration:generate": "typeorm-ts-node-commonjs migration:generate -d src/data-source.ts",

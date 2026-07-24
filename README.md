@@ -63,6 +63,18 @@ docker exec factory-map-backend npm run seed:itsm   # ITSM-linked assets for the
 # (use `podman exec` with Podman)
 ```
 
+To import real read-only IFS/CMDB reference data (the same JSON files the
+`shopfloor_visualizer` ingest scripts produce — `masterData.json`,
+`OTAssetData.json`, `production_lines.json`, `workcenters.json`,
+`entity_kinds.json`):
+
+```bash
+docker exec factory-map-backend npm run import:master -- /path/to/export-dir
+# Idempotent + layout-safe: upserts master_assets/production_lines/work_centers/
+# entity_kinds by key, never touches asset positions/connections. A dropped row
+# just makes its asset unmatched (Orphaned Assets), never deleted.
+```
+
 Open **http://localhost:5174** — you will be prompted to log in.
 
 ### Verify backend

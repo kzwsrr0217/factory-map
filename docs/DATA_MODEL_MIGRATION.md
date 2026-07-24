@@ -301,6 +301,59 @@ the cumulative diff was also recommended, but that has to be run by the user
   `(90, 110)` to `(200, 150)` and confirmed via the API that the position
   persisted (`updated_at` changed).
 
+## What phase 8 did (this change)
+
+**Ingest parity with shopfloor_visualizer's real export.** Phases 1-3 gave
+`master_assets`/`production_lines`/`work_centers`/`entity_kinds` a *minimal*
+column set (enough to prove the join). Phase 8 widens them to the **full**
+column set of Matthias's actual export shapes — verified against his real
+ingest scripts and sample data, not guessed — and adds the importer that eats
+those files. This is the first phase where a real (exported) IFS/CMDB dataset
+flows in end-to-end; still no *live* Databricks/IFS socket (that's a one-line
+swap in the importer when access is confirmed).
+
+Sources inspected directly (in `shopfloor_visualizer/`):
+`databricks-ingest/ingest-mmag-machines.py` and `ingest-mmag-ot-assets.py`
+(both querying the same `ot_governance_prd.gold.ot_asset` Databricks table
+with different column projections), `ifs-ingest/get_workcenters.py`
+(IFS Cloud OData for work centers + production lines), and the real sample
+exports `masterData.json` (528 machines), `OTAssetData.json` (580 OT assets),
+`production_lines.json` (79), `workcenters.json` (572), `entity_kinds.json`.
+
+- **New optional columns, all nullable** (a plain hand-seeded row still works;
+  a richer export fills more):
+  - `master_assets`: `ifs_machine_part_no` (= his "objectType", the Object-ID
+    prefix before the first `-`), plus the OT-assets-projection fields
+    `ifs_part_no`, `ifs_part_description`, `ifs_serial_state`,
+    `ifs_operational_condition`, `ifs_server_path`, `cmdb_model`,
+    `cmdb_serial_number`.
+  - `production_lines`: `contract` (IFS site).
+  - `work_centers`: `contract`, `objstate` (Active/…), `department_no`,
+    `cost_center_id`.
+  - `entity_kinds`: `model`, `model_scale`, `preserve_model_colors` (his 3D
+    fields — factorymap has no 3D view, but stores them so entity_kinds.json
+    round-trips losslessly), and `geometry_type` now also accepts `'object'`.
+  - Migration `1732300000000-AddIfsExportOptionalColumns.ts` (additive, all
+    nullable — no data migration).
+- **`backend/src/scripts/import-master-data.ts`** (new, `npm run import:master
+  -- <dir>`): idempotent, layout-safe upsert of all five files. Merges the
+  machines and OT-assets shapes into one `master_assets` row per `ifs_id`
+  (an OT asset's `parent_id` becomes `ifs_machine_id`, exactly his
+  machine↔device parent join). Field-agnostic (copies only the keys a row
+  actually has, mirroring his ingest scripts' "genau die Spalten, die QUERY
+  liefert" design) and never touches app-owned layout — a re-import that drops
+  a row just makes that asset unmatched (Orphaned Assets), never deleted.
+  Column count drives chunk size to stay under MSSQL's 2100-parameter cap.
+- **Frontend**: `AssetMasterData` type + the AssetDetailsModal "Master Data
+  (IFS/CMDB)" section gained the new CMDB detail (model, serial number).
+- **Verified end-to-end** against his real MMAG export: importer merged 528
+  machines + 580 OT assets → 943 master rows, 79 production lines, 572 work
+  centers, 3 entity kinds; spot-checked that an OT asset (`444444-615`) carries
+  its full CMDB detail and that its `parent_id` (`325557-316`) resolves to a
+  real machine row; confirmed idempotency (re-run stays at 943, no
+  duplication); confirmed the three list endpoints expose the new columns and
+  `GET /assets?include_master=true` still resolves without regression.
+
 ## What phase 7 did (this change)
 
 Not a data-model extension like phases 1-6 — a **live-use-case audit**: working

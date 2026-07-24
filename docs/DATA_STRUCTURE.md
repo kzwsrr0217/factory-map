@@ -11,6 +11,21 @@ Both apps model the same real-world thing (physical assets, placed on floor
 plans, joined to external master data) but made different, explicit
 trade-offs. Section 5 spells those out directly.
 
+> **Ingest parity (verified, not aspirational).** factorymap's read-only
+> reference tables (`master_assets`, `production_lines`, `work_centers`,
+> `entity_kinds`) carry the **full column set** of shopfloor_visualizer's real
+> export shapes, and `backend/src/scripts/import-master-data.ts` eats the exact
+> same JSON files his ingest scripts produce (`masterData.json`,
+> `OTAssetData.json`, `production_lines.json`, `workcenters.json`,
+> `entity_kinds.json`). Confirmed end-to-end against his real MMAG export: 528
+> machines + 580 OT assets merged by `ifs_id` into 943 master rows, 79
+> production lines, 572 work centers, 3 entity kinds — including the OT-asset →
+> machine parent join (`parent_id`/`ifs_machine_id`) resolving correctly. Every
+> column beyond the original minimal set is **optional/nullable**, so a plain
+> hand-seeded row still works and a richer IFS export just fills more fields.
+> The extra fields factorymap doesn't itself use (e.g. `entity_kinds`' 3D
+> `model`/`modelScale`) are stored anyway so the file round-trips losslessly.
+
 ---
 
 ## 1. Storage model
@@ -64,7 +79,7 @@ models directly requires this translation.
 |---|---|---|
 | `Asset` (~90 columns across identity/hardware/network/OS/location/ITSM/reconcile/maintenance/lifecycle — see `ARCHITECTURE.md` → Data Model) | `Functional Object` (a `Feature` with `entityKind: "object"`, joined to master data by `objectId`) | factorymap's `Asset` is far wider — it owns hardware specs, ITSM sync state, reconcile diffs, maintenance schedule, and connection graph directly on the row; his `Feature` is deliberately just geometry (`position`, `footprint`, `rotation`), with everything else living in the read-only master-data join |
 | `Asset.master_ifs_id` → `MasterAsset.ifs_id` (soft join) | `Feature.objectId` → master-data row's `objectId` (join key) | Same join-key philosophy (stable external ID, app never owns the target). factorymap additionally caches the master row locally (`MasterAsset` table); his app re-imports it into the same store on each manual import — no separate "cache table" concept, since master data already lives in his DB post-import |
-| `MasterAsset` — `ifs_site`, `ifs_production_line_id`, `ifs_workcenter_id`, `ifs_machine_id`, `cmdb_id`, `cmdb_status`, … | Master-data JSON shape (§6.1 of his PRD): `objectId`, `objectType` (derived), `name`, `site`, `attributes` (open key/value map), `orgRef.{department,productionLine,workCenter,resource}` | His `attributes` is an open map for anything not yet modeled; factorymap's `MasterAsset` is a fixed, typed column set mirroring the actual IFS/CMDB export columns seen so far |
+| `MasterAsset` — machines shape: `ifs_site`, `ifs_machine_id`, `ifs_machine_part_no`, `ifs_machine_part_description`, `ifs_production_line_id`, `ifs_workcenter_id`, `ifs_cost_center`; OT-assets shape: `ifs_part_no`, `ifs_part_description`, `ifs_serial_state`, `ifs_operational_condition`, `ifs_operational_status`, `cmdb_id`, `cmdb_status`, `cmdb_catalog_item`, `cmdb_manufacturer`, `cmdb_model`, `cmdb_serial_number`, `cmdb_mac_address`, `cmdb_os`, `cmdb_os_version` | Master-data JSON shape (§6.1 of his PRD): `objectId`, `objectType` (derived), `name`, `site`, `attributes` (open key/value map), `orgRef.{department,productionLine,workCenter,resource}` | factorymap's `MasterAsset` is a **fixed, typed column set that now covers both of his ingest projections in full** (machines via `ingest-mmag-machines.py`, OT assets via `ingest-mmag-ot-assets.py`) — the same `ot_governance_prd.gold.ot_asset` Databricks table both his scripts read. His `ifs_machine_part_no` is exactly his "objectType" (Object-ID prefix); one master row merges both shapes by `ifs_id` |
 | `Asset.loc_x`/`loc_y`/`loc_rotation`/`loc_footprint` (JSON polygon), snapped freely | `Feature.geometry` (`point`/`polyline`/`polygon`, `closed`), rotation in **fixed 15° steps**, move snapped to a **1m/0.1m grid** | factorymap has no grid-snap increment or rotation-step constraint — free-form x/y/rotation |
 | `Asset.entity_kind` → `EntityKind.value` (soft join: `label`, `geometry_type`, `default_color`, `rotatable`, `exempt_from_orphan`, `footprint`) | Object-type polygon template (§6.5, keyed by the `objectId` prefix before its first `-`) | Same "first-placement pre-fills a default footprint from a type template" idea (factorymap's `fillFootprintFromEntityKind`); factorymap's `EntityKind` also carries a map-marker color/rotatable flag his template does not |
 | `Asset.predecessor_id`/`successor_id` + `POST /assets/:id/replace` | *(no equivalent — no asset lifecycle/replace concept in his model)* | factorymap-only: physical swap workflow that transfers position/hierarchy/connections/wall-port assignment to a replacement and marks the old row unplaced-but-retained |

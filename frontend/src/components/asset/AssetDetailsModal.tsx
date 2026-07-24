@@ -653,9 +653,19 @@ const AssetDetailsModal: React.FC<AssetDetailsModalProps> = ({
                         <p>{displayAsset.master.cmdb_os ? `${displayAsset.master.cmdb_os} (${displayAsset.master.cmdb_os_version || '-'})` : '-'}</p>
                       </div>
                       <div className={styles.field}>
-                        <label>Manufacturer / Catalog Item</label>
-                        <p>{displayAsset.master.cmdb_manufacturer || '-'} / {displayAsset.master.cmdb_catalog_item || '-'}</p>
+                        <label>Manufacturer / Model</label>
+                        <p>{displayAsset.master.cmdb_manufacturer || '-'} / {displayAsset.master.cmdb_model || '-'}</p>
                       </div>
+                      <div className={styles.field}>
+                        <label>Catalog Item</label>
+                        <p>{displayAsset.master.cmdb_catalog_item || '-'}</p>
+                      </div>
+                      {displayAsset.master.cmdb_serial_number && (
+                        <div className={styles.field}>
+                          <label>CMDB Serial Number</label>
+                          <p>{displayAsset.master.cmdb_serial_number}</p>
+                        </div>
+                      )}
                     </>
                   )}
                 </div>
