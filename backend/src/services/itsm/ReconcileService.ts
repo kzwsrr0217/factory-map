@@ -391,9 +391,13 @@ export async function unlinkAsset(assetId: string): Promise<Asset> {
 
 /** List locally ITSM-linked assets. Built from the DB only — never calls ITSM. */
 export async function listLinked(): Promise<IReconcileLinkedAsset[]> {
+  // Excludes replaced assets (successor_id set, see replaceAsset) — a
+  // decommissioned device will never be reconciled again; without this it
+  // sits in the queue forever alongside genuinely active, ITSM-managed assets.
   const linked = await AppDataSource.getRepository(Asset)
     .createQueryBuilder('a')
     .where('a.hardware_asset_id IS NOT NULL')
+    .andWhere('a.successor_id IS NULL')
     .orderBy('a.display_name', 'ASC')
     .getMany();
   return linked.map((a) => ({
@@ -415,6 +419,7 @@ export async function driftSummary(): Promise<IReconcileSummary> {
   const linked = await AppDataSource.getRepository(Asset)
     .createQueryBuilder('a')
     .where('a.hardware_asset_id IS NOT NULL')
+    .andWhere('a.successor_id IS NULL')
     .getMany();
 
   const summary: IReconcileSummary = {

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Asset, assetService } from '../../services/asset.service';
 import { NetworkRack } from '../../services/network.service';
 import { useToast } from '../../contexts/ToastContext';
+import { getApiErrorMessage } from '../../utils/apiError';
 import styles from '../../styles/components/RackDiagram.module.css';
 
 const U_H = 24; // px per rack unit
@@ -89,8 +90,8 @@ export const RackDiagram: React.FC<RackDiagramProps> = ({ rack, assets, onRefres
       toast.success('Patch cable added');
       setPatchFrom(null); setPatchToId(''); setPatchSrc(''); setPatchDst('');
       onRefresh();
-    } catch {
-      toast.error('Failed to add patch cable');
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, 'Failed to add patch cable'));
     } finally {
       setSaving(false);
     }

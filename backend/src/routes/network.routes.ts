@@ -313,36 +313,39 @@
 import { Router } from 'express';
 import {
   listRooms, getRoom, createRoom, updateRoom, deleteRoom,
-  listRacks, getRack, createRack, updateRack, deleteRack,
-  listPatchPanels, getPatchPanel, createPatchPanel, updatePatchPanel, deletePatchPanel,
+  listRacks, getRack, createRack, updateRack, deleteRack, replaceRack,
+  listPatchPanels, getPatchPanel, createPatchPanel, updatePatchPanel, deletePatchPanel, replacePatchPanel,
   listWallPorts, getWallPort, createWallPort, updateWallPort, deleteWallPort,
 } from '../controllers/network.controller';
 import { validate, RoomCreateSchema, RoomUpdateSchema, RackCreateSchema, RackUpdateSchema } from '../utils/validate';
+import { requireOperator } from '../middleware/auth.middleware';
 
 const router = Router();
 
 router.get('/rooms',              listRooms);
 router.get('/rooms/:id',          getRoom);
-router.post('/rooms',             validate(RoomCreateSchema), createRoom);
-router.patch('/rooms/:id',        validate(RoomUpdateSchema), updateRoom);
-router.delete('/rooms/:id',       deleteRoom);
+router.post('/rooms',             requireOperator, validate(RoomCreateSchema), createRoom);
+router.patch('/rooms/:id',        requireOperator, validate(RoomUpdateSchema), updateRoom);
+router.delete('/rooms/:id',       requireOperator, deleteRoom);
 
 router.get('/racks',              listRacks);
 router.get('/racks/:id',          getRack);
-router.post('/racks',             validate(RackCreateSchema), createRack);
-router.patch('/racks/:id',        validate(RackUpdateSchema.partial()), updateRack);
-router.delete('/racks/:id',       deleteRack);
+router.post('/racks',             requireOperator, validate(RackCreateSchema), createRack);
+router.patch('/racks/:id',        requireOperator, validate(RackUpdateSchema.partial()), updateRack);
+router.delete('/racks/:id',       requireOperator, deleteRack);
+router.post('/racks/:id/replace', requireOperator, replaceRack);
 
 router.get('/patch-panels',       listPatchPanels);
 router.get('/patch-panels/:id',   getPatchPanel);
-router.post('/patch-panels',      createPatchPanel);
-router.patch('/patch-panels/:id', updatePatchPanel);
-router.delete('/patch-panels/:id',deletePatchPanel);
+router.post('/patch-panels',      requireOperator, createPatchPanel);
+router.patch('/patch-panels/:id', requireOperator, updatePatchPanel);
+router.delete('/patch-panels/:id',requireOperator, deletePatchPanel);
+router.post('/patch-panels/:id/replace', requireOperator, replacePatchPanel);
 
 router.get('/wall-ports',         listWallPorts);
 router.get('/wall-ports/:id',     getWallPort);
-router.post('/wall-ports',        createWallPort);
-router.patch('/wall-ports/:id',   updateWallPort);
-router.delete('/wall-ports/:id',  deleteWallPort);
+router.post('/wall-ports',        requireOperator, createWallPort);
+router.patch('/wall-ports/:id',   requireOperator, updateWallPort);
+router.delete('/wall-ports/:id',  requireOperator, deleteWallPort);
 
 export default router;

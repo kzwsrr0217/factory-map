@@ -31,7 +31,7 @@ import Card from '../common/Card';
 import ConnectionManager from './ConnectionManager';
 import AssetRelationships from './AssetRelationships';
 import ReplaceAssetModal from './ReplaceAssetModal';
-import { Asset, AssetHistoryEntry, assetService } from '../../services/asset.service';
+import { Asset, AssetHistoryEntry, AssetMasterData, assetService } from '../../services/asset.service';
 import { useToast } from '../../contexts/ToastContext';
 import styles from '../../styles/components/AssetDetailsModal.module.css';
 
@@ -65,6 +65,7 @@ const AssetDetailsModal: React.FC<AssetDetailsModalProps> = ({
   const [newItemAssignedTo, setNewItemAssignedTo] = useState('');
   const [savingWorkItems, setSavingWorkItems] = useState(false);
   const [notifyingTaskId, setNotifyingTaskId] = useState<string | null>(null);
+  const [otChildren, setOtChildren] = useState<AssetMasterData[]>([]);
   const toast = useToast();
 
   const loadHistory = useCallback(async () => {
@@ -81,9 +82,47 @@ const AssetDetailsModal: React.FC<AssetDetailsModalProps> = ({
     }
   }, [asset, historyLoaded, toast]);
 
+  // Keyed on the asset's id, not the asset object itself: a parent re-render
+  // that passes a new object for the *same* asset must not wipe out a
+  // locally-accepted ITSM snapshot (see handleAcceptSnapshot) or re-trigger
+  // the master-data refetch below — only actually switching to a different
+  // asset should reset.
   useEffect(() => {
     if (asset) setWorkItems(asset.work_items ?? []);
+    setCurrentAsset(null);
+  }, [asset?._id]);
+
+  // The asset passed in here often comes from a list view (GET /assets, no
+  // include_master) — `master` is `undefined` there (not fetched), which is
+  // different from `null` (fetched, no matching master row = orphan). Refetch
+  // via GET /assets/:id, which always resolves the join (see
+  // asset.controller.ts attachMasterData), so the Master Data section below
+  // can tell "not requested yet" apart from "genuinely orphaned". Guarded
+  // against races: if the asset changes again (or the modal closes) before
+  // this resolves, the stale response is dropped instead of overwriting
+  // whatever is now displayed.
+  useEffect(() => {
+    if (!asset || !asset.master_ifs_id || asset.master !== undefined) return;
+    let cancelled = false;
+    assetService.getAsset(asset._id).then((updated) => {
+      if (!cancelled) setCurrentAsset(updated);
+    }).catch(() => {});
+    return () => { cancelled = true; };
   }, [asset]);
+
+  // IT devices attached to the machine this asset represents (see
+  // MasterAsset.entity.ts ifs_machine_id / asset.controller.ts
+  // getAssetOtChildren). Cleared eagerly on asset switch so a stale list
+  // from the previous asset never flashes before the new one resolves.
+  useEffect(() => {
+    setOtChildren([]);
+    if (!asset?.master_ifs_id) return;
+    let cancelled = false;
+    assetService.getOtChildren(asset._id).then((children) => {
+      if (!cancelled) setOtChildren(children);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [asset?._id, asset?.master_ifs_id]);
 
   if (!asset) return null;
   const displayAsset = (currentAsset ?? asset) as Asset;
@@ -560,6 +599,120 @@ const AssetDetailsModal: React.FC<AssetDetailsModalProps> = ({
           </Card>
         </section>
 
+        {/* Master Data (IFS/CMDB) — see backend/src/entities/MasterAsset.entity.ts.
+            Only shown when this asset is joined to a master row (master_ifs_id
+            set); master === null with master_ifs_id set means the join target
+            is missing (orphan) — no live IFS/Databricks call happens here, the
+            data comes from GET /assets/:id which always resolves this join. */}
+        {displayAsset.master_ifs_id && (
+          <section className={styles.section}>
+            <h3 className={styles.sectionTitle}>Master Data (IFS/CMDB)</h3>
+            <Card padding="lg">
+              {displayAsset.master ? (
+                <div className={styles.grid}>
+                  <div className={styles.field}>
+                    <label>IFS ID</label>
+                    <p>{displayAsset.master.ifs_id}</p>
+                  </div>
+                  <div className={styles.field}>
+                    <label>Site</label>
+                    <p>{displayAsset.master.ifs_site || '-'}</p>
+                  </div>
+                  <div className={styles.field}>
+                    <label>Operational Status</label>
+                    <p>{displayAsset.master.ifs_operational_status || '-'}</p>
+                  </div>
+                  <div className={styles.field}>
+                    <label>Machine</label>
+                    <p>{displayAsset.master.ifs_machine_part_description || '-'} ({displayAsset.master.ifs_machine_id || '-'})</p>
+                  </div>
+                  <div className={styles.field}>
+                    <label>Production Line / Work Center</label>
+                    <p>{displayAsset.master.ifs_production_line_id || '-'} / {displayAsset.master.ifs_workcenter_description || displayAsset.master.ifs_workcenter_id || '-'}</p>
+                  </div>
+                  <div className={styles.field}>
+                    <label>CMDB ID</label>
+                    <p>{displayAsset.master.cmdb_id || '-'}</p>
+                  </div>
+                  <div className={styles.field}>
+                    <label>CMDB Status</label>
+                    <p>
+                      <Badge variant={displayAsset.master.cmdb_status === 'MISSING' ? 'error' : 'success'}>
+                        {displayAsset.master.cmdb_status || 'unknown'}
+                      </Badge>
+                    </p>
+                  </div>
+                  {displayAsset.master.cmdb_status !== 'MISSING' && (
+                    <>
+                      <div className={styles.field}>
+                        <label>MAC Address</label>
+                        <p>{displayAsset.master.cmdb_mac_address || '-'}</p>
+                      </div>
+                      <div className={styles.field}>
+                        <label>OS</label>
+                        <p>{displayAsset.master.cmdb_os ? `${displayAsset.master.cmdb_os} (${displayAsset.master.cmdb_os_version || '-'})` : '-'}</p>
+                      </div>
+                      <div className={styles.field}>
+                        <label>Manufacturer / Catalog Item</label>
+                        <p>{displayAsset.master.cmdb_manufacturer || '-'} / {displayAsset.master.cmdb_catalog_item || '-'}</p>
+                      </div>
+                    </>
+                  )}
+                </div>
+              ) : displayAsset.master === undefined ? (
+                <p>
+                  <Badge variant="neutral">Loading…</Badge>{' '}
+                  Fetching master data for IFS ID <strong>{displayAsset.master_ifs_id}</strong>.
+                </p>
+              ) : (
+                <p>
+                  <Badge variant="error">Master data unavailable</Badge>{' '}
+                  This asset references IFS ID <strong>{displayAsset.master_ifs_id}</strong>, but no matching
+                  master-data row was found (orphaned join — see docs/DATA_MODEL_MIGRATION.md).
+                </p>
+              )}
+            </Card>
+          </section>
+        )}
+
+        {/* Attached IT Devices (OT children) — IPCs/IT-managed devices whose
+            MasterAsset.ifs_machine_id points back at this asset's own
+            master_ifs_id. See MasterAsset.entity.ts and
+            asset.controller.ts getAssetOtChildren. Only meaningful when this
+            asset itself represents a machine (empty for IT devices / assets
+            with no IFS join). */}
+        {otChildren.length > 0 && (
+          <section className={styles.section}>
+            <h3 className={styles.sectionTitle}>
+              Attached IT Devices
+              <span style={{ marginLeft: 8 }}>
+                <Badge variant="info">{otChildren.length}</Badge>
+              </span>
+            </h3>
+            <Card padding="lg">
+              <div className={styles.softwareList}>
+                {otChildren.map((child) => (
+                  <div key={child.ifs_id} className={styles.softwareItem}>
+                    <div className={styles.softwareName}>
+                      {child.cmdb_catalog_item || child.ifs_id}
+                      <span style={{ marginLeft: 8, fontWeight: 400, color: 'var(--color-text-muted)', fontFamily: 'monospace', fontSize: '0.8em' }}>
+                        {child.ifs_id}
+                      </span>
+                    </div>
+                    <div className={styles.softwareMeta}>
+                      {child.cmdb_os && <span>{child.cmdb_os}{child.cmdb_os_version ? ` (${child.cmdb_os_version})` : ''}</span>}
+                      {child.cmdb_id && <span>{child.cmdb_id}</span>}
+                      <Badge variant={child.cmdb_status === 'MISSING' ? 'error' : 'success'}>
+                        {child.cmdb_status || 'unknown'}
+                      </Badge>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          </section>
+        )}
+
         {/* Operational */}
         {displayAsset.custom_fields && (
           displayAsset.custom_fields.remote_access_tool ||
@@ -647,7 +800,7 @@ const AssetDetailsModal: React.FC<AssetDetailsModalProps> = ({
           <Card padding="lg">
             {displayAsset.connections && displayAsset.connections.length > 0 ? (
               <div className={styles.connectionsList}>
-                {displayAsset.connections.map((connection, index) => {
+                {displayAsset.connections.map((connection) => {
                   const peer = allAssets.find(a => a._id === connection.connected_asset_id);
                   const typeColor =
                     connection.connection_type === 'ethernet' || connection.connection_type === 'network' ? '#3b82f6' :
@@ -658,7 +811,7 @@ const AssetDetailsModal: React.FC<AssetDetailsModalProps> = ({
                     connection.connection_type === 'serial' ? '#78716c' :
                     '#9ca3af';
                   return (
-                    <div key={index} className={styles.connectionItem}>
+                    <div key={connection.id} className={styles.connectionItem}>
                       <div className={styles.connectionTypeDot} style={{ background: typeColor }} />
                       <div className={styles.connectionInfo}>
                         <span className={styles.connectionType}>{connection.connection_type}</span>
@@ -1048,7 +1201,10 @@ const AssetDetailsModal: React.FC<AssetDetailsModalProps> = ({
         onClose={() => setReplaceOpen(false)}
         onSuccess={() => {
           setReplaceOpen(false);
-          setCurrentAsset(prev => prev ? { ...prev } : null);
+          // The old asset (still open in this modal) was just cleared to
+          // unplaced with its connections moved to the replacement — refetch
+          // so this view reflects that instead of the stale pre-replace state.
+          assetService.getAsset(displayAsset._id).then(setCurrentAsset).catch(() => {});
         }}
         currentAsset={displayAsset}
       />

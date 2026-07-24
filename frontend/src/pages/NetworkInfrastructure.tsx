@@ -10,6 +10,7 @@ import { useToast } from '../contexts/ToastContext';
 import { useBuildings } from '../hooks/queries/useBuildings';
 import { useFloors } from '../hooks/queries/useFloors';
 import { useNetworkRooms, networkKeys } from '../hooks/queries/useNetwork';
+import { getApiErrorMessage } from '../utils/apiError';
 import styles from '../styles/pages/NetworkInfrastructure.module.css';
 
 type ModalState =
@@ -17,7 +18,9 @@ type ModalState =
   | { kind: 'room';     room?: NetworkRoom }
   | { kind: 'rack';     room: NetworkRoom; rack?: NetworkRack }
   | { kind: 'panel';    rack: NetworkRack; panel?: PatchPanel }
-  | { kind: 'wallport'; panel: PatchPanel; portNum: number; existing?: WallPort };
+  | { kind: 'wallport'; panel: PatchPanel; portNum: number; existing?: WallPort }
+  | { kind: 'replaceRack';  room: NetworkRoom; rack: NetworkRack }
+  | { kind: 'replacePanel'; rack: NetworkRack; panel: PatchPanel };
 
 interface PortTooltip {
   port: WallPort;
@@ -130,6 +133,8 @@ const NetworkInfrastructure: React.FC = () => {
       defaults.switch_asset_id  = state.existing?.switch_asset_id ?? '';
       defaults.switch_port      = state.existing?.switch_port ?? '';
       defaults.description      = state.existing?.description ?? '';
+    } else if (state.kind === 'replaceRack' || state.kind === 'replacePanel') {
+      defaults.replacement_id = '';
     }
     setForm(defaults);
     setModal(state);
@@ -201,11 +206,21 @@ const NetworkInfrastructure: React.FC = () => {
           toast.success('Wall port created');
         }
         await reloadPanelPorts(modal.panel._id);
+      } else if (modal.kind === 'replaceRack') {
+        if (!form.replacement_id) { toast.error('Select a replacement rack'); setSaving(false); return; }
+        await networkService.replaceRack(modal.rack._id, form.replacement_id);
+        toast.success(`Rack replaced — patch panels and mounted assets moved to the replacement`);
+        if (selectedRackId === modal.rack._id) setSelectedRackId(form.replacement_id);
+        await invalidateRooms();
+      } else if (modal.kind === 'replacePanel') {
+        if (!form.replacement_id) { toast.error('Select a replacement patch panel'); setSaving(false); return; }
+        await networkService.replacePatchPanel(modal.panel._id, form.replacement_id);
+        toast.success(`Patch panel replaced — wall ports moved to the replacement`);
+        await invalidateRooms();
       }
       closeModal();
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Save failed';
-      toast.error(msg);
+      toast.error(getApiErrorMessage(err, 'Save failed'));
     } finally {
       setSaving(false);
     }
@@ -234,7 +249,7 @@ const NetworkInfrastructure: React.FC = () => {
         toast.success('Wall port removed');
         await reloadPanelPorts(deleteTarget.panelId);
       }
-    } catch { toast.error('Delete failed'); }
+    } catch (err: unknown) { toast.error(getApiErrorMessage(err, 'Delete failed')); }
     finally { setDeleteLoading(false); setDeleteTarget(null); }
   };
 
@@ -323,6 +338,9 @@ const NetworkInfrastructure: React.FC = () => {
                       <span className={styles.rackU}>{rack.u_count}U</span>
                       <div className={styles.rackActions}>
                         <button className={styles.iconBtn} onClick={e => { e.stopPropagation(); openModal({ kind: 'rack', room: selectedRoom, rack }); }} title="Edit rack">✏️</button>
+                        {selectedRoom.racks.length > 1 && (
+                          <button className={styles.iconBtn} onClick={e => { e.stopPropagation(); openModal({ kind: 'replaceRack', room: selectedRoom, rack }); }} title="Replace rack (moves patch panels and mounted assets to a replacement cabinet)">🔁</button>
+                        )}
                         <button className={styles.iconBtn} onClick={e => { e.stopPropagation(); setDeleteTarget({ kind: 'rack', rack }); }} title="Delete rack">🗑️</button>
                       </div>
                     </div>
@@ -366,6 +384,9 @@ const NetworkInfrastructure: React.FC = () => {
                         </div>
                         <div className={styles.panelCardActions}>
                           <button className={styles.iconBtn} onClick={() => openModal({ kind: 'panel', rack: selectedRack, panel })} title="Edit panel">✏️</button>
+                          {selectedRack.patch_panels.length > 1 && (
+                            <button className={styles.iconBtn} onClick={() => openModal({ kind: 'replacePanel', rack: selectedRack, panel })} title="Replace patch panel (moves its wall ports to a replacement panel)">🔁</button>
+                          )}
                           <button className={styles.iconBtn} onClick={() => setDeleteTarget({ kind: 'panel', panel, rack: selectedRack })} title="Delete panel">🗑️</button>
                         </div>
                       </div>
@@ -465,10 +486,12 @@ const NetworkInfrastructure: React.FC = () => {
             <div className={styles.modalHeader}>
               <div>
                 <h3>
-                  {modal.kind === 'room'     ? (modal.room     ? 'Edit Room'        : 'New Network Room') :
-                   modal.kind === 'rack'     ? (modal.rack     ? 'Edit Rack'        : `New Rack in ${modal.room.name}`) :
-                   modal.kind === 'wallport' ? (modal.existing  ? 'Edit Wall Port'  : `Assign Wall Port — Port ${modal.portNum}`) :
-                                               (modal.panel    ? 'Edit Patch Panel' : `New Panel in ${modal.rack.name}`)}
+                  {modal.kind === 'room'         ? (modal.room     ? 'Edit Room'        : 'New Network Room') :
+                   modal.kind === 'rack'         ? (modal.rack     ? 'Edit Rack'        : `New Rack in ${modal.room.name}`) :
+                   modal.kind === 'wallport'     ? (modal.existing  ? 'Edit Wall Port'  : `Assign Wall Port — Port ${modal.portNum}`) :
+                   modal.kind === 'replaceRack'  ? `Replace Rack "${modal.rack.name}"` :
+                   modal.kind === 'replacePanel' ? `Replace Patch Panel "${modal.panel.name}"` :
+                                                   (modal.panel    ? 'Edit Patch Panel' : `New Panel in ${modal.rack.name}`)}
                 </h3>
                 {modal.kind === 'panel' && !modal.panel && (
                   <p className={styles.modalSubtitle}>
@@ -485,18 +508,54 @@ const NetworkInfrastructure: React.FC = () => {
               <button className={styles.modalClose} onClick={closeModal}>✕</button>
             </div>
             <div className={styles.modalBody}>
-              <label className={styles.formLabel}>Name *</label>
-              <input
-                className={styles.formInput}
-                value={form.name ?? ''}
-                onChange={e => setForm(p => ({ ...p, name: e.target.value }))}
-                placeholder={
-                  modal.kind === 'room'  ? 'e.g. IDF-Floor2, MDF-W1' :
-                  modal.kind === 'rack'  ? 'e.g. RACK-GF-01' :
-                                          'e.g. PP-GF-PROD-01'
-                }
-                autoFocus
-              />
+              {modal.kind !== 'replaceRack' && modal.kind !== 'replacePanel' && (
+                <>
+                  <label className={styles.formLabel}>Name *</label>
+                  <input
+                    className={styles.formInput}
+                    value={form.name ?? ''}
+                    onChange={e => setForm(p => ({ ...p, name: e.target.value }))}
+                    placeholder={
+                      modal.kind === 'room'  ? 'e.g. IDF-Floor2, MDF-W1' :
+                      modal.kind === 'rack'  ? 'e.g. RACK-GF-01' :
+                                              'e.g. PP-GF-PROD-01'
+                    }
+                    autoFocus
+                  />
+                </>
+              )}
+
+              {modal.kind === 'replaceRack' && (
+                <>
+                  <p className={styles.formHint}>
+                    Every patch panel and mounted asset currently in <strong>{modal.rack.name}</strong> will
+                    be moved to the replacement rack, keeping their U-positions. The old rack is then removed.
+                  </p>
+                  <label className={styles.formLabel}>Replacement rack *</label>
+                  <select className={styles.formInput} value={form.replacement_id ?? ''} onChange={e => setForm(p => ({ ...p, replacement_id: e.target.value }))} autoFocus>
+                    <option value="">— Select replacement rack —</option>
+                    {modal.room.racks.filter(r => r._id !== modal.rack._id).map(r => (
+                      <option key={r._id} value={r._id}>{r.name} ({r.u_count}U)</option>
+                    ))}
+                  </select>
+                </>
+              )}
+
+              {modal.kind === 'replacePanel' && (
+                <>
+                  <p className={styles.formHint}>
+                    Every wall port wired into <strong>{modal.panel.name}</strong> will be moved to the
+                    replacement panel, keeping their port numbers. The old panel is then removed.
+                  </p>
+                  <label className={styles.formLabel}>Replacement patch panel *</label>
+                  <select className={styles.formInput} value={form.replacement_id ?? ''} onChange={e => setForm(p => ({ ...p, replacement_id: e.target.value }))} autoFocus>
+                    <option value="">— Select replacement panel —</option>
+                    {modal.rack.patch_panels.filter(p => p._id !== modal.panel._id).map(p => (
+                      <option key={p._id} value={p._id}>{p.name}{p.u_position != null ? ` (U${p.u_position})` : ''}</option>
+                    ))}
+                  </select>
+                </>
+              )}
 
               {modal.kind === 'room' && (
                 <>
@@ -617,12 +676,18 @@ const NetworkInfrastructure: React.FC = () => {
               )}
               <Button variant="secondary" onClick={closeModal} disabled={saving}>Cancel</Button>
               <Button variant="primary" onClick={handleSave}
-                disabled={saving || (modal.kind === 'wallport' ? !form.label?.trim() || !form.floor_id : !form.name?.trim())}>
+                disabled={saving || (
+                  modal.kind === 'wallport' ? !form.label?.trim() || !form.floor_id :
+                  modal.kind === 'replaceRack' || modal.kind === 'replacePanel' ? !form.replacement_id :
+                  !form.name?.trim()
+                )}>
                 {saving ? 'Saving…' : (
-                  modal.kind === 'room'     ? (modal.room     ? 'Update Room'     : 'Create Room') :
-                  modal.kind === 'rack'     ? (modal.rack     ? 'Update Rack'     : 'Create Rack') :
-                  modal.kind === 'wallport' ? (modal.existing  ? 'Update Wall Port' : 'Create Wall Port') :
-                                              (modal.panel    ? 'Update Panel'    : 'Create Panel')
+                  modal.kind === 'room'         ? (modal.room     ? 'Update Room'     : 'Create Room') :
+                  modal.kind === 'rack'         ? (modal.rack     ? 'Update Rack'     : 'Create Rack') :
+                  modal.kind === 'wallport'     ? (modal.existing  ? 'Update Wall Port' : 'Create Wall Port') :
+                  modal.kind === 'replaceRack'  ? 'Replace Rack' :
+                  modal.kind === 'replacePanel' ? 'Replace Panel' :
+                                                  (modal.panel    ? 'Update Panel'    : 'Create Panel')
                 )}
               </Button>
             </div>

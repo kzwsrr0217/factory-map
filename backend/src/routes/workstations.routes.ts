@@ -85,13 +85,14 @@
  */
 import { Router } from 'express';
 import { getAllWorkstations, getWorkstationById, createWorkstation, updateWorkstation, deleteWorkstation } from '../controllers/workstation.controller';
+import { requireOperator } from '../middleware/auth.middleware';
 
 const router = Router();
 
 router.get('/', getAllWorkstations);
 router.get('/:id', getWorkstationById);
-router.post('/', createWorkstation);
-router.patch('/:id', updateWorkstation);
-router.delete('/:id', deleteWorkstation);
+router.post('/', requireOperator, createWorkstation);
+router.patch('/:id', requireOperator, updateWorkstation);
+router.delete('/:id', requireOperator, deleteWorkstation);
 
 export default router;

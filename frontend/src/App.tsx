@@ -20,6 +20,7 @@
  *   /settings/users→ User management (admin only)
  *   /audit         → Audit log
  *   /unplaced      → Assets not yet on any floor map
+ *   /orphaned      → Assets whose IFS/CMDB master data no longer resolves
  *   /alerts        → Maintenance alert configuration (admin)
  *   /infrastructure→ Network infrastructure (IDF/MDF rooms, racks, patch panels)
  */
@@ -43,6 +44,7 @@ import Settings from './pages/Settings';
 import UserManagement from './pages/UserManagement';
 import AuditLog from './pages/AuditLog';
 import UnplacedAssets from './pages/UnplacedAssets';
+import OrphanedAssets from './pages/OrphanedAssets';
 import Alerts from './pages/Alerts';
 import NetworkGraph from './pages/NetworkGraph';
 import NetworkInfrastructure from './pages/NetworkInfrastructure';
@@ -91,6 +93,7 @@ function App() {
                           <Route path="/settings/users" element={<UserManagement />} />
                           <Route path="/audit" element={<AuditLog />} />
                           <Route path="/unplaced" element={<UnplacedAssets />} />
+                          <Route path="/orphaned" element={<OrphanedAssets />} />
                           <Route path="/alerts" element={<Alerts />} />
                           <Route path="/network" element={<NetworkGraph />} />
                           <Route path="/infrastructure" element={<NetworkInfrastructure />} />

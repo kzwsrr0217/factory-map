@@ -29,6 +29,7 @@ import { useToast } from '../contexts/ToastContext';
 import { useBuilding, useDeleteBuilding } from '../hooks/queries/useBuildings';
 import { useFloors, useDeleteFloor } from '../hooks/queries/useFloors';
 import { useAssets } from '../hooks/queries/useAssets';
+import { getApiErrorMessage } from '../utils/apiError';
 import styles from '../styles/pages/BuildingDetails.module.css';
 
 const BuildingDetails: React.FC = () => {
@@ -67,7 +68,7 @@ const BuildingDetails: React.FC = () => {
     if (!building) return;
     deleteBuilding.mutate(building._id, {
       onSuccess: () => navigate('/buildings'),
-      onError: () => toast.error('Failed to delete building. Please try again.'),
+      onError: (err: unknown) => toast.error(getApiErrorMessage(err, 'Failed to delete building. Please try again.')),
     });
   };
 
@@ -91,7 +92,7 @@ const BuildingDetails: React.FC = () => {
         setDeleteFloorDialogOpen(false);
         setDeletingFloor(null);
       },
-      onError: () => toast.error('Failed to delete floor. Please try again.'),
+      onError: (err: unknown) => toast.error(getApiErrorMessage(err, 'Failed to delete floor. Please try again.')),
     });
   };
 

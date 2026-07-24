@@ -18,7 +18,11 @@ import { Floor } from '../entities/Floor.entity';
 import { WorkArea } from '../entities/WorkArea.entity';
 import { Section } from '../entities/Section.entity';
 import { Workstation } from '../entities/Workstation.entity';
+import { ProductionLine } from '../entities/ProductionLine.entity';
+import { WorkCenter } from '../entities/WorkCenter.entity';
+import { EntityKind } from '../entities/EntityKind.entity';
 import { Asset } from '../entities/Asset.entity';
+import { MasterAsset } from '../entities/MasterAsset.entity';
 import { AssetSoftware } from '../entities/AssetSoftware.entity';
 import { AssetConnection } from '../entities/AssetConnection.entity';
 import { User } from '../entities/User.entity';
@@ -41,7 +45,7 @@ export const AppDataSource = new DataSource({
   database: config.mssql.database,
   synchronize: config.env !== 'production',
   logging: config.env === 'development' ? ['error', 'warn'] : false,
-  entities: [Building, Floor, WorkArea, Section, Workstation, Asset, AssetSoftware, AssetConnection, User, AuditLog, AlertConfig, AlertLog, ScheduledAlert, ActiveSession, NetworkRoom, NetworkRack, PatchPanel, WallPort],
+  entities: [Building, Floor, WorkArea, Section, Workstation, Asset, MasterAsset, AssetSoftware, AssetConnection, User, AuditLog, AlertConfig, AlertLog, ScheduledAlert, ActiveSession, NetworkRoom, NetworkRack, PatchPanel, WallPort, ProductionLine, WorkCenter, EntityKind],
   migrations: ['dist/migrations/*.js'],
   migrationsTableName: 'typeorm_migrations',
   options: {

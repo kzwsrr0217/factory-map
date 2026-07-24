@@ -2,7 +2,11 @@
  * building.controller.ts — CRUD for buildings.
  *
  * `deleteBuilding` performs a guarded cascading delete:
- *  1. Checks for assets assigned to the building — blocks deletion if any exist.
+ *  1. Checks for assets, wall ports, and network rooms assigned to the
+ *     building (or to any floor under it) — blocks deletion if any exist.
+ *     The wall-port/network-room checks matter because this cascade deletes
+ *     floors directly via the repository, bypassing deleteFloor's own guards
+ *     in floor.controller.ts — so they have to be re-checked here too.
  *  2. Runs the hierarchy cascade (workstations → sections → workareas → floors)
  *     inside a single transaction so a partial failure leaves no orphaned rows.
  *  3. Then removes the building itself.
@@ -18,6 +22,8 @@ import { WorkArea } from '../entities/WorkArea.entity';
 import { Section } from '../entities/Section.entity';
 import { Workstation } from '../entities/Workstation.entity';
 import { Asset } from '../entities/Asset.entity';
+import { WallPort } from '../entities/WallPort.entity';
+import { NetworkRoom } from '../entities/NetworkRoom.entity';
 
 const repo = () => AppDataSource.getRepository(Building);
 
@@ -58,6 +64,21 @@ export const deleteBuilding = asyncHandler(async (req, res) => {
   if (assetCount > 0) {
     res.status(400).json({ success: false, error: `Cannot delete building with ${assetCount} asset(s). Please reassign or remove them first.` });
     return;
+  }
+
+  const roomCount = await AppDataSource.getRepository(NetworkRoom).count({ where: { building_id: req.params.id } });
+  if (roomCount > 0) {
+    res.status(400).json({ success: false, error: `Cannot delete building with ${roomCount} network room(s). Please reassign or remove them first.` });
+    return;
+  }
+
+  const floorIdsForWallPortCheck = (await AppDataSource.getRepository(Floor).find({ where: { building_id: req.params.id }, select: ['id'] })).map((f) => f.id);
+  if (floorIdsForWallPortCheck.length > 0) {
+    const wallPortCount = await AppDataSource.getRepository(WallPort).count({ where: floorIdsForWallPortCheck.map((id) => ({ floor_id: id })) });
+    if (wallPortCount > 0) {
+      res.status(400).json({ success: false, error: `Cannot delete building with ${wallPortCount} wall port(s). Please remove them first.` });
+      return;
+    }
   }
 
   await AppDataSource.transaction(async (tx) => {

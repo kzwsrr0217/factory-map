@@ -18,6 +18,11 @@ export interface Floor {
   name: string;
   map_file?: string;
   svg_background?: string;
+  // File-reference convention adopted from shopfloor_visualizer (PRD 5.3a) —
+  // resolved via getFloorSvg() below (GET /floors/:id/svg) and parsed by
+  // utils/svgFloorPlan.ts; see docs/DATA_MODEL_MIGRATION.md phase 4.
+  svg_ref?: string | null;
+  scale_meters_per_unit?: number | null;
   metadata?: {
     area?: number;
     ceiling_height?: number;
@@ -56,5 +61,14 @@ export const floorService = {
   // Delete floor
   deleteFloor: async (id: string): Promise<void> => {
     await api.delete(`/floors/${id}`);
+  },
+
+  // Fetch the raw SVG file referenced by Floor.svg_ref (GET /floors/:id/svg)
+  // — see backend/src/controllers/floor.controller.ts getFloorSvg. Prototype
+  // path alongside the base64 svg_background field; see
+  // docs/DATA_MODEL_MIGRATION.md phase 4.
+  getFloorSvg: async (id: string): Promise<string> => {
+    const response = await api.get(`/floors/${id}/svg`, { responseType: 'text' });
+    return response.data;
   },
 };

@@ -205,3 +205,39 @@ describe('DELETE /api/workareas/:id', () => {
     expect(res.status).toBe(404);
   });
 });
+
+// ── production_line_code (organizational hierarchy, see ProductionLine.entity.ts) ──
+
+describe('WorkArea production_line_code', () => {
+  let waId: string;
+
+  beforeAll(async () => {
+    const res = await request(app)
+      .post('/api/workareas')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ floor_id: floorId, name: 'PL-linked WA', production_line_code: 'test-pl-001' });
+    waId = res.body.data._id;
+  });
+
+  it('persists production_line_code on create', async () => {
+    const res = await request(app)
+      .get(`/api/workareas/${waId}`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.production_line_code).toBe('test-pl-001');
+  });
+
+  it('is orphan-safe: a non-existent production_line_code does not block the update or delete the work area', async () => {
+    const patchRes = await request(app)
+      .patch(`/api/workareas/${waId}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ production_line_code: 'nonexistent-pl-code' });
+    expect(patchRes.status).toBe(200);
+    expect(patchRes.body.data.production_line_code).toBe('nonexistent-pl-code');
+
+    const getRes = await request(app)
+      .get(`/api/workareas/${waId}`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(getRes.status).toBe(200);
+  });
+});

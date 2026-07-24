@@ -35,7 +35,7 @@ export const createWorkstation = async (req: Request, res: Response, next: NextF
     const ws = repo().create({
       section_id: body.section_id,
       name: body.name,
-      type: body.type,
+      type: body.type || 'standard',
       coord_x: body.coordinates?.x ?? 0,
       coord_y: body.coordinates?.y ?? 0,
       rotation: body.rotation ?? 0,

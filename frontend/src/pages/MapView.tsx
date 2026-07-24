@@ -18,7 +18,7 @@
  * Memoised floor/building lookup maps prevent unnecessary recalculations when
  * only the selection changes.
  */
-import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import Card from '../components/common/Card';
 import Button from '../components/common/Button';
@@ -30,9 +30,14 @@ import AssetFormModal from '../components/asset/AssetFormModal';
 import { hierarchyService, Building } from '../services/hierarchy.service';
 import { floorService, Floor } from '../services/floor.service';
 import { workareaService, WorkArea } from '../services/workarea.service';
+import { sectionService } from '../services/section.service';
+import { workstationService, Workstation } from '../services/workstation.service';
 import { assetService, Asset } from '../services/asset.service';
 import { networkService, WallPort } from '../services/network.service';
 import { getAssetIcon } from '../utils/assetTypes';
+import { useDebouncedCallback } from '../hooks/useDebouncedCallback';
+import { useUndoRedo } from '../hooks/useUndoRedo';
+import { findContainingWorkareaId } from '../utils/workareaGeometry';
 import styles from '../styles/pages/MapView.module.css';
 
 const MapView: React.FC = () => {
@@ -47,9 +52,11 @@ const MapView: React.FC = () => {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [allAssets, setAllAssets] = useState<Asset[]>([]);
   const [wallPorts, setWallPorts] = useState<WallPort[]>([]);
+  const [workstations, setWorkstations] = useState<Workstation[]>([]);
   const [loading, setLoading] = useState(true);
   const [metaLoading, setMetaLoading] = useState(true);
   const [editMode, setEditMode] = useState(false);
+  const undoRedo = useUndoRedo();
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
   const [fullScreen, setFullScreen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -82,10 +89,6 @@ const MapView: React.FC = () => {
     wallports: false,
   });
   const [tracingAsset, setTracingAsset] = useState<Asset | null>(null);
-  const assetUpdateTimer = useRef<NodeJS.Timeout | null>(null);
-  const workareaUpdateTimer = useRef<NodeJS.Timeout | null>(null);
-  const workareaResizeTimer = useRef<NodeJS.Timeout | null>(null);
-  const wallPortUpdateTimer = useRef<NodeJS.Timeout | null>(null);
 
   const buildingOptions = useMemo(
     () => buildings.map((building) => ({ value: building._id, label: building.name })),
@@ -270,6 +273,27 @@ const MapView: React.FC = () => {
     return () => clearTimeout(timer);
   }, [successMessage]);
 
+  // Undo/redo for edit-mode drag actions (move/resize) — see useUndoRedo and
+  // the applyXMove/handleXMove pairs above. Only active in edit mode so
+  // Ctrl+Z doesn't fight with e.g. text-field undo elsewhere on the page.
+  useEffect(() => {
+    if (!editMode) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 'z') return;
+      e.preventDefault();
+      if (e.shiftKey) undoRedo.redo(); else undoRedo.undo();
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [editMode, undoRedo]);
+
+  // The undo stack references specific workarea/asset/wallport/workstation
+  // ids on the currently-loaded floor — stale once the floor changes.
+  useEffect(() => {
+    undoRedo.clear();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedFloorId]);
+
   const loadMapData = useCallback(async (floorId: string) => {
     if (!floorId) {
       setSelectedFloor(null);
@@ -281,17 +305,25 @@ const MapView: React.FC = () => {
     try {
       setLoading(true);
       setError(null);
-      const [floorData, workareasData, floorAssets, floorWallPorts] = await Promise.all([
+      const [floorData, workareasData, floorAssets, floorWallPorts, allSections, allWorkstations] = await Promise.all([
         floorService.getFloor(floorId),
         workareaService.getWorkAreas(floorId),
-        assetService.getAssetsByFloor(floorId),
+        assetService.getAssetsByFloor(floorId, { include_master: true }),
         networkService.getWallPorts({ floor_id: floorId }),
+        sectionService.getSections(),
+        workstationService.getWorkstations(),
       ]);
 
       setSelectedFloor(floorData);
       setWorkareas(workareasData);
       setAssets(floorAssets);
       setWallPorts(floorWallPorts);
+      // Workstation has no floor_id of its own — filter via this floor's
+      // WorkAreas -> Sections chain, same "fetch all, filter client-side"
+      // pattern already used in FloorDetails.tsx (getWorkstationsInWorkarea).
+      const workareaIds = new Set(workareasData.map((wa) => wa._id));
+      const sectionIds = new Set(allSections.filter((s) => workareaIds.has(s.workarea_id)).map((s) => s._id));
+      setWorkstations(allWorkstations.filter((ws) => sectionIds.has(ws.section_id)));
     } catch (error) {
       console.error('Error loading map data:', error);
       setError('Failed to load floor data. Please try selecting a different floor.');
@@ -408,55 +440,83 @@ const MapView: React.FC = () => {
     }
   }, [selectedAssetsForConnection, selectedFloorId, loadMapData, newConnectionType]);
 
-  const handleWorkareaMove = useCallback((workareaId: string, x: number, y: number) => {
+  const persistWorkareaMove = useDebouncedCallback(async (workareaId: string, x: number, y: number) => {
+    try {
+      await workareaService.updateWorkArea(workareaId, { coordinates: { x, y } });
+    } catch (error) {
+      console.error('Error updating work area position:', error);
+    }
+  });
+  const applyWorkareaMove = useCallback((workareaId: string, x: number, y: number) => {
     setWorkareas((prev) =>
       prev.map((wa) =>
         wa._id === workareaId ? { ...wa, coordinates: { x, y } } : wa
       )
     );
-
-    if (workareaUpdateTimer.current) {
-      clearTimeout(workareaUpdateTimer.current);
+    persistWorkareaMove(workareaId, x, y);
+  }, [persistWorkareaMove]);
+  const handleWorkareaMove = useCallback((workareaId: string, x: number, y: number) => {
+    const prev = workareas.find((wa) => wa._id === workareaId);
+    applyWorkareaMove(workareaId, x, y);
+    if (prev) {
+      undoRedo.push({
+        undo: () => applyWorkareaMove(workareaId, prev.coordinates?.x ?? 0, prev.coordinates?.y ?? 0),
+        redo: () => applyWorkareaMove(workareaId, x, y),
+      });
     }
+  }, [workareas, applyWorkareaMove, undoRedo]);
 
-    workareaUpdateTimer.current = setTimeout(async () => {
-      try {
-        await workareaService.updateWorkArea(workareaId, { coordinates: { x, y } });
-      } catch (error) {
-        console.error('Error updating work area position:', error);
-      }
-    }, 500);
-  }, []);
-
-  const handleWorkareaResize = useCallback((workareaId: string, width: number, height: number) => {
+  const persistWorkareaResize = useDebouncedCallback(async (workareaId: string, width: number, height: number) => {
+    try {
+      await workareaService.updateWorkArea(workareaId, { dimensions: { width, height } });
+    } catch (error) {
+      console.error('Error updating work area dimensions:', error);
+    }
+  });
+  const applyWorkareaResize = useCallback((workareaId: string, width: number, height: number) => {
     setWorkareas((prev) =>
       prev.map((wa) =>
         wa._id === workareaId ? { ...wa, dimensions: { width, height } } : wa
       )
     );
-
-    if (workareaResizeTimer.current) {
-      clearTimeout(workareaResizeTimer.current);
+    persistWorkareaResize(workareaId, width, height);
+  }, [persistWorkareaResize]);
+  const handleWorkareaResize = useCallback((workareaId: string, width: number, height: number) => {
+    const prev = workareas.find((wa) => wa._id === workareaId);
+    applyWorkareaResize(workareaId, width, height);
+    if (prev) {
+      undoRedo.push({
+        undo: () => applyWorkareaResize(workareaId, prev.dimensions?.width ?? 0, prev.dimensions?.height ?? 0),
+        redo: () => applyWorkareaResize(workareaId, width, height),
+      });
     }
+  }, [workareas, applyWorkareaResize, undoRedo]);
 
-    workareaResizeTimer.current = setTimeout(async () => {
-      try {
-        await workareaService.updateWorkArea(workareaId, { dimensions: { width, height } });
-      } catch (error) {
-        console.error('Error updating work area dimensions:', error);
-      }
-    }, 500);
-  }, []);
-
-  const handleAssetMove = useCallback((assetId: string, x: number, y: number) => {
+  const persistAssetMove = useDebouncedCallback(async (assetId: string, x: number, y: number, iconType: string, hierarchy: Asset['hierarchy']) => {
+    try {
+      await assetService.updateAsset(assetId, {
+        location: { coordinates: { x, y }, icon_type: iconType },
+        hierarchy,
+      });
+    } catch (error) {
+      console.error('Error updating asset position:', error);
+    }
+  });
+  const applyAssetMove = useCallback((assetId: string, x: number, y: number) => {
     const asset = assets.find((a) => a._id === assetId);
     if (!asset) return;
+    // Recompute which work area (if any) the asset's new position falls
+    // inside — otherwise workarea_id would silently keep pointing at
+    // wherever it used to be, regardless of where it visually is now.
+    const workareaId = findContainingWorkareaId(x, y, workareas);
+    const hierarchy = { ...asset.hierarchy, workarea_id: workareaId };
 
     setAssets((prev) =>
       prev.map((a) =>
         a._id === assetId
           ? {
               ...a,
+              hierarchy,
               location: {
                 ...a.location,
                 coordinates: { x, y },
@@ -465,25 +525,19 @@ const MapView: React.FC = () => {
           : a
       )
     );
-
-    if (assetUpdateTimer.current) {
-      clearTimeout(assetUpdateTimer.current);
+    persistAssetMove(assetId, x, y, asset.location.icon_type || 'computer', hierarchy);
+  }, [assets, workareas, persistAssetMove]);
+  const handleAssetMove = useCallback((assetId: string, x: number, y: number) => {
+    const prev = assets.find((a) => a._id === assetId);
+    applyAssetMove(assetId, x, y);
+    if (prev) {
+      const prevCoords = prev.location.coordinates;
+      undoRedo.push({
+        undo: () => applyAssetMove(assetId, prevCoords.x, prevCoords.y),
+        redo: () => applyAssetMove(assetId, x, y),
+      });
     }
-
-    assetUpdateTimer.current = setTimeout(async () => {
-      try {
-        await assetService.updateAsset(assetId, {
-          location: {
-            ...asset.location,
-            coordinates: { x, y },
-            icon_type: asset.location.icon_type || 'computer',
-          },
-        });
-      } catch (error) {
-        console.error('Error updating asset position:', error);
-      }
-    }, 500);
-  }, [assets]);
+  }, [assets, applyAssetMove, undoRedo]);
 
   const handleUploadSuccess = () => {
     if (selectedFloorId) {
@@ -547,35 +601,64 @@ const MapView: React.FC = () => {
     setSelectedZoneId(prev => prev === workarea._id ? null : workarea._id);
   }, []);
 
-  const handleConnectionDelete = useCallback(async (assetId: string, connectedAssetId: string) => {
+  const handleConnectionDelete = useCallback(async (assetId: string, connectionId: string) => {
     try {
-      await assetService.removeConnection(assetId, connectedAssetId);
-      // Best-effort removal of reverse direction
-      try { await assetService.removeConnection(connectedAssetId, assetId); } catch {}
-      setAssets(prev => prev.map(a => {
-        if (a._id === assetId)
-          return { ...a, connections: (a.connections || []).filter(c => c.connected_asset_id !== connectedAssetId) };
-        if (a._id === connectedAssetId)
-          return { ...a, connections: (a.connections || []).filter(c => c.connected_asset_id !== assetId) };
-        return a;
-      }));
+      // removeConnection deletes both rows of a bidirectional pair
+      // server-side (via pair_id — see asset.controller.ts), so a single
+      // call here is enough; reload rather than hand-patch both assets'
+      // connection arrays by id, since the peer's row isn't in this response.
+      await assetService.removeConnection(assetId, connectionId);
+      if (selectedFloorId) await loadMapData(selectedFloorId);
       setSuccessMessage('Connection removed.');
     } catch (error) {
       console.error('Error removing connection:', error);
     }
-  }, []);
+  }, [selectedFloorId, loadMapData]);
 
-  const handleWallPortMove = useCallback((portId: string, x: number, y: number) => {
+  const persistWallPortMove = useDebouncedCallback(async (portId: string, x: number, y: number) => {
+    try {
+      await networkService.updateWallPort(portId, { pos_x: x, pos_y: y } as any);
+    } catch (error) {
+      console.error('Error updating wall port position:', error);
+    }
+  });
+  const applyWallPortMove = useCallback((portId: string, x: number, y: number) => {
     setWallPorts(prev => prev.map(wp => wp._id === portId ? { ...wp, pos_x: x, pos_y: y } : wp));
-    if (wallPortUpdateTimer.current) clearTimeout(wallPortUpdateTimer.current);
-    wallPortUpdateTimer.current = setTimeout(async () => {
-      try {
-        await networkService.updateWallPort(portId, { pos_x: x, pos_y: y } as any);
-      } catch (error) {
-        console.error('Error updating wall port position:', error);
-      }
-    }, 500);
-  }, []);
+    persistWallPortMove(portId, x, y);
+  }, [persistWallPortMove]);
+  const handleWallPortMove = useCallback((portId: string, x: number, y: number) => {
+    const prev = wallPorts.find((wp) => wp._id === portId);
+    applyWallPortMove(portId, x, y);
+    if (prev) {
+      undoRedo.push({
+        undo: () => applyWallPortMove(portId, prev.pos_x, prev.pos_y),
+        redo: () => applyWallPortMove(portId, x, y),
+      });
+    }
+  }, [wallPorts, applyWallPortMove, undoRedo]);
+
+  const persistWorkstationMove = useDebouncedCallback(async (workstationId: string, x: number, y: number) => {
+    try {
+      await workstationService.updateWorkstation(workstationId, { coordinates: { x, y } });
+    } catch (error) {
+      console.error('Error updating workstation position:', error);
+    }
+  });
+  const applyWorkstationMove = useCallback((workstationId: string, x: number, y: number) => {
+    setWorkstations(prev => prev.map(ws => ws._id === workstationId ? { ...ws, coordinates: { x, y } } : ws));
+    persistWorkstationMove(workstationId, x, y);
+  }, [persistWorkstationMove]);
+  const handleWorkstationMove = useCallback((workstationId: string, x: number, y: number) => {
+    const prev = workstations.find((ws) => ws._id === workstationId);
+    applyWorkstationMove(workstationId, x, y);
+    if (prev) {
+      const prevCoords = prev.coordinates ?? { x: 0, y: 0 };
+      undoRedo.push({
+        undo: () => applyWorkstationMove(workstationId, prevCoords.x, prevCoords.y),
+        redo: () => applyWorkstationMove(workstationId, x, y),
+      });
+    }
+  }, [workstations, applyWorkstationMove, undoRedo]);
 
   const handleAssetTrace = useCallback((asset: Asset) => {
     setTracingAsset(asset);
@@ -648,6 +731,16 @@ const MapView: React.FC = () => {
               <Button variant={editMode ? 'danger' : 'primary'} onClick={() => setEditMode((prev) => !prev)}>
                 {editMode ? 'Exit Edit Mode' : 'Enter Edit Mode'}
               </Button>
+              {editMode && (
+                <>
+                  <Button variant="outline" onClick={undoRedo.undo} disabled={!undoRedo.canUndo} title="Undo (Ctrl+Z)">
+                    ↶ Undo
+                  </Button>
+                  <Button variant="outline" onClick={undoRedo.redo} disabled={!undoRedo.canRedo} title="Redo (Ctrl+Shift+Z)">
+                    ↷ Redo
+                  </Button>
+                </>
+              )}
               <Button
                 variant={deployMode ? 'success' : 'outline'}
                 onClick={handleDeployToggle}
@@ -890,6 +983,10 @@ const MapView: React.FC = () => {
               dimmedAssetIds={dimmedAssetIds}
               editable={editMode}
               backgroundImage={selectedFloor.svg_background}
+              floorId={selectedFloor._id}
+              floorSvgRef={selectedFloor.svg_ref}
+              workstations={workstations}
+              onWorkstationMove={editMode ? handleWorkstationMove : undefined}
               onWorkareaMove={handleWorkareaMove}
               onWorkareaResize={handleWorkareaResize}
               onAssetMove={handleAssetMove}

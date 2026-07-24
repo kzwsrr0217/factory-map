@@ -23,6 +23,7 @@ import Button from '../common/Button';
 import ConfirmDialog from '../common/ConfirmDialog';
 import { assetService, Asset } from '../../services/asset.service';
 import { useToast } from '../../contexts/ToastContext';
+import { getApiErrorMessage } from '../../utils/apiError';
 import styles from '../../styles/components/ConnectionManager.module.css';
 
 type AssetConnection = NonNullable<Asset['connections']>[0];
@@ -120,10 +121,10 @@ const ConnectionManager: React.FC<ConnectionManagerProps> = ({
     try {
       const assets = await assetService.getAssets();
       setAllAssets(assets);
-      const connectedIds = connections.map(c => c.connected_asset_id);
-      setAvailableAssets(assets.filter(asset =>
-        asset._id !== assetId && !connectedIds.includes(asset._id)
-      ));
+      // Deliberately does NOT exclude assets already connected to — a pair
+      // can have several distinct connections (e.g. two physical cables),
+      // so already being connected must not remove a peer from this list.
+      setAvailableAssets(assets.filter(asset => asset._id !== assetId));
     } catch (error) {
       console.error('Error loading available assets:', error);
     }
@@ -144,7 +145,7 @@ const ConnectionManager: React.FC<ConnectionManagerProps> = ({
       resetForm();
     } catch (err) {
       console.error('Error adding connection:', err);
-      toast.error('Failed to add connection');
+      toast.error(getApiErrorMessage(err, 'Failed to add connection'));
     } finally {
       setLoading(false);
     }
@@ -155,21 +156,21 @@ const ConnectionManager: React.FC<ConnectionManagerProps> = ({
 
     try {
       setLoading(true);
-      await assetService.updateConnection(assetId, editingConnection.connected_asset_id, { ...formData, patch_panel: buildPatchPanel(formData) });
+      await assetService.updateConnection(assetId, editingConnection.id, { ...formData, patch_panel: buildPatchPanel(formData) });
       await loadConnections();
       setEditingConnection(null);
       resetForm();
       toast.success('Connection updated');
     } catch (err) {
       console.error('Error updating connection:', err);
-      toast.error('Failed to update connection');
+      toast.error(getApiErrorMessage(err, 'Failed to update connection'));
     } finally {
       setLoading(false);
     }
   };
 
-  const handleDeleteConnection = (connectedAssetId: string) => {
-    setDeleteTargetId(connectedAssetId);
+  const handleDeleteConnection = (connectionId: string) => {
+    setDeleteTargetId(connectionId);
   };
 
   const confirmDeleteConnection = async () => {
@@ -246,8 +247,8 @@ const ConnectionManager: React.FC<ConnectionManagerProps> = ({
           {connections.length === 0 ? (
             <p className={styles.empty}>No connections found.</p>
           ) : (
-            connections.map((connection, index) => (
-              <div key={index} className={styles.connectionItem}>
+            connections.map((connection) => (
+              <div key={connection.id} className={styles.connectionItem}>
                 <div className={styles.connectionInfo}>
                   <div className={styles.connectionHeader}>
                     <span className={styles.assetName}>
@@ -283,7 +284,7 @@ const ConnectionManager: React.FC<ConnectionManagerProps> = ({
                     Edit
                   </Button>
                   <Button
-                    onClick={() => handleDeleteConnection(connection.connected_asset_id)}
+                    onClick={() => handleDeleteConnection(connection.id)}
                     variant="danger"
                     size="sm"
                   >

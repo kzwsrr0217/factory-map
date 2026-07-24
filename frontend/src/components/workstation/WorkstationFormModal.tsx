@@ -157,7 +157,7 @@ const WorkstationFormModal: React.FC<WorkstationFormModalProps> = ({
         </div>
 
         <div className={styles.note}>
-          <p>Position this workstation on the floor plan in the Map View after creating it.</p>
+          <p>New workstations appear at the floor's origin (0, 0) — drag the marker on the Map View (in Edit Mode) to position it.</p>
         </div>
       </div>
     </Modal>

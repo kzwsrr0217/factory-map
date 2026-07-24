@@ -102,6 +102,17 @@ export async function runSyncAll(): Promise<ISyncAllResult> {
         continue;
       }
 
+      // Once an asset has been replaced (successor_id set, see replaceAsset in
+      // asset.controller.ts) it's decommissioned — the physical unit is gone.
+      // Applying an ITSM update here would silently "resurrect" it (flip
+      // status back to e.g. 'Deployed', overwrite display_name, etc.) even
+      // though it will never be re-placed. Skip it entirely; the live
+      // replacement asset is what should keep syncing.
+      if (existing.successor_id) {
+        result.skipped++;
+        continue;
+      }
+
       const sourceOfTruth = existing.source_of_truth ?? 'local';
 
       if (sourceOfTruth === 'itsm') {

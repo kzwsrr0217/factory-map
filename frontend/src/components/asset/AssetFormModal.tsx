@@ -409,6 +409,8 @@ const AssetFormModal: React.FC<AssetFormModalProps> = ({
     setItsmConfirming(false);
     setSubmitting(true);
     try {
+      const newFloorId = formData.floor_id || defaultFloorId || null;
+      const floorChanged = !!asset && (asset.hierarchy.floor_id || null) !== newFloorId;
       const payload: Partial<Asset> = {
         basic_info: {
           display_name: formData.display_name,
@@ -424,10 +426,18 @@ const AssetFormModal: React.FC<AssetFormModalProps> = ({
         },
         hierarchy: {
           building_id: formData.building_id || null,
-          floor_id: formData.floor_id || defaultFloorId || null,
-          workarea_id: asset?.hierarchy?.workarea_id || null,
-          section_id: asset?.hierarchy?.section_id || null,
-          workstation_id: asset?.hierarchy?.workstation_id || null,
+          floor_id: newFloorId,
+          // This form has no work area/section/workstation picker, so it can
+          // only ever carry the asset's EXISTING assignment forward — never
+          // set a new one. That's fine as long as the floor hasn't changed;
+          // if it has, the old work area/section/workstation belongs to a
+          // different floor entirely and must not be resent (the backend
+          // would also catch this, but the asset would flash a false "in
+          // work area X" state until the response comes back). Reassigning
+          // to a work area on the new floor is done afterwards on the map.
+          workarea_id: floorChanged ? null : (asset?.hierarchy?.workarea_id || null),
+          section_id: floorChanged ? null : (asset?.hierarchy?.section_id || null),
+          workstation_id: floorChanged ? null : (asset?.hierarchy?.workstation_id || null),
         },
         location: {
           coordinates: {

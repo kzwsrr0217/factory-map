@@ -272,12 +272,15 @@ const CsvImportModal: React.FC<CsvImportModalProps> = ({
         os_type: row.os_type,
         os_version: row.os_version,
       },
+      // Empty strings here would fail the backend's z.string().uuid()
+      // validation on hierarchy fields (an empty string is not a valid UUID),
+      // 400-ing the entire bulk import — must be null instead.
       hierarchy: {
-        building_id: defaultBuildingId || '',
-        floor_id: defaultFloorId || '',
-        workarea_id: '',
-        section_id: '',
-        workstation_id: '',
+        building_id: defaultBuildingId || null,
+        floor_id: defaultFloorId || null,
+        workarea_id: null,
+        section_id: null,
+        workstation_id: null,
       },
       location: { coordinates: { x: 0, y: 0 } },
       itsm: {

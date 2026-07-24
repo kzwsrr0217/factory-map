@@ -15,7 +15,13 @@
  *  - `updateAsset`: Includes cycle detection for predecessor/successor lifecycle links
  *    and automatic location history recording when coordinates change.
  *  - `addConnection` / `updateConnection` / `removeConnection`: Manage the
- *    asset_connections table. Remove also cleans up the reverse direction.
+ *    asset_connections table. A pair of assets can have several distinct
+ *    connections between them (identity is each row's own id, not the
+ *    asset pair); bidirectional connections are mirrored as two rows
+ *    sharing a `pair_id`, kept in sync on update/remove.
+ *  - `replaceAsset`: Swaps a broken/retired asset for a replacement,
+ *    transferring position, hierarchy, wall-port assignment, and every
+ *    connection to the replacement.
  *  - `syncAssetFromITSM`: Mock ITSM sync that updates status and software (for dev/demo).
  *
  * Internal helpers:
@@ -27,16 +33,130 @@
  *  - `wouldCreateCycle()`: Traverses the predecessor/successor chain to detect loops.
  */
 import { randomUUID } from 'crypto';
+import { In } from 'typeorm';
 import { Request, Response, NextFunction } from 'express';
+import { AuthRequest } from '../middleware/auth.middleware';
+import { AuditLog } from '../entities/AuditLog.entity';
 import { AppDataSource } from '../config/database';
 import { Asset } from '../entities/Asset.entity';
+import { MasterAsset } from '../entities/MasterAsset.entity';
 import { AssetSoftware } from '../entities/AssetSoftware.entity';
 import { AssetConnection } from '../entities/AssetConnection.entity';
+import { EntityKind } from '../entities/EntityKind.entity';
+import { WallPort } from '../entities/WallPort.entity';
+import { WorkArea } from '../entities/WorkArea.entity';
+import { Section } from '../entities/Section.entity';
+import { Workstation } from '../entities/Workstation.entity';
 import { io } from '../server';
 
 const repo = () => AppDataSource.getRepository(Asset);
+const masterAssetRepo = () => AppDataSource.getRepository(MasterAsset);
 const softwareRepo = () => AppDataSource.getRepository(AssetSoftware);
 const connRepo = () => AppDataSource.getRepository(AssetConnection);
+const entityKindRepo = () => AppDataSource.getRepository(EntityKind);
+const wallPortRepo = () => AppDataSource.getRepository(WallPort);
+
+// Mirrors shopfloor_visualizer's objectTypeTemplates convention (FR-6b): the
+// first time an asset is placed (is_placed flips false → true) with no
+// explicit footprint of its own, pre-fill loc_footprint from its
+// EntityKind's default footprint. Never overwrites a footprint the asset
+// already has (explicitly set, or filled by an earlier placement).
+async function fillFootprintFromEntityKind(asset: Asset, wasPlaced: boolean): Promise<void> {
+  if (wasPlaced || !asset.is_placed || asset.loc_footprint || !asset.entity_kind) return;
+  const kind = await entityKindRepo().findOne({ where: { value: asset.entity_kind } });
+  if (kind?.footprint) asset.loc_footprint = kind.footprint;
+}
+
+// Two devices can't physically occupy the same U slot in a rack. Checks the
+// [u_position, u_position + rack_u_size - 1] range against every other
+// asset in the same rack (excluding this one, for updates). Called after
+// applyBodyToAsset so rack_id/u_position/rack_u_size reflect the incoming
+// request.
+// Building/floor/workarea/section/workstation are independent columns on
+// Asset (no FK chain), so nothing stops e.g. floor_id pointing at Floor A
+// while section_id points at a section whose work area is on Floor B —
+// confirmed reachable via the plain API. Walks up from whichever of
+// workstation_id/section_id/workarea_id is set (most specific first) to the
+// work area's floor_id, and rejects if that disagrees with asset.floor_id.
+// Does not require every intermediate field to be filled in — only that
+// whichever ARE filled in agree with each other.
+async function findHierarchyMismatch(asset: Asset): Promise<string | null> {
+  let derivedFloorId: string | null = null;
+  if (asset.workstation_id) {
+    const ws = await AppDataSource.getRepository(Workstation).findOne({ where: { id: asset.workstation_id } });
+    if (!ws) return 'workstation_id does not reference an existing workstation';
+    const sec = await AppDataSource.getRepository(Section).findOne({ where: { id: ws.section_id } });
+    if (sec) {
+      const wa = await AppDataSource.getRepository(WorkArea).findOne({ where: { id: sec.workarea_id } });
+      if (wa) derivedFloorId = wa.floor_id;
+    }
+  } else if (asset.section_id) {
+    const sec = await AppDataSource.getRepository(Section).findOne({ where: { id: asset.section_id } });
+    if (!sec) return 'section_id does not reference an existing section';
+    const wa = await AppDataSource.getRepository(WorkArea).findOne({ where: { id: sec.workarea_id } });
+    if (wa) derivedFloorId = wa.floor_id;
+  } else if (asset.workarea_id) {
+    const wa = await AppDataSource.getRepository(WorkArea).findOne({ where: { id: asset.workarea_id } });
+    if (!wa) return 'workarea_id does not reference an existing work area';
+    derivedFloorId = wa.floor_id;
+  }
+  if (derivedFloorId && asset.floor_id && derivedFloorId !== asset.floor_id) {
+    return 'floor_id does not match the floor of the assigned work area/section/workstation';
+  }
+  return null;
+}
+
+async function findRackCollision(asset: Asset): Promise<Asset | null> {
+  if (!asset.rack_id || asset.u_position == null) return null;
+  const start = asset.u_position;
+  const end = asset.u_position + (asset.rack_u_size || 1) - 1;
+  const others = await repo().find({ where: { rack_id: asset.rack_id } });
+  return others.find((other) => {
+    if (other.id === asset.id || other.u_position == null) return false;
+    const oStart = other.u_position;
+    const oEnd = other.u_position + (other.rack_u_size || 1) - 1;
+    return start <= oEnd && oStart <= end;
+  }) ?? null;
+}
+
+// A maintenance "last serviced" date in the future is always a data-entry
+// mistake (typo, wrong picker value) — nobody has serviced equipment ahead
+// of time. Left unchecked it also silently breaks reporting: AssetReports.tsx
+// counts "recently serviced" via `now - last_date < 30 days`, which a future
+// date satisfies trivially, making unserviced equipment look serviced.
+function findFutureMaintenanceDate(asset: Asset): string | null {
+  if (asset.maint_last_date && asset.maint_last_date.getTime() > Date.now()) {
+    return 'maintenance.last_date cannot be in the future';
+  }
+  return null;
+}
+
+// Attaches the joined MasterAsset (IFS/CMDB) row, if any, onto an asset's API
+// response under `master`. `master: null` with a non-null `master_ifs_id`
+// means the join target is missing — the orphan case from PRD 5.3 (the
+// master row disappeared on a re-import, or was never seeded/imported).
+// No live IFS/Databricks call happens here — this only reads the local
+// master_assets table (see MasterAsset.entity.ts).
+async function attachMasterData<T extends { master_ifs_id: string | null }>(
+  response: T
+): Promise<T & { master: ReturnType<MasterAsset['toApiResponse']> | null }> {
+  const master = response.master_ifs_id
+    ? await masterAssetRepo().findOne({ where: { ifs_id: response.master_ifs_id } })
+    : null;
+  return { ...response, master: master ? master.toApiResponse() : null };
+}
+
+async function attachMasterDataMany<T extends { master_ifs_id: string | null }>(
+  responses: T[]
+): Promise<Array<T & { master: ReturnType<MasterAsset['toApiResponse']> | null }>> {
+  const ifsIds = [...new Set(responses.map((r) => r.master_ifs_id).filter((v): v is string => !!v))];
+  if (ifsIds.length === 0) return responses.map((r) => ({ ...r, master: null }));
+  const rows = await masterAssetRepo().find({ where: { ifs_id: In(ifsIds) } });
+  // Keyed case-insensitively to match MSSQL's default case-insensitive collation,
+  // which attachMasterData's findOne({ where: { ifs_id } }) relies on implicitly.
+  const byIfsId = new Map(rows.map((m) => [m.ifs_id.toUpperCase(), m.toApiResponse()]));
+  return responses.map((r) => ({ ...r, master: r.master_ifs_id ? byIfsId.get(r.master_ifs_id.toUpperCase()) ?? null : null }));
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -125,6 +245,9 @@ function applyBodyToAsset(asset: Asset, body: Record<string, unknown>): void {
     if (itsm.last_synced !== undefined) asset.last_synced = itsm.last_synced ? new Date(itsm.last_synced as string) : null;
   }
 
+  if (body.master_ifs_id !== undefined) asset.master_ifs_id = (body.master_ifs_id as string) ?? null;
+  if (body.entity_kind !== undefined) asset.entity_kind = (body.entity_kind as string) ?? null;
+
   const loc = body.location as Record<string, unknown> | undefined;
   if (loc) {
     const coords = loc.coordinates as { x?: number; y?: number } | undefined;
@@ -136,18 +259,47 @@ function applyBodyToAsset(asset: Asset, body: Record<string, unknown>): void {
     if (loc.rotation !== undefined) asset.loc_rotation = (loc.rotation as number) ?? 0;
     if (loc.icon_type !== undefined) asset.loc_icon_type = (loc.icon_type as string) ?? 'computer';
     if (loc.description !== undefined) asset.loc_description = (loc.description as string) ?? null;
+    if (loc.footprint !== undefined) asset.loc_footprint = (loc.footprint as Array<[number, number]>) ?? null;
   }
 
   const hier = body.hierarchy as Record<string, unknown> | undefined;
   if (hier) {
+    // AssetFormModal only exposes building/floor pickers — it has no
+    // workarea/section/workstation selector, so it always resubmits those
+    // fields unchanged from the asset's PREVIOUS floor. If floor_id is
+    // actually changing, those stale ids would silently point at a work
+    // area/section/workstation/rack that lives on the old floor entirely
+    // (confirmed: they can reference rows that don't exist on the new floor
+    // at all). Clear them here unless the caller explicitly set a new value
+    // for that specific field in the same request (e.g. a future
+    // "assign to this work area" action, or the map drag-to-move handler,
+    // which does pass the newly-computed workarea_id).
+    const floorChanging = hier.floor_id !== undefined && hier.floor_id !== asset.floor_id;
+
     if (hier.building_id !== undefined) asset.building_id = (hier.building_id as string) ?? null;
     if (hier.floor_id !== undefined) asset.floor_id = (hier.floor_id as string) ?? null;
+
     if (hier.workarea_id !== undefined) asset.workarea_id = (hier.workarea_id as string) ?? null;
+    else if (floorChanging) asset.workarea_id = null;
+
     if (hier.section_id !== undefined) asset.section_id = (hier.section_id as string) ?? null;
+    else if (floorChanging) asset.section_id = null;
+
     if (hier.workstation_id !== undefined) asset.workstation_id = (hier.workstation_id as string) ?? null;
+    else if (floorChanging) asset.workstation_id = null;
+
     if (hier.rack_id !== undefined) {
       asset.rack_id = (hier.rack_id as string) ?? null;
-      if (asset.rack_id) asset.is_placed = true;
+      // Clearing rack_id (unmounting) without also clearing/re-setting map
+      // coordinates left is_placed stuck at true forever — the asset then
+      // has no rack AND no meaningful map position, but never shows up in
+      // Unplaced Assets because nothing ever flips the flag back. Recompute
+      // from whichever placement signal (rack or coords) is actually true.
+      asset.is_placed = asset.rack_id ? true : isPlacedFromCoords(asset.loc_x, asset.loc_y);
+    } else if (floorChanging) {
+      asset.rack_id = null;
+      asset.u_position = null;
+      asset.is_placed = isPlacedFromCoords(asset.loc_x, asset.loc_y);
     }
     if (hier.u_position !== undefined) asset.u_position = (hier.u_position as number) ?? null;
     if (hier.rack_u_size !== undefined) asset.rack_u_size = (hier.rack_u_size as number) ?? 1;
@@ -263,7 +415,7 @@ export const getAssetLookups = async (_req: Request, res: Response, next: NextFu
 
 export const getAllAssets = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const { page, limit, floor_id, building_id, workarea_id, section_id, status, type, is_placed, q, include_connections } =
+    const { page, limit, floor_id, building_id, workarea_id, section_id, status, type, is_placed, q, include_connections, include_master, orphaned } =
       req.query as Record<string, string | undefined>;
 
     const qb = repo().createQueryBuilder('a');
@@ -283,6 +435,14 @@ export const getAllAssets = async (req: Request, res: Response, next: NextFuncti
     if (status)      qb.andWhere('a.status = :status', { status });
     if (type)        qb.andWhere('a.asset_type = :type', { type });
     if (is_placed !== undefined) qb.andWhere('a.is_placed = :is_placed', { is_placed: is_placed === 'true' ? 1 : 0 });
+    // Orphaned = references a master row (IFS/CMDB) that no longer resolves —
+    // see MasterAsset.entity.ts / attachMasterData. Filtered here (rather than
+    // fetched-then-filtered client-side) so the dedicated Orphaned Assets page
+    // doesn't have to pull every asset in the org to find the few that qualify.
+    if (orphaned === 'true') {
+      qb.andWhere('a.master_ifs_id IS NOT NULL')
+        .andWhere('NOT EXISTS (SELECT 1 FROM master_assets ma WHERE ma.ifs_id = a.master_ifs_id)');
+    }
 
     if (q) {
       const like = `%${q}%`;
@@ -301,13 +461,19 @@ export const getAllAssets = async (req: Request, res: Response, next: NextFuncti
       const l = Math.min(500, Math.max(1, parseInt(limit, 10)));
       qb.skip((p - 1) * l).take(l);
       const [assets, total] = await qb.getManyAndCount();
-      res.json({ success: true, data: assets.map((a) => a.toApiResponse()), meta: { total, page: p, limit: l, totalPages: Math.ceil(total / l) } });
+      const data = include_master === 'true'
+        ? await attachMasterDataMany(assets.map((a) => a.toApiResponse()))
+        : assets.map((a) => a.toApiResponse());
+      res.json({ success: true, data, meta: { total, page: p, limit: l, totalPages: Math.ceil(total / l) } });
     } else {
       // No explicit pagination — apply a safety cap so large datasets don't cause full-table reads
       const CAP = 1000;
       qb.take(CAP);
       const [assets, total] = await qb.getManyAndCount();
-      res.json({ success: true, data: assets.map((a) => a.toApiResponse()), meta: { total, limit: CAP, truncated: total > CAP } });
+      const data = include_master === 'true'
+        ? await attachMasterDataMany(assets.map((a) => a.toApiResponse()))
+        : assets.map((a) => a.toApiResponse());
+      res.json({ success: true, data, meta: { total, limit: CAP, truncated: total > CAP } });
     }
   } catch (error) { next(error); }
 };
@@ -318,7 +484,28 @@ export const getAssetById = async (req: Request, res: Response, next: NextFuncti
   try {
     const asset = await loadWithRelations(req.params.id);
     if (!asset) { res.status(404).json({ success: false, error: 'Asset not found' }); return; }
-    res.json({ success: true, data: asset.toApiResponse() });
+    res.json({ success: true, data: await attachMasterData(asset.toApiResponse()) });
+  } catch (error) { next(error); }
+};
+
+// ── GET /assets/:id/ot-children ─────────────────────────────────────────────
+// IT-managed devices (IPCs, etc.) mounted on the physical machine this asset
+// represents — the reverse of MasterAsset.ifs_machine_id (see that entity's
+// doc comment). Empty when the asset isn't IFS-joined or is itself an IT
+// device rather than a machine. No live IFS/Databricks call — reads only
+// the local master_assets table.
+export const getAssetOtChildren = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const asset = await repo().findOne({ where: { id: req.params.id } });
+    if (!asset) { res.status(404).json({ success: false, error: 'Asset not found' }); return; }
+    if (!asset.master_ifs_id) { res.json({ success: true, data: [] }); return; }
+
+    const children = await masterAssetRepo()
+      .createQueryBuilder('m')
+      .where('m.ifs_machine_id = :ifsId', { ifsId: asset.master_ifs_id })
+      .andWhere('m.ifs_id != m.ifs_machine_id')
+      .getMany();
+    res.json({ success: true, data: children.map((c) => c.toApiResponse()) });
   } catch (error) { next(error); }
 };
 
@@ -329,6 +516,22 @@ export const createAsset = async (req: Request, res: Response, next: NextFunctio
     const body = req.body as Record<string, unknown>;
     const asset = repo().create({ source_of_truth: 'local', sync_status: 'never', is_managed: false });
     applyBodyToAsset(asset, body);
+    const hierarchyMismatch = await findHierarchyMismatch(asset);
+    if (hierarchyMismatch) {
+      res.status(422).json({ success: false, error: hierarchyMismatch });
+      return;
+    }
+    const collision = await findRackCollision(asset);
+    if (collision) {
+      res.status(409).json({ success: false, error: `Rack U${asset.u_position} is already occupied by "${collision.display_name}"` });
+      return;
+    }
+    const futureMaint = findFutureMaintenanceDate(asset);
+    if (futureMaint) {
+      res.status(422).json({ success: false, error: futureMaint });
+      return;
+    }
+    await fillFootprintFromEntityKind(asset, false);
     await repo().save(asset);
     await saveRelations(asset, body);
     const full = (await loadWithRelations(asset.id))!;
@@ -410,7 +613,24 @@ export const updateAsset = async (req: Request, res: Response, next: NextFunctio
       }
     }
 
+    const wasPlaced = asset.is_placed;
     applyBodyToAsset(asset, body);
+    const hierarchyMismatch = await findHierarchyMismatch(asset);
+    if (hierarchyMismatch) {
+      res.status(422).json({ success: false, error: hierarchyMismatch });
+      return;
+    }
+    const collision = await findRackCollision(asset);
+    if (collision) {
+      res.status(409).json({ success: false, error: `Rack U${asset.u_position} is already occupied by "${collision.display_name}"` });
+      return;
+    }
+    const futureMaint = findFutureMaintenanceDate(asset);
+    if (futureMaint) {
+      res.status(422).json({ success: false, error: futureMaint });
+      return;
+    }
+    await fillFootprintFromEntityKind(asset, wasPlaced);
 
     // When wall_port_id is being explicitly cleared, issue a direct SQL UPDATE
     // to bypass TypeORM identity-map / dirty-checking that can swallow null FKs
@@ -445,9 +665,116 @@ export const deleteAsset = async (req: Request, res: Response, next: NextFunctio
   try {
     const asset = await repo().findOne({ where: { id: req.params.id } });
     if (!asset) { res.status(404).json({ success: false, error: 'Asset not found' }); return; }
+    const id = req.params.id;
+
+    // asset_connections.asset_id cascades via FK (this asset's own outgoing
+    // rows), but connected_asset_id, Asset.predecessor_id/successor_id, and
+    // WallPort.switch_asset_id are plain columns with no FK — clean up the
+    // dangling inbound references those would otherwise leave behind.
+    await connRepo().delete({ connected_asset_id: id });
+    await repo().createQueryBuilder().update().set({ predecessor_id: () => 'NULL' }).where('predecessor_id = :id', { id }).execute();
+    await repo().createQueryBuilder().update().set({ successor_id: () => 'NULL' }).where('successor_id = :id', { id }).execute();
+    await wallPortRepo().createQueryBuilder().update().set({ switch_asset_id: () => 'NULL', switch_port: () => 'NULL' }).where('switch_asset_id = :id', { id }).execute();
+
     await repo().remove(asset);
-    io.emit('asset:deleted', { _id: req.params.id });
+    io.emit('asset:deleted', { _id: id });
     res.json({ success: true, message: 'Asset deleted successfully' });
+  } catch (error) { next(error); }
+};
+
+// ── POST /assets/:id/replace ──────────────────────────────────────────────
+// A broken/retired asset is swapped for a replacement: the replacement
+// inherits the old asset's map position, hierarchy, and wall-port
+// assignment, every connection (both directions) is re-pointed at the
+// replacement, and — if the old asset was itself a switch — every WallPort
+// wired into one of its ports (switch_asset_id) follows it too. The old
+// asset keeps existing (for audit/history — see predecessor_id/successor_id)
+// but is cleared to unplaced, matching it having been physically removed.
+export const replaceAsset = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const oldId = req.params.id;
+    const { replacement_id: newId } = req.body as { replacement_id: string };
+    if (!newId) { res.status(400).json({ success: false, error: 'replacement_id is required' }); return; }
+    if (newId === oldId) { res.status(422).json({ success: false, error: 'An asset cannot replace itself' }); return; }
+
+    const oldAsset = await repo().findOne({ where: { id: oldId } });
+    const newAsset = await repo().findOne({ where: { id: newId } });
+    if (!oldAsset) { res.status(404).json({ success: false, error: 'Asset to replace not found' }); return; }
+    if (!newAsset) { res.status(404).json({ success: false, error: 'Replacement asset not found' }); return; }
+
+    // Transfer position, hierarchy, and physical wiring to the replacement.
+    newAsset.building_id = oldAsset.building_id;
+    newAsset.floor_id = oldAsset.floor_id;
+    newAsset.workarea_id = oldAsset.workarea_id;
+    newAsset.section_id = oldAsset.section_id;
+    newAsset.workstation_id = oldAsset.workstation_id;
+    newAsset.rack_id = oldAsset.rack_id;
+    newAsset.u_position = oldAsset.u_position;
+    newAsset.rack_u_size = oldAsset.rack_u_size;
+    newAsset.loc_x = oldAsset.loc_x;
+    newAsset.loc_y = oldAsset.loc_y;
+    newAsset.loc_rotation = oldAsset.loc_rotation;
+    newAsset.loc_footprint = oldAsset.loc_footprint;
+    newAsset.is_placed = oldAsset.is_placed;
+    newAsset.wall_port_id = oldAsset.wall_port_id;
+    newAsset.predecessor_id = oldId;
+    await repo().save(newAsset);
+
+    // Clear the old asset out of its physical slot — it's been removed.
+    oldAsset.successor_id = newId;
+    oldAsset.is_placed = false;
+    oldAsset.loc_x = 0;
+    oldAsset.loc_y = 0;
+    oldAsset.workarea_id = null;
+    oldAsset.section_id = null;
+    oldAsset.workstation_id = null;
+    oldAsset.rack_id = null;
+    oldAsset.u_position = null;
+    await repo().save(oldAsset);
+    // wall_port_id=null bypasses the same TypeORM identity-map quirk worked
+    // around in updateAsset — see the comment there.
+    await AppDataSource.createQueryBuilder().update(Asset).set({ wall_port_id: () => 'NULL' }).where('id = :id', { id: oldId }).execute();
+
+    // Re-point every connection (either direction) from the old asset to the
+    // replacement. A row that would become self-referencing (the old asset
+    // was directly connected to its own replacement) is dropped instead.
+    await connRepo().createQueryBuilder().update().set({ asset_id: newId })
+      .where('asset_id = :oldId AND connected_asset_id != :newId', { oldId, newId }).execute();
+    await connRepo().createQueryBuilder().update().set({ connected_asset_id: newId })
+      .where('connected_asset_id = :oldId AND asset_id != :newId', { oldId, newId }).execute();
+    await connRepo().delete({ asset_id: newId, connected_asset_id: newId });
+
+    // If the old asset was itself a switch, every WallPort wired into one of
+    // its ports (switch_asset_id) needs to follow it to the replacement too —
+    // otherwise those wall ports keep pointing at the now-retired switch.
+    await wallPortRepo().createQueryBuilder().update().set({ switch_asset_id: newId })
+      .where('switch_asset_id = :oldId', { oldId }).execute();
+
+    const fullOld = (await loadWithRelations(oldId))!;
+    const fullNew = (await loadWithRelations(newId))!;
+    io.emit('asset:updated', fullOld.toApiResponse());
+    io.emit('asset:updated', fullNew.toApiResponse());
+
+    // Written manually rather than via the auditLog middleware — that
+    // middleware infers create/update/delete from req.method alone (this is
+    // a POST, so it would be misfiled as "create") and expects a single
+    // flat asset in the response body, not this endpoint's { old, new } pair.
+    const user = (req as AuthRequest).user;
+    if (user) {
+      const logRepo = AppDataSource.getRepository(AuditLog);
+      await logRepo.save(logRepo.create({
+        user_id: user.id, username: user.username, action: 'update',
+        entity_type: 'asset', document_id: oldId,
+        diff: { replaced_by: newId, note: 'Asset replaced — cleared to unplaced, connections transferred to replacement' },
+      })).catch(() => { /* audit failure must never fail the request */ });
+      await logRepo.save(logRepo.create({
+        user_id: user.id, username: user.username, action: 'update',
+        entity_type: 'asset', document_id: newId,
+        diff: { replaces: oldId, note: 'Inherited position, hierarchy, wall-port assignment, and connections from replaced asset' },
+      })).catch(() => { /* audit failure must never fail the request */ });
+    }
+
+    res.json({ success: true, data: { old: fullOld.toApiResponse(), new: fullNew.toApiResponse() }, message: 'Asset replaced successfully' });
   } catch (error) { next(error); }
 };
 
@@ -496,16 +823,57 @@ export const syncAssetFromITSM = async (req: Request, res: Response, next: NextF
 };
 
 // ── Connections ───────────────────────────────────────────────────────────────
+// A pair of assets can have multiple distinct connections between them (e.g.
+// two physical ethernet cables, or one ethernet + one power link) — identity
+// is each row's own `id`, never the (asset_id, connected_asset_id) pair. When
+// bidirectional, addConnection creates a second, mirrored row sharing a
+// `pair_id` so update/remove can act on both sides together — see
+// AssetConnection.entity.ts.
+
+interface ConnectionBody {
+  connected_asset_id: string;
+  connection_type: string;
+  description?: string | null;
+  label?: string | null;
+  bidirectional?: boolean;
+  strength?: string;
+  patch_panel?: { panel_name?: string; panel_port?: string; switch_name?: string; switch_port?: string } | null;
+  source_port?: string | null;
+  target_port?: string | null;
+}
 
 export const addConnection = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const asset = await loadWithRelations(req.params.id);
     if (!asset) { res.status(404).json({ success: false, error: 'Asset not found' }); return; }
-    const connData = req.body as { connected_asset_id: string; connection_type: string; description?: string; label?: string; bidirectional?: boolean; strength?: string; patch_panel?: { panel_name?: string; panel_port?: string; switch_name?: string; switch_port?: string } | null; source_port?: string | null; target_port?: string | null };
-    const existing = (asset.connections ?? []).find((c) => c.connected_asset_id === connData.connected_asset_id);
-    if (existing) { res.status(400).json({ success: false, error: 'Connection already exists' }); return; }
-    const conn = connRepo().create({ asset_id: req.params.id, ...connData });
+    const connData = req.body as ConnectionBody;
+    if (req.params.id === connData.connected_asset_id) {
+      res.status(422).json({ success: false, error: 'An asset cannot connect to itself' }); return;
+    }
+    // Block only an exact duplicate (same peer, type, and label) — distinct
+    // connections to the same peer (a second cable, a different link type)
+    // are a legitimate, common case and must be allowed.
+    const exactDuplicate = (asset.connections ?? []).find((c) =>
+      c.connected_asset_id === connData.connected_asset_id &&
+      c.connection_type === connData.connection_type &&
+      (c.label ?? null) === (connData.label ?? null)
+    );
+    if (exactDuplicate) { res.status(400).json({ success: false, error: 'An identical connection already exists' }); return; }
+
+    const bidirectional = connData.bidirectional ?? true;
+    const pairId = bidirectional ? randomUUID() : null;
+    const conn = connRepo().create({ asset_id: req.params.id, ...connData, bidirectional, pair_id: pairId });
     await connRepo().save(conn);
+    if (bidirectional) {
+      const mirror = connRepo().create({
+        ...connData,
+        asset_id: connData.connected_asset_id,
+        connected_asset_id: req.params.id,
+        bidirectional: true,
+        pair_id: pairId,
+      });
+      await connRepo().save(mirror);
+    }
     const full = (await loadWithRelations(req.params.id))!;
     res.status(201).json({ success: true, data: full.toApiResponse(), message: 'Connection added successfully' });
   } catch (error) { next(error); }
@@ -513,12 +881,19 @@ export const addConnection = async (req: Request, res: Response, next: NextFunct
 
 export const updateConnection = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const { id, connectedAssetId } = req.params;
-    const conn = await connRepo().findOne({ where: { asset_id: id, connected_asset_id: connectedAssetId } });
+    const { id, connectionId } = req.params;
+    const conn = await connRepo().findOne({ where: { id: connectionId, asset_id: id } });
     if (!conn) { res.status(404).json({ success: false, error: 'Connection not found' }); return; }
     const body = req.body as Partial<{ connection_type: string; description: string; label: string; bidirectional: boolean; strength: string; patch_panel: { panel_name?: string; panel_port?: string; switch_name?: string; switch_port?: string } | null; source_port: string | null; target_port: string | null }>;
-    Object.assign(conn, body);
-    await connRepo().save(conn);
+    // Apply the same field changes to both rows of a bidirectional pair
+    // (direction-specific fields — asset_id/connected_asset_id — are never
+    // touched here) so the two sides never drift apart.
+    if (conn.pair_id) {
+      await connRepo().update({ pair_id: conn.pair_id }, body);
+    } else {
+      Object.assign(conn, body);
+      await connRepo().save(conn);
+    }
     const full = (await loadWithRelations(id))!;
     res.json({ success: true, data: full.toApiResponse(), message: 'Connection updated successfully' });
   } catch (error) { next(error); }
@@ -526,18 +901,26 @@ export const updateConnection = async (req: Request, res: Response, next: NextFu
 
 export const removeConnection = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const { id, connectedAssetId } = req.params;
-    const conn = await connRepo().findOne({ where: { asset_id: id, connected_asset_id: connectedAssetId } });
+    const { id, connectionId } = req.params;
+    const conn = await connRepo().findOne({ where: { id: connectionId, asset_id: id } });
     if (!conn) { res.status(404).json({ success: false, error: 'Connection not found' }); return; }
-    await connRepo().remove(conn);
-    // Remove reverse connection too
-    await connRepo().delete({ asset_id: connectedAssetId, connected_asset_id: id });
+    if (conn.pair_id) {
+      await connRepo().delete({ pair_id: conn.pair_id });
+    } else {
+      await connRepo().remove(conn);
+    }
     const full = (await loadWithRelations(id))!;
     res.json({ success: true, data: full.toApiResponse(), message: 'Connection removed successfully' });
   } catch (error) { next(error); }
 };
 
 // ── GET /assets/maintenance-counts ───────────────────────────────────────────
+// An asset that has been replaced (see replaceAsset) keeps its own
+// maint_next_date forever — nothing ever clears it once the asset is
+// decommissioned. Without the successor_id exclusion below, a replaced
+// asset with a stale next_date would count as "overdue" indefinitely,
+// permanently inflating the dashboard even after the real, live equipment
+// (the replacement) has no maintenance issue at all.
 
 export const getMaintenanceCounts = async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
@@ -548,11 +931,13 @@ export const getMaintenanceCounts = async (_req: Request, res: Response, next: N
       repo().createQueryBuilder('a')
         .where('a.maint_next_date IS NOT NULL')
         .andWhere('a.maint_next_date < :now', { now })
+        .andWhere('a.successor_id IS NULL')
         .getCount(),
       repo().createQueryBuilder('a')
         .where('a.maint_next_date IS NOT NULL')
         .andWhere('a.maint_next_date >= :now', { now })
         .andWhere('a.maint_next_date <= :in30', { in30 })
+        .andWhere('a.successor_id IS NULL')
         .getCount(),
     ]);
 

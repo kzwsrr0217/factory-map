@@ -406,11 +406,16 @@ const AssetReports: React.FC<AssetReportsProps> = ({ isOpen, onClose, inline = f
   const generateReport = useCallback(async () => {
     setLoading(true);
     try {
-      const [assets, buildings, floors] = await Promise.all([
+      const [rawAssets, buildings, floors] = await Promise.all([
         assetService.getAssetsWithConnections(),
         hierarchyService.getBuildings(),
         floorService.getFloors(),
       ]);
+      // Exclude replaced assets (successor_id set, see replaceAsset) — they
+      // are decommissioned history, not live inventory. Without this, every
+      // report (asset totals, maintenance overdue, location breakdowns)
+      // keeps counting equipment that was physically swapped out years ago.
+      const assets = rawAssets.filter((a: Asset) => !a.successor_id);
 
       const buildingMap = new Map<string, string>(buildings.map((b: Building) => [b._id, b.name]));
       const floorMap = new Map<string, string>(

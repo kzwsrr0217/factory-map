@@ -7,6 +7,12 @@
  *
  * Work areas contain Sections, which in turn contain Workstations. This three-level
  * hierarchy allows granular organisation of physical space within a floor.
+ *
+ * `production_line_code` is a soft join (no FK/cascade) to
+ * ProductionLine.code — organizational-hierarchy metadata (IFS-aligned,
+ * mirrors shopfloor_visualizer's Department/ProductionLine/WorkCenter model),
+ * kept separate from the spatial coord_x/y/dim_width/dim_height fields above,
+ * which still drive the existing rectangle rendering unchanged.
  */
 import {
   Entity,
@@ -17,6 +23,7 @@ import {
   ManyToOne,
   OneToMany,
   JoinColumn,
+  Index,
 } from 'typeorm';
 import { Floor } from './Floor.entity';
 import { Section } from './Section.entity';
@@ -51,6 +58,10 @@ export class WorkArea {
   @Column({ name: 'dim_height', type: 'float', default: 100 })
   dim_height!: number;
 
+  @Column({ name: 'production_line_code', type: 'nvarchar', length: 50, nullable: true })
+  @Index('IDX_work_areas_production_line_code')
+  production_line_code!: string | null;
+
   @Column({ type: 'simple-json', nullable: true })
   metadata!: Record<string, unknown> | null;
 
@@ -71,6 +82,7 @@ export class WorkArea {
       type: this.type,
       coordinates: { x: this.coord_x, y: this.coord_y },
       dimensions: { width: this.dim_width, height: this.dim_height },
+      production_line_code: this.production_line_code,
       metadata: this.metadata ?? {},
       created_at: this.created_at,
       updated_at: this.updated_at,

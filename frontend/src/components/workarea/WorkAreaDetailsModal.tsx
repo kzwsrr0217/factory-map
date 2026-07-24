@@ -22,6 +22,7 @@ import { Asset } from '../../services/asset.service';
 import { Section, sectionService } from '../../services/section.service';
 import { Workstation, workstationService } from '../../services/workstation.service';
 import { useToast } from '../../contexts/ToastContext';
+import { getApiErrorMessage } from '../../utils/apiError';
 import styles from '../../styles/components/WorkAreaDetailsModal.module.css';
 
 interface WorkAreaDetailsModalProps {
@@ -91,7 +92,7 @@ const WorkAreaDetailsModal: React.FC<WorkAreaDetailsModalProps> = ({
       onRefresh();
     } catch (err) {
       console.error('Error deleting section:', err);
-      toast.error('Failed to delete section. Please try again.');
+      toast.error(getApiErrorMessage(err, 'Failed to delete section. Please try again.'));
     } finally {
       setDeleting(false);
       setDeleteSectionDialogOpen(false);
@@ -126,7 +127,7 @@ const WorkAreaDetailsModal: React.FC<WorkAreaDetailsModalProps> = ({
       onRefresh();
     } catch (err) {
       console.error('Error deleting workstation:', err);
-      toast.error('Failed to delete workstation. Please try again.');
+      toast.error(getApiErrorMessage(err, 'Failed to delete workstation. Please try again.'));
     } finally {
       setDeleting(false);
       setDeleteWorkstationDialogOpen(false);
@@ -196,6 +197,12 @@ const WorkAreaDetailsModal: React.FC<WorkAreaDetailsModalProps> = ({
                     <div className={styles.infoItem}>
                       <span className={styles.label}>Type:</span>
                       <span className={styles.value}>{workarea.type}</span>
+                    </div>
+                  )}
+                  {workarea.production_line_code && (
+                    <div className={styles.infoItem}>
+                      <span className={styles.label}>Production Line:</span>
+                      <span className={styles.value}>{workarea.production_line_code}</span>
                     </div>
                   )}
                   {workarea.metadata?.supervisor && (

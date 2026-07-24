@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  werk1-ground-floor.svg — hand-authored prototype floor plan for WERK1 /
+  Ground Floor — Production. Mirrors shopfloor_visualizer's layer convention
+  (see mvp-2d-demo/js/svgplan.js): a layer is a top-level <g> whose <title>
+  names it; a shape's identity is its own <title> child. viewBox intentionally
+  matches FloorMap.tsx's WORLD_W/WORLD_H (1000x800) so no scale conversion is
+  needed for this prototype (see docs/DATA_MODEL_MIGRATION.md, phase 4).
+
+  This is a prototype, not a real surveyed floor plan — coordinates are chosen
+  to roughly line up with the existing seeded WorkArea rectangles (Assembly
+  Line A at coord 50,50 size 420x220) so the two layers visibly agree.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 800">
+  <g>
+    <title>outline</title>
+    <rect x="10" y="10" width="980" height="780" fill="none" stroke="#374151" stroke-width="4" />
+  </g>
+  <g>
+    <title>walls</title>
+    <line x1="10" y1="290" x2="990" y2="290" stroke="#6b7280" stroke-width="3" />
+    <line x1="510" y1="10" x2="510" y2="290" stroke="#6b7280" stroke-width="3" />
+  </g>
+  <g>
+    <title>production-lines</title>
+    <polygon points="40,60 480,60 480,280 40,280">
+      <title>11101</title>
+    </polygon>
+  </g>
+  <g>
+    <title>work-centers</title>
+    <polygon points="60,80 460,80 460,260 60,260">
+      <title>30230</title>
+    </polygon>
+  </g>
+</svg>

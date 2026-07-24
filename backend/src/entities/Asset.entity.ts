@@ -64,9 +64,25 @@ interface ItsmSnapshot {
 @Index(['building_id', 'status'])
 @Index(['itsm_guid'], { where: 'itsm_guid IS NOT NULL' })
 @Index(['hardware_asset_id'], { where: 'hardware_asset_id IS NOT NULL' })
+@Index('IDX_assets_master_ifs_id', ['master_ifs_id'], { where: 'master_ifs_id IS NOT NULL' })
 export class Asset {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
+
+  // ── Master data join (IFS/CMDB — see MasterAsset.entity.ts) ───────────────
+  // Soft join only: no FK/cascade, so a MasterAsset row disappearing on
+  // re-import never deletes this Asset — it just stops resolving, which the
+  // controller layer surfaces as an "orphan" rather than losing the layout.
+  @Column({ name: 'master_ifs_id', type: 'nvarchar', length: 50, nullable: true })
+  master_ifs_id!: string | null;
+
+  // Soft join to EntityKind.value (see EntityKind.entity.ts) — configures how
+  // this asset is placeable/rendered on the map (geometry type, footprint,
+  // rotatability), independent of `asset_type` (business/inventory type) and
+  // `loc_icon_type` (which icon to draw). Null/unresolved falls back to the
+  // 'object' default, same as shopfloor_visualizer's entity_kinds.json.
+  @Column({ name: 'entity_kind', type: 'nvarchar', length: 50, nullable: true })
+  entity_kind!: string | null;
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────
   @Column({ name: 'predecessor_id', type: 'nvarchar', length: 36, nullable: true })
@@ -269,6 +285,12 @@ export class Asset {
   @Column({ name: 'loc_history', type: 'simple-json', nullable: true })
   loc_history!: LocationHistoryEntry[] | null;
 
+  // Optional footprint polygon in cm, centered on (loc_x, loc_y) — mirrors
+  // Matthias's objectTypeTemplates/footprint convention. Null keeps today's
+  // point-only rendering; this only stores the shape, nothing reads it yet.
+  @Column({ name: 'loc_footprint', type: 'simple-json', nullable: true })
+  loc_footprint!: Array<[number, number]> | null;
+
   // ── custom_fields (flattened) ─────────────────────────────────────────────
   @Column({ name: 'physical_condition', type: 'nvarchar', length: 20, nullable: true })
   physical_condition!: string | null;
@@ -372,6 +394,8 @@ export class Asset {
   toApiResponse() {
     return {
       _id: this.id,
+      master_ifs_id: this.master_ifs_id,
+      entity_kind: this.entity_kind ?? 'object',
       predecessor_id: this.predecessor_id,
       successor_id: this.successor_id,
       is_placed: this.is_placed,
@@ -447,6 +471,7 @@ export class Asset {
         icon_type: this.loc_icon_type,
         description: this.loc_description,
         history: this.loc_history ?? [],
+        footprint: this.loc_footprint ?? null,
       },
       custom_fields: {
         physical_condition: this.physical_condition,
@@ -492,6 +517,8 @@ export class Asset {
       })),
       work_items: this.work_items ?? [],
       connections: (this.connections ?? []).map((c) => ({
+        id: c.id,
+        pair_id: c.pair_id,
         connected_asset_id: c.connected_asset_id,
         connection_type: c.connection_type,
         description: c.description,

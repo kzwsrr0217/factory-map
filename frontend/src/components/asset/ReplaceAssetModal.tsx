@@ -1,10 +1,13 @@
 /**
  * ReplaceAssetModal.tsx — Swap one asset's physical slot with another.
  *
- * "Replace" means the selected replacement asset inherits the current asset's
- * building, floor, and map coordinates. Calls
- * `assetService.replaceAsset(currentId, replacementId)` which performs the
- * coordinate transfer on the backend in a single PATCH.
+ * "Replace" means the selected replacement asset inherits the current
+ * asset's building, floor, work area/section/workstation, rack position,
+ * map coordinates, wall-port assignment, AND every connection (both
+ * directions) — the old asset is cleared out of its physical slot (unplaced)
+ * and linked as the replacement's predecessor for lifecycle history. All of
+ * this happens atomically via `assetService.replaceAsset(currentId,
+ * replacementId)` — see asset.controller.ts replaceAsset.
  *
  * The replacement list is filtered to exclude the current asset and shows a
  * live search box for large inventories. The "Before → After" row previews
@@ -63,15 +66,12 @@ const ReplaceAssetModal: React.FC<ReplaceAssetModalProps> = ({
     if (!selectedId) return;
     setSaving(true);
     try {
-      await Promise.all([
-        assetService.updateAsset(currentAsset._id, { successor_id: selectedId }),
-        assetService.updateAsset(selectedId, { predecessor_id: currentAsset._id }),
-      ]);
-      toast.success(`${currentAsset.basic_info.display_name} linked — replaced by ${selectedAsset?.basic_info.display_name}`);
+      await assetService.replaceAsset(currentAsset._id, selectedId);
+      toast.success(`${selectedAsset?.basic_info.display_name} now stands in for ${currentAsset.basic_info.display_name} — position, wiring, and connections transferred`);
       onSuccess();
       onClose();
-    } catch {
-      toast.error('Failed to link assets');
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error ?? 'Failed to replace asset');
     } finally {
       setSaving(false);
     }
@@ -122,7 +122,7 @@ const ReplaceAssetModal: React.FC<ReplaceAssetModalProps> = ({
         </div>
 
         <p className={styles.hint}>
-          This will set the successor of <strong>{currentAsset.basic_info.display_name}</strong> and the predecessor of the new asset, linking them in the lifecycle chain.
+          The new asset takes over <strong>{currentAsset.basic_info.display_name}</strong>'s map position, work area, wall-port assignment, and every network connection. <strong>{currentAsset.basic_info.display_name}</strong> is removed from its physical slot and kept only as replacement history.
         </p>
 
         <input

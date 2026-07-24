@@ -85,13 +85,14 @@
  */
 import { Router } from 'express';
 import { getAllSections, getSectionById, createSection, updateSection, deleteSection } from '../controllers/section.controller';
+import { requireOperator } from '../middleware/auth.middleware';
 
 const router = Router();
 
 router.get('/', getAllSections);
 router.get('/:id', getSectionById);
-router.post('/', createSection);
-router.patch('/:id', updateSection);
-router.delete('/:id', deleteSection);
+router.post('/', requireOperator, createSection);
+router.patch('/:id', requireOperator, updateSection);
+router.delete('/:id', requireOperator, deleteSection);
 
 export default router;

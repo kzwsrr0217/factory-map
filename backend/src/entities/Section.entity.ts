@@ -5,6 +5,10 @@
  * The optional `capacity` field documents how many people or workstations the section
  * can accommodate. `shift_schedule` records which shift operates in this section
  * (e.g., "Day / Afternoon / Night").
+ *
+ * `workcenter_code` is a soft join (no FK/cascade) to WorkCenter.code —
+ * organizational-hierarchy metadata, kept separate from the spatial
+ * coord_x/y fields above (see WorkArea.entity.ts for the same pattern).
  */
 import {
   Entity,
@@ -15,6 +19,7 @@ import {
   ManyToOne,
   OneToMany,
   JoinColumn,
+  Index,
 } from 'typeorm';
 import { WorkArea } from './WorkArea.entity';
 import { Workstation } from './Workstation.entity';
@@ -46,6 +51,10 @@ export class Section {
   @Column({ name: 'shift_schedule', type: 'nvarchar', length: 200, nullable: true })
   shift_schedule!: string | null;
 
+  @Column({ name: 'workcenter_code', type: 'nvarchar', length: 50, nullable: true })
+  @Index('IDX_sections_workcenter_code')
+  workcenter_code!: string | null;
+
   @CreateDateColumn({ name: 'created_at' })
   created_at!: Date;
 
@@ -63,6 +72,7 @@ export class Section {
       coordinates: { x: this.coord_x, y: this.coord_y },
       capacity: this.capacity,
       shift_schedule: this.shift_schedule,
+      workcenter_code: this.workcenter_code,
       created_at: this.created_at,
       updated_at: this.updated_at,
     };

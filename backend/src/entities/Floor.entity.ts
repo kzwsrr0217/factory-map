@@ -9,6 +9,13 @@
  *  - `svg_background`: the full image content stored as a base64-encoded data URI
  *    or an SVG string. Stored as NVARCHAR(MAX) to avoid size limitations.
  *    The 20 MB body limit in server.ts accommodates large floor plan images.
+ *    Kept for existing floors only — new floors should prefer `svg_ref` below.
+ *  - `svg_ref` / `scale_meters_per_unit`: the file-reference convention adopted
+ *    from shopfloor_visualizer (PRD 5.3a) — the plan lives as its own file on
+ *    disk/share (not a DB blob), so it stays directly editable in another
+ *    program; the DB stores only the reference and the real-world scale.
+ *    Nothing resolves `svg_ref` to actual file content yet — that lands with
+ *    the frontend map rewrite (see docs/DATA_MODEL_MIGRATION.md).
  *
  * Deleting a floor cascades to its work areas (and transitively to sections,
  * workstations). The floor controller blocks deletion if assets exist on the floor.
@@ -52,6 +59,12 @@ export class Floor {
   @Column({ name: 'svg_background', type: 'nvarchar', length: 'max' as unknown as number, nullable: true })
   svg_background!: string | null;
 
+  @Column({ name: 'svg_ref', type: 'nvarchar', length: 500, nullable: true })
+  svg_ref!: string | null;
+
+  @Column({ name: 'scale_meters_per_unit', type: 'float', nullable: true })
+  scale_meters_per_unit!: number | null;
+
   @Column({ type: 'simple-json', nullable: true })
   metadata!: Record<string, unknown> | null;
 
@@ -72,6 +85,8 @@ export class Floor {
       name: this.name,
       map_file: this.map_file,
       svg_background: this.svg_background,
+      svg_ref: this.svg_ref,
+      scale_meters_per_unit: this.scale_meters_per_unit,
       metadata: this.metadata ?? {},
       created_at: this.created_at,
       updated_at: this.updated_at,

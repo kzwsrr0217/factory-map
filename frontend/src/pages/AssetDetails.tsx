@@ -14,6 +14,7 @@ import { networkService, NetworkRack } from '../services/network.service';
 import { workareaService, WorkArea } from '../services/workarea.service';
 import { useToast } from '../contexts/ToastContext';
 import { getAssetIcon, getAssetTypeLabel } from '../utils/assetTypes';
+import { getApiErrorMessage } from '../utils/apiError';
 import styles from '../styles/pages/AssetDetails.module.css';
 import AssetFormModal from '../components/asset/AssetFormModal';
 
@@ -144,17 +145,17 @@ const AssetDetails: React.FC = () => {
       setConnSearch(''); setConnLabel(''); setConnSourcePort(''); setConnTargetPort('');
       setShowAddConn(false);
       toast.success('Connection added');
-    } catch {
-      toast.error('Failed to add connection');
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, 'Failed to add connection'));
     } finally {
       setAddingConn(false);
     }
   };
 
-  const handleRemoveConnection = async (connectedAssetId: string) => {
+  const handleRemoveConnection = async (connectionId: string) => {
     if (!id) return;
     try {
-      const updated = await assetService.removeConnection(id, connectedAssetId);
+      const updated = await assetService.removeConnection(id, connectionId);
       setAsset(updated);
       toast.success('Connection removed');
     } catch {
@@ -756,7 +757,7 @@ const AssetDetails: React.FC = () => {
                     const peer = allAssets.find(a => a._id === c.connected_asset_id);
                     const peerName = peer?.label ?? '…';
                     return (
-                      <tr key={c.connected_asset_id} style={{ borderBottom: '1px solid var(--color-gray-100)' }}>
+                      <tr key={c.id} style={{ borderBottom: '1px solid var(--color-gray-100)' }}>
                         <td style={{ padding: '6px 8px' }}>
                           <span style={{ fontSize: '0.7rem', fontWeight: 600, textTransform: 'uppercase', padding: '1px 6px', borderRadius: '4px', background: 'var(--color-primary)', color: '#fff' }}>
                             {c.connection_type}
@@ -775,7 +776,7 @@ const AssetDetails: React.FC = () => {
                         <td style={{ padding: '6px 8px', color: 'var(--color-text-secondary)' }}>{c.label ?? '—'}</td>
                         <td style={{ padding: '6px 4px', textAlign: 'right' }}>
                           <button
-                            onClick={() => handleRemoveConnection(c.connected_asset_id)}
+                            onClick={() => handleRemoveConnection(c.id)}
                             style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-text-secondary)', fontSize: '0.8rem', padding: '2px 4px' }}
                             title="Remove connection"
                           >✕</button>

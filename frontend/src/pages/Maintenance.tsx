@@ -22,7 +22,11 @@ const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 const Maintenance: React.FC = () => {
   const { data: allAssets = [], isLoading: loading } = useAssets();
-  const assets = allAssets.filter((a: Asset) => a.maintenance?.next_date);
+  // Exclude replaced assets (successor_id set) — once an asset has been
+  // swapped for a replacement (see replaceAsset), its own maint_next_date is
+  // never cleared, so without this it would show as overdue forever even
+  // though the physical device is gone and the replacement is the live one.
+  const assets = allAssets.filter((a: Asset) => a.maintenance?.next_date && !a.successor_id);
   const toast = useToast();
   const [today] = useState(() => new Date());
   const [viewYear, setViewYear] = useState(today.getFullYear());
