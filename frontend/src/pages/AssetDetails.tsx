@@ -12,6 +12,8 @@ import { hierarchyService, Building } from '../services/hierarchy.service';
 import { floorService, Floor } from '../services/floor.service';
 import { networkService, NetworkRack } from '../services/network.service';
 import { workareaService, WorkArea } from '../services/workarea.service';
+import { sectionService, Section } from '../services/section.service';
+import { workstationService, Workstation } from '../services/workstation.service';
 import { useToast } from '../contexts/ToastContext';
 import { getAssetIcon, getAssetTypeLabel } from '../utils/assetTypes';
 import { getApiErrorMessage } from '../utils/apiError';
@@ -46,6 +48,10 @@ const AssetDetails: React.FC = () => {
   const [floor, setFloor]       = useState<Floor | null>(null);
   const [rack, setRack]         = useState<NetworkRack | null>(null);
   const [workArea, setWorkArea] = useState<WorkArea | null>(null);
+  const [section, setSection]   = useState<Section | null>(null);
+  const [workstation, setWorkstation] = useState<Workstation | null>(null);
+  const [predecessor, setPredecessor] = useState<Asset | null>(null);
+  const [successor, setSuccessor]     = useState<Asset | null>(null);
   const [loading, setLoading]   = useState(true);
   const [error, setError]       = useState<string | null>(null);
   const [syncing, setSyncing]         = useState(false);
@@ -94,10 +100,16 @@ const AssetDetails: React.FC = () => {
       const fId = data.hierarchy?.floor_id;
       const rId = data.hierarchy?.rack_id;
       const waId = data.hierarchy?.workarea_id;
+      const secId = data.hierarchy?.section_id;
+      const wsId = data.hierarchy?.workstation_id;
       if (bId)  hierarchyService.getBuilding(bId).then(setBuilding).catch(() => {});
       if (fId)  floorService.getFloor(fId).then(setFloor).catch(() => {});
       if (rId)  networkService.getRack(rId).then(setRack).catch(() => {});
       if (waId) workareaService.getWorkArea(waId).then(setWorkArea).catch(() => {});
+      if (secId) sectionService.getSection(secId).then(setSection).catch(() => {});
+      if (wsId)  workstationService.getWorkstation(wsId).then(setWorkstation).catch(() => {});
+      if (data.predecessor_id) assetService.getAsset(data.predecessor_id).then(setPredecessor).catch(() => {});
+      if (data.successor_id)   assetService.getAsset(data.successor_id).then(setSuccessor).catch(() => {});
     } catch {
       setError('Failed to load asset details. Please try again.');
     } finally {
@@ -611,8 +623,60 @@ const AssetDetails: React.FC = () => {
                   <p>{asset.catalog_item.display_name}</p>
                 </div>
               )}
+              {asset.catalog_item?.itsm_id && (
+                <div className={styles.field}>
+                  <label>Catalog Item ITSM ID</label>
+                  <p style={{ fontFamily: 'monospace', fontSize: '11px', opacity: 0.7 }}>{asset.catalog_item.itsm_id}</p>
+                </div>
+              )}
+              {predecessor && (
+                <div className={styles.field}>
+                  <label>Replaces</label>
+                  <p><Link to={`/assets/${predecessor._id}`} style={{ color: 'var(--color-primary)' }}>{predecessor.basic_info?.display_name}</Link></p>
+                </div>
+              )}
+              {successor && (
+                <div className={styles.field}>
+                  <label>Replaced By</label>
+                  <p><Link to={`/assets/${successor._id}`} style={{ color: 'var(--color-primary)' }}>{successor.basic_info?.display_name}</Link></p>
+                </div>
+              )}
+              {asset.created_at && (
+                <div className={styles.field}>
+                  <label>Created</label>
+                  <p style={{ fontSize: '0.8rem', opacity: 0.75 }}>{new Date(asset.created_at).toLocaleString()}</p>
+                </div>
+              )}
+              {asset.updated_at && (
+                <div className={styles.field}>
+                  <label>Last Updated</label>
+                  <p style={{ fontSize: '0.8rem', opacity: 0.75 }}>{new Date(asset.updated_at).toLocaleString()}</p>
+                </div>
+              )}
             </div>
           </Card>
+
+          {/* IFS/CMDB Master Data — soft-joined reference data, see MasterAsset.entity.ts */}
+          {asset.master && (
+            <Card padding="lg">
+              <h3 className={styles.sectionTitle}>IFS/CMDB Master Data</h3>
+              <div className={styles.fieldsList}>
+                {asset.master.ifs_site && <div className={styles.field}><label>IFS Site</label><p>{asset.master.ifs_site}</p></div>}
+                {asset.master.ifs_operational_status && <div className={styles.field}><label>Operational Status</label><p>{asset.master.ifs_operational_status}</p></div>}
+                {asset.master.ifs_machine_part_description && <div className={styles.field}><label>Machine Part</label><p>{asset.master.ifs_machine_part_description}</p></div>}
+                {asset.master.ifs_workcenter_description && <div className={styles.field}><label>Work Center</label><p>{asset.master.ifs_workcenter_description}</p></div>}
+                {asset.master.ifs_production_line_id && <div className={styles.field}><label>Production Line</label><p>{asset.master.ifs_production_line_id}</p></div>}
+                {asset.master.ifs_cost_center && <div className={styles.field}><label>Cost Center</label><p>{asset.master.ifs_cost_center}</p></div>}
+                {asset.master.ifs_part_description && <div className={styles.field}><label>IT/OT Part</label><p>{asset.master.ifs_part_description}</p></div>}
+                {asset.master.ifs_serial_state && <div className={styles.field}><label>Serial State</label><p>{asset.master.ifs_serial_state}</p></div>}
+                {asset.master.cmdb_id && <div className={styles.field}><label>CMDB ID</label><p style={{ fontFamily: 'monospace' }}>{asset.master.cmdb_id}</p></div>}
+                {asset.master.cmdb_status && <div className={styles.field}><label>CMDB Status</label><p>{asset.master.cmdb_status}</p></div>}
+                {asset.master.cmdb_manufacturer && <div className={styles.field}><label>CMDB Manufacturer</label><p>{asset.master.cmdb_manufacturer}</p></div>}
+                {asset.master.cmdb_model && <div className={styles.field}><label>CMDB Model</label><p>{asset.master.cmdb_model}</p></div>}
+                {asset.master.cmdb_os && <div className={styles.field}><label>CMDB OS</label><p>{asset.master.cmdb_os}{asset.master.cmdb_os_version ? ` ${asset.master.cmdb_os_version}` : ''}</p></div>}
+              </div>
+            </Card>
+          )}
 
           {/* Technical Specs */}
           {asset.technical_specs && (asset.technical_specs.cpu || asset.technical_specs.ram || asset.technical_specs.storage || asset.technical_specs.gpu) && (
@@ -651,7 +715,9 @@ const AssetDetails: React.FC = () => {
                 </div>
                 <div>
                   <p className={styles.personName}>{asset.assigned_person.full_name}</p>
-                  <p className={styles.personId}>ID: {asset.assigned_person.person_id}</p>
+                  {asset.assigned_person.person_id && (
+                    <p className={styles.personId}>ID: {asset.assigned_person.person_id}</p>
+                  )}
                   {asset.assigned_person.itsm_id && (
                     <p className={styles.personId} style={{ fontFamily: 'monospace', fontSize: '11px', opacity: 0.7 }}>
                       ITSM: {asset.assigned_person.itsm_id}
@@ -673,6 +739,78 @@ const AssetDetails: React.FC = () => {
                     <label>ITSM ID</label>
                     <p style={{ fontFamily: 'monospace', fontSize: '12px', wordBreak: 'break-all' }}>{asset.organization.itsm_id}</p>
                   </div>
+                )}
+              </div>
+            </Card>
+          )}
+
+          {/* Custom Fields */}
+          {asset.custom_fields && (
+            asset.custom_fields.physical_condition || asset.custom_fields.environment ||
+            asset.custom_fields.notes || (asset.custom_fields.tags && asset.custom_fields.tags.length > 0) ||
+            asset.custom_fields.object_id || asset.custom_fields.serial_object ||
+            asset.custom_fields.remote_access_tool || asset.custom_fields.backup_tool ||
+            asset.custom_fields.winupdate_date || asset.custom_fields.fortiedr_active != null
+          ) && (
+            <Card padding="lg">
+              <h3 className={styles.sectionTitle}>Custom Fields</h3>
+              <div className={styles.fieldsList}>
+                {asset.custom_fields.physical_condition && (
+                  <div className={styles.field}><label>Physical Condition</label><p>{asset.custom_fields.physical_condition}</p></div>
+                )}
+                {asset.custom_fields.environment && (
+                  <div className={styles.field}><label>Environment</label><p>{asset.custom_fields.environment}</p></div>
+                )}
+                {asset.custom_fields.object_id && (
+                  <div className={styles.field}><label>Object ID</label><p>{asset.custom_fields.object_id}</p></div>
+                )}
+                {asset.custom_fields.serial_object && (
+                  <div className={styles.field}><label>Serial Object</label><p>{asset.custom_fields.serial_object}</p></div>
+                )}
+                {asset.custom_fields.remote_access_tool && (
+                  <div className={styles.field}>
+                    <label>Remote Access</label>
+                    <p>{asset.custom_fields.remote_access_tool}{asset.custom_fields.remote_access_version ? ` v${asset.custom_fields.remote_access_version}` : ''}</p>
+                  </div>
+                )}
+                {asset.custom_fields.backup_tool && (
+                  <div className={styles.field}>
+                    <label>Backup</label>
+                    <p>
+                      {asset.custom_fields.backup_tool}
+                      {asset.custom_fields.backup_status && (
+                        <span style={{ marginLeft: 6 }}>
+                          <Badge variant={asset.custom_fields.backup_status === 'active' ? 'success' : asset.custom_fields.backup_status === 'error' ? 'error' : 'neutral'} size="sm">
+                            {asset.custom_fields.backup_status}
+                          </Badge>
+                        </span>
+                      )}
+                    </p>
+                  </div>
+                )}
+                {asset.custom_fields.winupdate_date && (
+                  <div className={styles.field}><label>Last Windows Update</label><p>{new Date(asset.custom_fields.winupdate_date).toLocaleDateString()}</p></div>
+                )}
+                {asset.custom_fields.fortiedr_active != null && (
+                  <div className={styles.field}>
+                    <label>FortiEDR</label>
+                    <Badge variant={asset.custom_fields.fortiedr_active ? 'success' : 'neutral'} size="sm">
+                      {asset.custom_fields.fortiedr_active ? 'Active' : 'Inactive'}
+                    </Badge>
+                  </div>
+                )}
+                {asset.custom_fields.tags && asset.custom_fields.tags.length > 0 && (
+                  <div className={styles.field}>
+                    <label>Tags</label>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                      {asset.custom_fields.tags.map((t, i) => (
+                        <span key={i} style={{ fontSize: '0.75rem', padding: '2px 8px', borderRadius: '999px', background: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}>{t}</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {asset.custom_fields.notes && (
+                  <div className={styles.field}><label>Notes</label><p>{asset.custom_fields.notes}</p></div>
                 )}
               </div>
             </Card>
@@ -714,6 +852,18 @@ const AssetDetails: React.FC = () => {
                   <p>{workArea.name}</p>
                 </div>
               )}
+              {section && (
+                <div className={styles.field}>
+                  <label>Section</label>
+                  <p>{section.name}</p>
+                </div>
+              )}
+              {workstation && (
+                <div className={styles.field}>
+                  <label>Workstation</label>
+                  <p>{workstation.name}</p>
+                </div>
+              )}
               {isRackMounted && rack && (
                 <div className={styles.field}>
                   <label>Rack</label>
@@ -739,17 +889,47 @@ const AssetDetails: React.FC = () => {
               )}
               {/* Wall port connection */}
               {asset.wall_port && (
-                <div className={styles.field}>
-                  <label>Wall Port</label>
-                  <p style={{ fontFamily: 'monospace', fontSize: '0.85rem' }}>
-                    {asset.wall_port.label}
-                    {asset.wall_port.patch_panel_name && ` → ${asset.wall_port.patch_panel_name} port ${asset.wall_port.patch_port}`}
-                    {asset.wall_port.room_name && ` → ${asset.wall_port.room_name}`}
-                  </p>
-                </div>
+                <>
+                  <div className={styles.field}>
+                    <label>Wall Port</label>
+                    <p style={{ fontFamily: 'monospace', fontSize: '0.85rem' }}>
+                      {asset.wall_port.label}
+                      {asset.wall_port.patch_panel_name && ` → ${asset.wall_port.patch_panel_name} port ${asset.wall_port.patch_port}`}
+                      {asset.wall_port.room_name && ` → ${asset.wall_port.room_name}`}
+                    </p>
+                  </div>
+                  {asset.wall_port.rack_name && (
+                    <div className={styles.field}><label>Wall Port Rack</label><p>{asset.wall_port.rack_name}</p></div>
+                  )}
+                  {asset.wall_port.room_type && (
+                    <div className={styles.field}><label>Room Type</label><p>{asset.wall_port.room_type}</p></div>
+                  )}
+                  {asset.wall_port.switch_port && (
+                    <div className={styles.field}><label>Switch Port</label><p style={{ fontFamily: 'monospace', fontSize: '0.85rem' }}>{asset.wall_port.switch_port}</p></div>
+                  )}
+                  {asset.wall_port.description && (
+                    <div className={styles.field}><label>Wall Port Notes</label><p>{asset.wall_port.description}</p></div>
+                  )}
+                </>
               )}
             </div>
           </Card>
+
+          {/* Move History */}
+          {asset.location.history && asset.location.history.length > 0 && (
+            <Card padding="lg">
+              <h3 className={styles.sectionTitle}>Move History</h3>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                {asset.location.history.slice(-5).reverse().map((h, i) => (
+                  <div key={i} style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                    <span>{new Date(h.moved_at).toLocaleString()}</span>
+                    {h.moved_by && <span>· {h.moved_by}</span>}
+                    {h.reason && <span>· {h.reason}</span>}
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
 
           {/* Maintenance */}
           {asset.maintenance && (asset.maintenance.last_date || asset.maintenance.next_date) && (
@@ -810,7 +990,7 @@ const AssetDetails: React.FC = () => {
                 {asset.software.map((sw, index) => (
                   <div key={index} className={styles.softwareItem}>
                     <div>
-                      <p className={styles.softwareName}>{sw.display_name}</p>
+                      <p className={styles.softwareName}>{sw.display_name}{sw.vendor ? ` — ${sw.vendor}` : ''}</p>
                       {sw.version && <p className={styles.softwareVersion}>v{sw.version}</p>}
                     </div>
                     <Badge variant={sw.source === 'itsm' ? 'info' : 'neutral'} size="sm">
@@ -901,6 +1081,7 @@ const AssetDetails: React.FC = () => {
                     <th style={{ textAlign: 'left', padding: '4px 8px', color: 'var(--color-text-secondary)', fontWeight: 600, fontSize: '0.75rem', textTransform: 'uppercase' }}>My Port</th>
                     <th style={{ textAlign: 'left', padding: '4px 8px', color: 'var(--color-text-secondary)', fontWeight: 600, fontSize: '0.75rem', textTransform: 'uppercase' }}>Their Port</th>
                     <th style={{ textAlign: 'left', padding: '4px 8px', color: 'var(--color-text-secondary)', fontWeight: 600, fontSize: '0.75rem', textTransform: 'uppercase' }}>Label</th>
+                    <th style={{ textAlign: 'left', padding: '4px 8px', color: 'var(--color-text-secondary)', fontWeight: 600, fontSize: '0.75rem', textTransform: 'uppercase' }}>Details</th>
                     <th style={{ width: '40px' }}></th>
                   </tr>
                 </thead>
@@ -926,6 +1107,17 @@ const AssetDetails: React.FC = () => {
                         <td style={{ padding: '6px 8px', color: 'var(--color-text-secondary)', fontFamily: 'monospace', fontSize: '0.8rem' }}>{c.source_port ?? '—'}</td>
                         <td style={{ padding: '6px 8px', color: 'var(--color-text-secondary)', fontFamily: 'monospace', fontSize: '0.8rem' }}>{c.target_port ?? '—'}</td>
                         <td style={{ padding: '6px 8px', color: 'var(--color-text-secondary)' }}>{c.label ?? '—'}</td>
+                        <td style={{ padding: '6px 8px', color: 'var(--color-text-secondary)', fontSize: '0.75rem' }}>
+                          {c.strength && <span style={{ marginRight: 6 }}>{c.strength}</span>}
+                          {c.patch_panel?.panel_name && (
+                            <span style={{ fontFamily: 'monospace' }}>
+                              {c.patch_panel.panel_name}{c.patch_panel.panel_port ? `/${c.patch_panel.panel_port}` : ''}
+                              {c.patch_panel.switch_name ? ` → ${c.patch_panel.switch_name}${c.patch_panel.switch_port ? `/${c.patch_panel.switch_port}` : ''}` : ''}
+                            </span>
+                          )}
+                          {c.description && <span> {c.description}</span>}
+                          {!c.strength && !c.patch_panel?.panel_name && !c.description && '—'}
+                        </td>
                         <td style={{ padding: '6px 4px', textAlign: 'right' }}>
                           <button
                             onClick={() => handleRemoveConnection(c.id)}

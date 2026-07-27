@@ -18,6 +18,7 @@
  */
 import { AppDataSource } from '../../config/database';
 import { Asset } from '../../entities/Asset.entity';
+import { ItsmHardwareSnapshot } from '../../entities/ItsmHardwareSnapshot.entity';
 import itsmService from './ITSMService';
 import config from '../../config/config';
 import {
@@ -26,6 +27,7 @@ import {
   IReconcileFieldDiff,
   IReconcileLinkedAsset,
   IReconcileSummary,
+  IUnlinkedMmhAsset,
 } from '../../types/itsm.types';
 import {
   statusEquals,
@@ -409,6 +411,153 @@ export async function listLinked(): Promise<IReconcileLinkedAsset[]> {
     last_at: a.reconcile_last_at,
     diff_count: a.reconcile_diff_count,
   }));
+}
+
+/**
+ * MMH-scoped ITSM hardware (from the imported itsm_hardware_snapshot table)
+ * that no local asset links to via hardware_asset_id — the reverse of the
+ * usual reconcile direction. Pure local-DB + snapshot-table read; never calls
+ * ITSM (the snapshot itself was populated out-of-band — see
+ * SnapshotITSMAdapter / import-itsm-snapshot.ts).
+ */
+export async function findUnlinkedMmhAssets(): Promise<IUnlinkedMmhAsset[]> {
+  const snapshotRows = await AppDataSource.getRepository(ItsmHardwareSnapshot).find();
+  if (snapshotRows.length === 0) return [];
+
+  const linked = await AppDataSource.getRepository(Asset)
+    .createQueryBuilder('a')
+    .select('a.hardware_asset_id', 'hardware_asset_id')
+    .where('a.hardware_asset_id IS NOT NULL')
+    .getRawMany<{ hardware_asset_id: string }>();
+  const linkedIds = new Set(linked.map((r) => r.hardware_asset_id.toUpperCase()));
+
+  return snapshotRows
+    .filter((row) => !linkedIds.has(row.itsm_id.toUpperCase()))
+    .map((row) => ({
+      itsm_guid: row.itsm_guid,
+      itsm_id: row.itsm_id,
+      display_name: row.display_name ?? row.itsm_id,
+      catalog_item_name: row.catalog_item_name,
+      status: row.status,
+      location_name: row.location_name,
+      itsm_url: config.itsm.webUrl ? `${config.itsm.webUrl}/Analyst/Forms/Open/${row.itsm_guid}` : null,
+    }))
+    .sort((a, b) => a.display_name.localeCompare(b.display_name));
+}
+
+export interface ICreateAssetsFromMmhResult {
+  created: Asset[];
+  skipped: Array<{ itsm_guid: string; error: string }>;
+}
+
+/**
+ * Materialise selected MMH snapshot rows into real, **unplaced** local assets
+ * (`is_placed` defaults to false — the snapshot carries no floor-plan geometry,
+ * so a human still has to drag each one onto the map afterward). Only ever
+ * reads the already-imported snapshot table + local DB; never calls ITSM.
+ *
+ * Idempotent per call: a row whose hardware_asset_id already has a local
+ * asset (created by a previous call, or linked some other way since the
+ * snapshot was last read) is skipped rather than duplicated.
+ */
+export async function createAssetsFromUnlinkedMmh(itsmGuids: string[]): Promise<ICreateAssetsFromMmhResult> {
+  const snapshotRepo = AppDataSource.getRepository(ItsmHardwareSnapshot);
+  const assetRepo = AppDataSource.getRepository(Asset);
+  const result: ICreateAssetsFromMmhResult = { created: [], skipped: [] };
+
+  for (const guid of itsmGuids) {
+    const row = await snapshotRepo.findOne({ where: { itsm_guid: guid } });
+    if (!row) { result.skipped.push({ itsm_guid: guid, error: 'Not found in the imported snapshot' }); continue; }
+
+    const existing = await assetRepo.findOne({ where: { hardware_asset_id: row.itsm_id } });
+    if (existing) { result.skipped.push({ itsm_guid: guid, error: `Already linked locally (asset ${existing.id})` }); continue; }
+
+    const modifiedAt = row.itsm_modified_at ? new Date(row.itsm_modified_at) : null;
+    const asset = assetRepo.create({
+      display_name: row.display_name ?? row.itsm_id,
+      hardware_asset_id: row.itsm_id,
+      itsm_guid: row.itsm_guid,
+      serial_number: row.serial_number,
+      asset_tag: row.asset_tag,
+      model: row.model,
+      manufacturer: row.manufacturer,
+      asset_type: row.asset_type,
+      os_type: row.os_type,
+      os_version: row.os_version,
+      mac_address: row.mac_address,
+      status: itsmStatusToLocal(row.status),
+      catalog_display_name: row.catalog_item_name,
+      catalog_itsm_id: row.catalog_itsm_id,
+      org_display_name: row.location_name,
+      person_full_name: row.assigned_person_name,
+      person_itsm_id: row.person_itsm_id,
+      itsm_modified_at: modifiedAt && !isNaN(modifiedAt.getTime()) ? modifiedAt : null,
+      source_of_truth: 'itsm',
+      is_managed: true,
+      sync_status: 'success',
+      last_synced: new Date(),
+    });
+    await assetRepo.save(asset);
+    result.created.push(asset);
+  }
+
+  return result;
+}
+
+export interface IBackfillResult {
+  checked: number;
+  updated: number;
+  fieldsWritten: number;
+}
+
+/**
+ * Backfills manufacturer/asset_type/catalog_itsm_id/person_itsm_id (and
+ * person_full_name) onto already-linked local assets from the current
+ * snapshot table. For assets created before a snapshot re-import resolved
+ * these fields (e.g. the initial MMH bulk-create, done before the Catalog
+ * Items reference-list join existed) or before an export-script bug fix.
+ *
+ * Never overwrites a field the asset already has a value for — only fills
+ * genuine gaps, so a manual edit is never clobbered. Local-DB + snapshot-table
+ * read/write only; never calls ITSM.
+ */
+export async function backfillAssetsFromSnapshot(): Promise<IBackfillResult> {
+  const assetRepo = AppDataSource.getRepository(Asset);
+  const snapshotRepo = AppDataSource.getRepository(ItsmHardwareSnapshot);
+
+  const linked = await assetRepo
+    .createQueryBuilder('a')
+    .where('a.hardware_asset_id IS NOT NULL')
+    .getMany();
+
+  const result: IBackfillResult = { checked: linked.length, updated: 0, fieldsWritten: 0 };
+
+  for (const asset of linked) {
+    const row = await snapshotRepo.findOne({ where: { itsm_id: asset.hardware_asset_id! } });
+    if (!row) continue;
+
+    let changed = false;
+    const fill = <K extends keyof Asset>(field: K, value: Asset[K] | null | undefined) => {
+      if (value == null || value === '') return;
+      if (asset[field] != null && asset[field] !== '') return;
+      asset[field] = value;
+      changed = true;
+      result.fieldsWritten++;
+    };
+
+    fill('manufacturer', row.manufacturer);
+    fill('asset_type', row.asset_type);
+    fill('catalog_itsm_id', row.catalog_itsm_id);
+    fill('person_itsm_id', row.person_itsm_id);
+    fill('person_full_name', row.assigned_person_name);
+
+    if (changed) {
+      await assetRepo.save(asset);
+      result.updated++;
+    }
+  }
+
+  return result;
 }
 
 /**

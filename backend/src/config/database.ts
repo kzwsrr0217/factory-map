@@ -23,6 +23,7 @@ import { WorkCenter } from '../entities/WorkCenter.entity';
 import { EntityKind } from '../entities/EntityKind.entity';
 import { Asset } from '../entities/Asset.entity';
 import { MasterAsset } from '../entities/MasterAsset.entity';
+import { ItsmHardwareSnapshot } from '../entities/ItsmHardwareSnapshot.entity';
 import { AssetSoftware } from '../entities/AssetSoftware.entity';
 import { AssetConnection } from '../entities/AssetConnection.entity';
 import { User } from '../entities/User.entity';
@@ -45,7 +46,7 @@ export const AppDataSource = new DataSource({
   database: config.mssql.database,
   synchronize: config.env !== 'production',
   logging: config.env === 'development' ? ['error', 'warn'] : false,
-  entities: [Building, Floor, WorkArea, Section, Workstation, Asset, MasterAsset, AssetSoftware, AssetConnection, User, AuditLog, AlertConfig, AlertLog, ScheduledAlert, ActiveSession, NetworkRoom, NetworkRack, PatchPanel, WallPort, ProductionLine, WorkCenter, EntityKind],
+  entities: [Building, Floor, WorkArea, Section, Workstation, Asset, MasterAsset, ItsmHardwareSnapshot, AssetSoftware, AssetConnection, User, AuditLog, AlertConfig, AlertLog, ScheduledAlert, ActiveSession, NetworkRoom, NetworkRack, PatchPanel, WallPort, ProductionLine, WorkCenter, EntityKind],
   migrations: ['dist/migrations/*.js'],
   migrationsTableName: 'typeorm_migrations',
   options: {

@@ -53,7 +53,7 @@ interface Config {
     expiresIn: string;
   };
   itsm: {
-    mode: 'mock' | 'real';
+    mode: 'mock' | 'real' | 'snapshot';
     mockApiUrl: string;
     realApiUrl: string;
     apiKey: string;
@@ -103,7 +103,7 @@ const config: Config = {
   },
   
   itsm: {
-    mode: (process.env.ITSM_MODE as 'mock' | 'real') || 'mock',
+    mode: (process.env.ITSM_MODE as 'mock' | 'real' | 'snapshot') || 'mock',
     mockApiUrl: process.env.ITSM_MOCK_API_URL || 'http://localhost:5000/mock-itsm',
     realApiUrl: process.env.ITSM_REAL_API_URL || '',
     apiKey: process.env.ITSM_API_KEY || '',

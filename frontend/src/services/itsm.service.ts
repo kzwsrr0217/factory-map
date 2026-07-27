@@ -48,6 +48,21 @@ export interface ReconcileSummary {
   generated_at: string;
 }
 
+/**
+ * ITSM hardware in the imported MMH snapshot that no local asset links to —
+ * the reverse of the usual reconcile direction. Built from the LOCAL DB + the
+ * imported snapshot table only (no ITSM call, see itsm_hardware_snapshot).
+ */
+export interface UnlinkedMmhAsset {
+  itsm_guid: string;
+  itsm_id: string;
+  display_name: string;
+  catalog_item_name: string | null;
+  status: string | null;
+  location_name: string | null;
+  itsm_url: string | null;
+}
+
 export const itsmService = {
   // ── Read from LOCAL DB (no ITSM call) ─────────────────────────────────────
   getLinked: async (): Promise<ReconcileLinkedAsset[]> => {
@@ -56,6 +71,14 @@ export const itsmService = {
   },
   getSummary: async (): Promise<ReconcileSummary> => {
     const res = await api.get('/itsm/reconcile/summary');
+    return res.data.data;
+  },
+  getUnlinkedMmh: async (): Promise<UnlinkedMmhAsset[]> => {
+    const res = await api.get('/itsm/reconcile/unlinked-mmh');
+    return res.data.data;
+  },
+  createFromUnlinkedMmh: async (itsmGuids: string[]): Promise<{ created: unknown[]; skipped: { itsm_guid: string; error: string }[] }> => {
+    const res = await api.post('/itsm/reconcile/unlinked-mmh/create', { itsm_guids: itsmGuids });
     return res.data.data;
   },
 

@@ -434,7 +434,12 @@ export class Asset {
         switch_port: this.switch_port,
         dhcp_static: this.dhcp_static,
       } : undefined,
-      assigned_person: this.person_id ? {
+      // Gated on person_itsm_id, matching organization/catalog_item below —
+      // person_id is a separate, not-yet-populated local identifier (the
+      // ITSM Person's own human-readable ID, e.g. a login name, isn't
+      // exposed anywhere in the Hardware Asset's payload; only its internal
+      // GUID and display name are).
+      assigned_person: this.person_itsm_id || this.person_id ? {
         person_id: this.person_id,
         itsm_id: this.person_itsm_id,
         full_name: this.person_full_name ?? '',

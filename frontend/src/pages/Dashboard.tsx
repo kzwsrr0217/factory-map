@@ -16,10 +16,10 @@
  * incremental list reloads via `useSocket` so the table stays live without
  * manual refresh.
  */
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { Monitor, Activity, Wrench, Building2, AlertTriangle, Bell, Eye, Map, Download, Upload, BarChart2, Filter, Trash2, MoveRight, FileText, LayoutGrid, List, ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react';
+import { Monitor, Activity, Wrench, Building2, AlertTriangle, Bell, Eye, Map, Download, Upload, BarChart2, Filter, Trash2, MoveRight, FileText, LayoutGrid, List, ChevronUp, ChevronDown, ChevronsUpDown, Columns3 } from 'lucide-react';
 import Card from '../components/common/Card';
 import Button from '../components/common/Button';
 import Badge from '../components/common/Badge';
@@ -42,6 +42,18 @@ import { useFloors } from '../hooks/queries/useFloors';
 import { useWorkareas } from '../hooks/queries/useWorkareas';
 import { useAuditLog } from '../hooks/queries/useAuditLog';
 import styles from '../styles/pages/Dashboard.module.css';
+
+// Table-view optional columns — Name (identity) and the trailing actions
+// column are always shown and not part of this list.
+const COLUMN_DEFS = [
+  { key: 'type',         label: 'Type' },
+  { key: 'status',       label: 'Status' },
+  { key: 'manufacturer', label: 'Manufacturer / Model' },
+  { key: 'ip_serial',    label: 'IP / Serial' },
+  { key: 'location',     label: 'Location' },
+  { key: 'maintenance',  label: 'Next Maint.' },
+] as const;
+type ColumnKey = typeof COLUMN_DEFS[number]['key'];
 
 const Dashboard: React.FC = () => {
   const navigate = useNavigate();
@@ -90,8 +102,36 @@ const Dashboard: React.FC = () => {
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>(
     () => (localStorage.getItem('db_sort_dir') as 'asc' | 'desc') ?? 'asc'
   );
+  const [visibleColumns, setVisibleColumns] = useState<Set<ColumnKey>>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('db_columns') ?? 'null');
+      if (Array.isArray(saved)) return new Set(saved);
+    } catch { /* fall through to default */ }
+    return new Set(COLUMN_DEFS.map(c => c.key));
+  });
+  const [columnsMenuOpen, setColumnsMenuOpen] = useState(false);
+  const columnsMenuRef = useRef<HTMLDivElement>(null);
   const itemsPerPage = loadSettings().itemsPerPage;
   const toast = useToast();
+
+  const toggleColumn = (key: ColumnKey) => {
+    setVisibleColumns(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  };
+
+  // Close column-picker popover on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (columnsMenuRef.current && !columnsMenuRef.current.contains(e.target as Node)) {
+        setColumnsMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
 
   // Ctrl+N → New Asset shortcut
   useEffect(() => {
@@ -385,6 +425,7 @@ const Dashboard: React.FC = () => {
   useEffect(() => { localStorage.setItem('db_view', viewMode); }, [viewMode]);
   useEffect(() => { localStorage.setItem('db_sort', sortField); }, [sortField]);
   useEffect(() => { localStorage.setItem('db_sort_dir', sortDir); }, [sortDir]);
+  useEffect(() => { localStorage.setItem('db_columns', JSON.stringify([...visibleColumns])); }, [visibleColumns]);
 
   // ── Sort ─────────────────────────────────────────────────────
   const handleSort = (field: string) => {
@@ -840,6 +881,28 @@ const Dashboard: React.FC = () => {
               <h3>Assets ({sortedAssets.length})</h3>
             </div>
             <div className={styles.assetsHeaderRight}>
+              {viewMode === 'table' && (
+                <div className={styles.columnsMenu} ref={columnsMenuRef}>
+                  <button
+                    className={styles.columnsBtn}
+                    onClick={() => setColumnsMenuOpen(v => !v)}
+                    title="Choose columns"
+                  >
+                    <Columns3 size={15} />
+                    Columns
+                  </button>
+                  {columnsMenuOpen && (
+                    <div className={styles.columnsDropdown}>
+                      {COLUMN_DEFS.map(({ key, label }) => (
+                        <button key={key} className={styles.columnsItem} onClick={() => toggleColumn(key)}>
+                          <input type="checkbox" checked={visibleColumns.has(key)} readOnly />
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
               <div className={styles.viewToggle}>
                 <button
                   className={`${styles.viewBtn} ${viewMode === 'card' ? styles.viewBtnActive : ''}`}
@@ -1025,27 +1088,30 @@ const Dashboard: React.FC = () => {
                         <th className={styles.thCheck}>
                           <input type="checkbox" checked={allPageSelected} onChange={toggleSelectAllPage} />
                         </th>
-                        {([
-                          { key: 'name',         label: 'Name' },
-                          { key: 'type',         label: 'Type' },
-                          { key: 'status',       label: 'Status' },
-                          { key: 'manufacturer', label: 'Manufacturer / Model' },
-                        ] as const).map(({ key, label }) => (
+                        <th key="name" className={styles.thSortable} onClick={() => handleSort('name')}>
+                          Name
+                          {sortField === 'name'
+                            ? sortDir === 'asc' ? <ChevronUp size={12} style={{ marginLeft: 3 }} /> : <ChevronDown size={12} style={{ marginLeft: 3 }} />
+                            : <ChevronsUpDown size={12} style={{ marginLeft: 3, opacity: 0.35 }} />}
+                        </th>
+                        {(['type', 'status', 'manufacturer'] as const).filter(k => visibleColumns.has(k)).map((key) => (
                           <th key={key} className={styles.thSortable} onClick={() => handleSort(key)}>
-                            {label}
+                            {COLUMN_DEFS.find(c => c.key === key)?.label}
                             {sortField === key
                               ? sortDir === 'asc' ? <ChevronUp size={12} style={{ marginLeft: 3 }} /> : <ChevronDown size={12} style={{ marginLeft: 3 }} />
                               : <ChevronsUpDown size={12} style={{ marginLeft: 3, opacity: 0.35 }} />}
                           </th>
                         ))}
-                        <th className={styles.th}>IP / Serial</th>
-                        <th className={styles.th}>Location</th>
-                        <th className={`${styles.thSortable}`} onClick={() => handleSort('maintenance')}>
-                          Next Maint.
-                          {sortField === 'maintenance'
-                            ? sortDir === 'asc' ? <ChevronUp size={12} style={{ marginLeft: 3 }} /> : <ChevronDown size={12} style={{ marginLeft: 3 }} />
-                            : <ChevronsUpDown size={12} style={{ marginLeft: 3, opacity: 0.35 }} />}
-                        </th>
+                        {visibleColumns.has('ip_serial') && <th className={styles.th}>IP / Serial</th>}
+                        {visibleColumns.has('location') && <th className={styles.th}>Location</th>}
+                        {visibleColumns.has('maintenance') && (
+                          <th className={`${styles.thSortable}`} onClick={() => handleSort('maintenance')}>
+                            Next Maint.
+                            {sortField === 'maintenance'
+                              ? sortDir === 'asc' ? <ChevronUp size={12} style={{ marginLeft: 3 }} /> : <ChevronDown size={12} style={{ marginLeft: 3 }} />
+                              : <ChevronsUpDown size={12} style={{ marginLeft: 3, opacity: 0.35 }} />}
+                          </th>
+                        )}
                         <th className={styles.th}></th>
                       </tr>
                     </thead>
@@ -1071,24 +1137,34 @@ const Dashboard: React.FC = () => {
                                 {asset.basic_info?.display_name}
                               </div>
                             </td>
-                            <td className={styles.tdMuted}>{asset.basic_info?.type ?? '—'}</td>
-                            <td onClick={e => e.stopPropagation()}>
-                              <select
-                                className={`${styles.inlineStatusSelect} ${styles[`status_${asset.basic_info?.status ?? 'unknown'}`]}`}
-                                value={asset.basic_info?.status ?? ''}
-                                onChange={e => handleInlineStatusChange(asset._id, e.target.value)}
-                              >
-                                {['active', 'maintenance', 'inactive', 'retired'].map(s => (
-                                  <option key={s} value={s}>{s}</option>
-                                ))}
-                              </select>
-                            </td>
-                            <td className={styles.tdMuted}>{[asset.basic_info?.manufacturer, asset.basic_info?.model].filter(Boolean).join(' ') || '—'}</td>
-                            <td className={styles.tdMono}>{asset.network?.ip_address || asset.basic_info?.serial_number || '—'}</td>
-                            <td className={styles.tdMuted}>{[building?.name, floor?.name].filter(Boolean).join(' · ') || '—'}</td>
-                            <td className={maintOverdue ? styles.tdOverdue : styles.tdMuted}>
-                              {nextMaint ? nextMaint.toLocaleDateString() : '—'}
-                            </td>
+                            {visibleColumns.has('type') && <td className={styles.tdMuted}>{asset.basic_info?.type ?? '—'}</td>}
+                            {visibleColumns.has('status') && (
+                              <td onClick={e => e.stopPropagation()}>
+                                <select
+                                  className={`${styles.inlineStatusSelect} ${styles[`status_${asset.basic_info?.status ?? 'unknown'}`]}`}
+                                  value={asset.basic_info?.status ?? ''}
+                                  onChange={e => handleInlineStatusChange(asset._id, e.target.value)}
+                                >
+                                  {['active', 'maintenance', 'inactive', 'retired'].map(s => (
+                                    <option key={s} value={s}>{s}</option>
+                                  ))}
+                                </select>
+                              </td>
+                            )}
+                            {visibleColumns.has('manufacturer') && (
+                              <td className={styles.tdMuted}>{[asset.basic_info?.manufacturer, asset.basic_info?.model].filter(Boolean).join(' ') || '—'}</td>
+                            )}
+                            {visibleColumns.has('ip_serial') && (
+                              <td className={styles.tdMono}>{asset.network?.ip_address || asset.basic_info?.serial_number || '—'}</td>
+                            )}
+                            {visibleColumns.has('location') && (
+                              <td className={styles.tdMuted}>{[building?.name, floor?.name].filter(Boolean).join(' · ') || '—'}</td>
+                            )}
+                            {visibleColumns.has('maintenance') && (
+                              <td className={maintOverdue ? styles.tdOverdue : styles.tdMuted}>
+                                {nextMaint ? nextMaint.toLocaleDateString() : '—'}
+                              </td>
+                            )}
                             <td className={styles.tdActions} onClick={e => e.stopPropagation()}>
                               <button className={styles.quickViewBtn} title="Quick view" onClick={() => setViewAsset(asset)}>
                                 <Eye size={14} />
