@@ -90,6 +90,19 @@ const AssetDetails: React.FC = () => {
       const data = await assetService.getAsset(assetId);
       setAsset(data);
 
+      // Reset relation state before the conditional fetches below — otherwise
+      // navigating between assets (e.g. via the Replaces/Replaced By links)
+      // while this component stays mounted leaves the PREVIOUS asset's
+      // building/floor/section/predecessor/etc. rendered under the new one.
+      setBuilding(null);
+      setFloor(null);
+      setRack(null);
+      setWorkArea(null);
+      setSection(null);
+      setWorkstation(null);
+      setPredecessor(null);
+      setSuccessor(null);
+
       const dataUrl = await QRCode.toDataURL(buildQrPayload(data, assetId), {
         width: 220, margin: 1, errorCorrectionLevel: 'M',
       });

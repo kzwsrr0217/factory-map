@@ -85,5 +85,11 @@ $records = @($resp.Items | ForEach-Object { Get-AssetRecord $_ } | Where-Object 
 Write-Host "  $($records.Count) $LocationFilter-s asset az ITSM-ben."
 
 $outPath = Join-Path $OutDir $OutFile
-$records | ConvertTo-Json -Depth 5 | Out-File -FilePath $outPath -Encoding utf8
+# -AsArray: without it, ConvertTo-Json serializes a single-element pipeline
+# collection as a bare {...} object instead of a 1-element [{...}] array (a
+# well-known PowerShell quirk — the pipeline unrolls $records regardless of
+# how it was constructed). import-itsm-snapshot.ts's readRows() only handles
+# a JSON array or an {items:[...]}-wrapped object, so a bare object would be
+# silently read as zero rows if MMH ever has exactly one matching asset.
+$records | ConvertTo-Json -Depth 5 -AsArray | Out-File -FilePath $outPath -Encoding utf8
 Write-Host "KÉSZ. Kiírva: $outPath ($($records.Count) rekord)"

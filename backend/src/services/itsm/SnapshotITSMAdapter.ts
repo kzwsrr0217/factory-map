@@ -41,9 +41,11 @@ function toHardware(row: ItsmHardwareSnapshot): IITSMHardware {
     mac_address: row.mac_address ?? undefined,
     status: (row.status as IITSMHardware['status']) ?? 'Deployed',
     itsm_modified_at: row.itsm_modified_at ?? undefined,
+    assigned_to_person: row.person_itsm_id ?? row.person_id ?? undefined,
     assigned_person_name: row.assigned_person_name ?? undefined,
     organization_name: row.location_name ?? undefined,
     location_name: row.location_name ?? undefined,
+    catalog_item_itsm_id: row.catalog_itsm_id ?? undefined,
     catalog_item_name: row.catalog_item_name ?? undefined,
   };
 }
