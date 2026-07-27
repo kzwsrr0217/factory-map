@@ -11,7 +11,7 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import {
   RefreshCw, ExternalLink, Check, EyeOff, Eye, AlertTriangle,
-  CheckCircle2, XCircle, HelpCircle, Unlink, Search,
+  CheckCircle2, XCircle, HelpCircle, Unlink, Search, PlusCircle,
 } from 'lucide-react';
 import Card from '../components/common/Card';
 import Button from '../components/common/Button';
@@ -19,7 +19,7 @@ import Badge from '../components/common/Badge';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import {
-  itsmService, ReconcileLinkedAsset, ReconcileSummary, ReconcileAssetResult,
+  itsmService, ReconcileLinkedAsset, ReconcileSummary, ReconcileAssetResult, UnlinkedMmhAsset,
 } from '../services/itsm.service';
 import styles from '../styles/pages/ItsmReconcile.module.css';
 
@@ -46,6 +46,26 @@ const ItsmReconcile: React.FC = () => {
   const [results, setResults] = useState<Record<string, ReconcileAssetResult>>({});
   const [checking, setChecking] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState<Set<string>>(new Set());
+  const [unlinkedMmh, setUnlinkedMmh] = useState<UnlinkedMmhAsset[]>([]);
+  const [loadingUnlinked, setLoadingUnlinked] = useState(true);
+
+  // Separate load, independent of loadList: the underlying snapshot table may
+  // not have been imported yet on some deployments, and that shouldn't block
+  // the main per-asset reconcile list from loading.
+  const loadUnlinkedMmh = useCallback(async () => {
+    setLoadingUnlinked(true);
+    try {
+      setUnlinkedMmh(await itsmService.getUnlinkedMmh());
+    } catch {
+      setUnlinkedMmh([]);
+    } finally {
+      setLoadingUnlinked(false);
+    }
+  }, []);
+
+  useEffect(() => { loadUnlinkedMmh(); }, [loadUnlinkedMmh]);
+
+  const [creating, setCreating] = useState<Set<string>>(new Set());
 
   const loadList = useCallback(async () => {
     setLoadingList(true);
@@ -68,6 +88,22 @@ const ItsmReconcile: React.FC = () => {
       if (on) next.add(key); else next.delete(key);
       return next;
     });
+
+  const createFromMmh = useCallback(async (itsmGuids: string[]) => {
+    const key = itsmGuids.join(',');
+    toggle(setCreating, key, true);
+    try {
+      const { created, skipped } = await itsmService.createFromUnlinkedMmh(itsmGuids);
+      setUnlinkedMmh((prev) => prev.filter((u) => !itsmGuids.includes(u.itsm_guid) || skipped.some((s) => s.itsm_guid === u.itsm_guid)));
+      if (created.length > 0) toast.success(created.length === 1 ? 'Unplaced asset created — see Unplaced Assets to place it.' : `${created.length} unplaced assets created — see Unplaced Assets to place them.`);
+      if (skipped.length > 0) toast.error(`${skipped.length} skipped: ${skipped.map((s) => s.error).join('; ')}`);
+      await loadList();
+    } catch {
+      toast.error('Could not create assets from the ITSM snapshot.');
+    } finally {
+      toggle(setCreating, key, false);
+    }
+  }, [toast, loadList]);
 
   const refreshSummary = useCallback(async () => {
     try {
@@ -202,6 +238,78 @@ const ItsmReconcile: React.FC = () => {
           <Card className={`${styles.statCard} ${styles.statErr}`}><span className={styles.statValue}><XCircle size={16} /> {summary.missing + summary.error}</span><span className={styles.statLabel}>Missing / error</span></Card>
         </div>
       )}
+
+      <Card className={styles.assetCard}>
+        <div className={styles.assetHead}>
+          <div className={styles.assetTitle}>
+            <span className={styles.assetName}>MMH ITSM hardware not linked locally</span>
+            <Badge variant={unlinkedMmh.length > 0 ? 'warning' : 'neutral'}>{unlinkedMmh.length}</Badge>
+          </div>
+          <div className={styles.assetActions}>
+            {isOperator && unlinkedMmh.length > 0 && (
+              <Button
+                size="sm"
+                variant="primary"
+                onClick={() => createFromMmh(unlinkedMmh.map((u) => u.itsm_guid))}
+                loading={creating.has(unlinkedMmh.map((u) => u.itsm_guid).join(','))}
+              >
+                <PlusCircle size={14} /> Create all as unplaced assets
+              </Button>
+            )}
+            <Button variant="outline" size="sm" onClick={loadUnlinkedMmh} loading={loadingUnlinked} disabled={loadingUnlinked}>
+              <RefreshCw size={14} /> Refresh
+            </Button>
+          </div>
+        </div>
+        <p className={styles.note}>
+          The reverse direction: ITSM hardware in the imported MMH snapshot with no matching local asset
+          (hardware_asset_id). Built from the local DB and the last snapshot import only — no ITSM call.
+          Creating an asset here makes it an unplaced, ITSM-linked record — ITSM has no floor-plan geometry,
+          so it still needs to be dragged onto the map from the Unplaced Assets page.
+        </p>
+        {!loadingUnlinked && unlinkedMmh.length === 0 && (
+          <p className={styles.note}>None found — either everything in the MMH snapshot is linked, or no snapshot has been imported yet.</p>
+        )}
+        {unlinkedMmh.length > 0 && (
+          <div className={styles.tableWrap}>
+            <table className={styles.diffTable}>
+              <thead>
+                <tr><th>ITSM ID</th><th>Display name</th><th>Catalog item</th><th>Status</th><th>Location</th><th className={styles.actionCol} /></tr>
+              </thead>
+              <tbody>
+                {unlinkedMmh.map((u) => (
+                  <tr key={u.itsm_guid}>
+                    <td className={styles.hwid}>{u.itsm_id}</td>
+                    <td>{u.display_name}</td>
+                    <td>{emptyValue(u.catalog_item_name)}</td>
+                    <td>{emptyValue(u.status)}</td>
+                    <td>{emptyValue(u.location_name)}</td>
+                    <td className={styles.actionCol}>
+                      <div className={styles.rowActions}>
+                        {u.itsm_url && (
+                          <a className={styles.itsmLink} href={u.itsm_url} target="_blank" rel="noreferrer">
+                            <ExternalLink size={14} /> Open in ITSM
+                          </a>
+                        )}
+                        {isOperator && (
+                          <button
+                            className={styles.ignoreBtn}
+                            onClick={() => createFromMmh([u.itsm_guid])}
+                            disabled={creating.has(u.itsm_guid)}
+                            title="Create as an unplaced local asset"
+                          >
+                            <PlusCircle size={14} /> Create
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
 
       {!loadingList && linked.length === 0 && (
         <Card className={styles.empty}><p>No ITSM-linked assets found.</p></Card>

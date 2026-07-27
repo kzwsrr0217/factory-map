@@ -209,7 +209,7 @@ Single-row table (id = `'global'`):
 
 ### 1. Adapter Pattern — ITSM integration
 
-`ITSMService` is a singleton that picks `MockITSMAdapter` or `RealITSMAdapter` at startup based on `ITSM_MODE`. All callers depend only on the `IITSMAdapter` interface.
+`ITSMService` is a singleton that picks `MockITSMAdapter`, `RealITSMAdapter`, or `SnapshotITSMAdapter` at startup based on `ITSM_MODE`. All callers depend only on the `IITSMAdapter` interface.
 
 ```typescript
 // backend/src/services/itsm/IITSMAdapter.ts
@@ -233,6 +233,20 @@ caption mapping lives in a `COLUMN_MAP` table that can be overridden without a
 code change via the `ITSM_COLUMN_MAP` env var (JSON). **The adapter only ever
 issues GET requests — nothing is written back to ITSM.**
 
+`RealITSMAdapter` is **not currently wired up to anything**: the backend runs
+in a Podman container with no confirmed way to authenticate to the real
+Alemba View API (a real, currently-running reconciliation script for this
+same ITSM instance uses Windows Integrated/Kerberos SSO from a domain-joined
+machine — not available from inside the container). `ITSM_MODE=snapshot`
+(`SnapshotITSMAdapter`) is the path actually in use: it makes **zero** network
+calls to ITSM, reading only from the `itsm_hardware_snapshot` table, which is
+populated out-of-band by `ops/itsm/Export-ItsmMmhSnapshot.ps1` (run manually on
+a domain-joined machine, one MMH-filtered OData call) + `npm run import:itsm`
+(full-replace on each run). See DEVELOPER_GUIDE.md → ITSM Integration for the
+full data flow, and `findUnlinkedMmhAssets()` in `ReconcileService` for the
+reverse-direction check ("ITSM has it, factorymap doesn't") this snapshot
+uniquely enables.
+
 ### 1b. Read-only reconciliation — `ReconcileService`
 
 ITSM is the single source of truth. The reconcile flow compares one local asset
@@ -248,6 +262,7 @@ difference individually:
 | Un-ignore | `PATCH /api/itsm/reconcile/:id/unignore/:field` | Field is compared again |
 | Unlink | `PATCH /api/itsm/reconcile/:id/unlink` | Clears the local ITSM link (for records deleted from ITSM) |
 | List / summary | `GET /api/itsm/reconcile/linked`, `GET /api/itsm/reconcile/summary` | Built from the local DB only — never call ITSM |
+| Unlinked (reverse) | `GET /api/itsm/reconcile/unlinked-mmh` | MMH-scoped ITSM hardware not linked locally — built from the local DB + imported snapshot only, never calls ITSM |
 
 The comparable fields are declared in one table (`RECONCILE_FIELDS`) that drives
 the diff, the accept write-back and the UI. Status values map through

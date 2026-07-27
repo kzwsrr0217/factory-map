@@ -175,10 +175,11 @@ factory-map/
 │       │   │   └── LdapAuthService.ts     # LDAP bind + search, auto-provision user
 │       │   └── itsm/
 │       │       ├── IITSMAdapter.ts        # Interface (contract) all adapters must satisfy
-│       │       ├── ITSMService.ts         # Singleton; picks Mock or Real adapter from config
+│       │       ├── ITSMService.ts         # Singleton; picks Mock/Real/Snapshot adapter from config
 │       │       ├── MockITSMAdapter.ts     # In-memory mock with 22 realistic Hungarian assets
-│       │       ├── RealITSMAdapter.ts     # Alemba/Operaio View API client (read-only, COLUMN_MAP-driven)
-│       │       ├── ReconcileService.ts    # Per-asset diff vs ITSM + acceptFields/ignore/unlink/summary
+│       │       ├── RealITSMAdapter.ts     # Alemba/Operaio View API client (read-only, COLUMN_MAP-driven; not wired up — see docs)
+│       │       ├── SnapshotITSMAdapter.ts # Reads itsm_hardware_snapshot only — zero live ITSM calls (current working path)
+│       │       ├── ReconcileService.ts    # Per-asset diff vs ITSM + acceptFields/ignore/unlink/summary + findUnlinkedMmhAssets
 │       │       ├── statusMapping.ts       # ITSM ⇄ local status map + normalizeMac()
 │       │       └── SyncService.ts         # runSyncAll() — ITSM → DB bulk import
 │       ├── types/
@@ -749,7 +750,7 @@ Set `LDAP_ENABLED=true` and configure `LDAP_*` env vars. On first LDAP login, th
 
 ## ITSM Integration
 
-The ITSM layer uses an **adapter pattern** — `ITSMService` is a singleton that delegates to either `MockITSMAdapter` or `RealITSMAdapter` based on `ITSM_MODE`.
+The ITSM layer uses an **adapter pattern** — `ITSMService` is a singleton that delegates to `MockITSMAdapter`, `RealITSMAdapter`, or `SnapshotITSMAdapter` based on `ITSM_MODE`.
 
 > **Hard rule: the integration is READ-ONLY.** No adapter method may issue
 > anything other than a GET towards ITSM. ITSM is the single source of truth;
@@ -769,6 +770,68 @@ time via the `ITSM_COLUMN_MAP` env var (JSON, canonical field → caption list).
 `getPerson`/`getSoftware` are not available through this view and throw;
 `getTicketsByHardware` returns `[]`.
 
+**Known gap (unresolved):** a real, currently-running reconciliation script for
+this same ITSM instance (outside this repo) shows the live contract differs
+from what `RealITSMAdapter` assumes — it authenticates with **Windows
+Integrated/Kerberos SSO** (no bearer token), queries via **OData `$filter`**
+(e.g. `contains(HardwareAssetIsAssignedToLocation/DisplayName/Value,'MMH')`),
+and reads fields as nested `{Value}` / nav-property objects rather than flat
+captions. The backend runs in a Podman container with no confirmed way to get
+that SSO working, so `RealITSMAdapter` is not wired up to anything today — see
+Snapshot mode below for the path actually in use.
+
+### Snapshot mode — MMH-scoped, import-only (current working path)
+Because `RealITSMAdapter` can't authenticate from the container, `ITSM_MODE=snapshot`
+selects `SnapshotITSMAdapter`, which makes **zero network calls to ITSM** —
+every method is a read against the local `itsm_hardware_snapshot` table.
+
+Data flow:
+1. `ops/itsm/Export-ItsmMmhSnapshot.ps1` runs on a domain-joined Windows machine
+   (Kerberos SSO via the running user's AD session — no password needed). It
+   makes **one** OData call filtered to `contains(Location,'MMH')` and writes
+   `itsm-mmh-hardware.json`.
+2. Copy that file into the backend container and run
+   `npm run import:itsm -- <dir>` (`backend/src/scripts/import-itsm-snapshot.ts`).
+   Unlike the IFS master-data import, this is a **full replace** — the table
+   always reflects "MMH hardware as of the last export run", not a merged
+   cache, so a device that moves off-MMH or is retired in ITSM disappears on
+   the next import.
+3. `SnapshotITSMAdapter` and `ReconcileService.findUnlinkedMmhAssets()` read
+   from that table; the per-asset Check/Accept/Ignore/Unlink flow below works
+   unchanged against it.
+
+This also enables a reconcile direction the per-asset flow structurally can't
+cover: `GET /api/itsm/reconcile/unlinked-mmh` returns MMH-scoped ITSM hardware
+that no local asset links to (`hardware_asset_id`) — "ITSM has it, factorymap
+doesn't" — built entirely from the local DB + the imported snapshot, no ITSM
+call. `POST /api/itsm/reconcile/unlinked-mmh/create` (+ UI buttons) materialises
+selected rows into real, **unplaced** local assets — ITSM has no floor-plan
+geometry, so placement on the map is always a manual follow-up step.
+
+#### Field mapping — what's queryable in this ITSM instance and what isn't
+Confirmed by inspecting a raw `GetViewData` payload and the ITSM web UI
+directly (not guessed):
+
+| App field | Source | Notes |
+|---|---|---|
+| `serial_number`, `status`, `mac_address`, `asset_tag`, `hardware_asset_id`, `itsm_guid` | Hardware Asset's own flat fields | Straightforward. |
+| `catalog_display_name`, `catalog_itsm_id` | `HardwareAssetIsBasedOnCatalogItem` nav (`DisplayName` / `$Id$`) | Free — no extra call. |
+| `person_full_name`, `person_itsm_id` | `HardwareAssetIsUsedByPerson` nav | Free, **but the relationship name matters** — `HardwareAssetIsAssignedToPerson` (an earlier guess) doesn't exist and silently returns null forever. `person_id` is also set (reused from `person_itsm_id`) purely because `Asset.toApiResponse()` gates the whole `assigned_person` object on `person_id`, not `person_itsm_id`. |
+| `asset_type` | Catalog Item's own `Type` field, mapped via `ITSM_TYPE_TO_ASSET_TYPE` in `import-itsm-snapshot.ts` | **Not** reachable through the Hardware Asset's nav-expansion (only Class/Id/DisplayName are exposed there) or the Catalog Items grid's per-user column settings. Requires a one-time join against a hand-exported `hardware-catalog-items.csv` (ITSM web UI: Asset Management > Hardware Asset Management > Hardware Catalog Items > Export to CSV), keyed by **display name** (the nav's GUID has no counterpart in that CSV — verified 8/618 name collisions all share the same Type, so this is safe). "Network Device" is disambiguated by keyword against the catalog item name. |
+| `manufacturer` | First word of the Catalog Item's display name | **Not an authoritative field** — Manufacturer isn't exposed anywhere queryable in this ITSM instance (not on the Hardware Asset, not in the Catalog Items grid/CSV, only on each Catalog Item's own individual record form — pulling it in bulk would need an Alemba admin to widen that grid's server-side projection). This is a best-effort text heuristic. |
+| `model`, `os_type`, `os_version` | — | Confirmed **not populated anywhere** in this ITSM instance: Model isn't in the Catalog Items CSV either, and the Hardware Asset's Software Assets relationship is applications only (no OS entry) — left null rather than guessed. |
+
+The Catalog Items CSV parser has to special-case ~20 of 618 rows (mostly
+Monitors) with an unescaped inch-mark quote in the display name (`Monitor
+24"`) that breaks naive CSV quote-toggling — it splits on the literal `","`
+delimiter instead, which handles this correctly since no field contains a
+literal comma.
+
+`ReconcileService.backfillAssetsFromSnapshot()` (`npm run backfill:itsm`)
+fills these fields onto assets that were already created before a richer
+snapshot import resolved them — it only ever fills a currently-empty field,
+never overwrites one that already has a value (so a manual edit is safe).
+
 ### Reconcile flow (`ReconcileService`) — preferred
 Per-asset, on-demand, read-only comparison. `RECONCILE_FIELDS` is the single
 declarative table that drives the diff, the accept write-back and the UI — add a
@@ -779,6 +842,7 @@ row there to make a new field reconcilable. Status comparisons go through
 |---|---|---|
 | `GET /reconcile/linked` | any | none (local DB) |
 | `GET /reconcile/summary` | any | none (local DB) |
+| `GET /reconcile/unlinked-mmh` | any | none (local DB + imported snapshot) |
 | `POST /reconcile/:id/check` | operator | **1 GET** (the only ITSM read) |
 | `PATCH /reconcile/:id/accept` `{fields:[]}` | operator | 1 GET (re-read at accept time), writes locally |
 | `PATCH /reconcile/:id/ignore` `{field, itsm_value}` | operator | none — the value comes from the client |
@@ -965,6 +1029,11 @@ cd frontend && npm audit
 1. Set env vars: `ITSM_MODE=real`, `ITSM_REAL_API_URL=...`, `ITSM_API_KEY=...`
 2. In `RealITSMAdapter.ts`, implement each method using `this._request(endpoint)`
 3. Map the ITSM response fields to the `IITSMHardware` interface
+4. **Not usable as-is today** — see the "Known gap" note under ITSM Integration
+   above. Resolving the container's ITSM authentication (service account /
+   API-key support on the Alemba side, or NTLM/Kerberos from the container) is
+   a prerequisite before this mode can be turned on; until then use `snapshot`
+   mode (`ops/itsm/Export-ItsmMmhSnapshot.ps1` + `npm run import:itsm`).
 
 ### Adding Swagger annotations to a new route
 

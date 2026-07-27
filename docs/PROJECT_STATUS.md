@@ -82,13 +82,40 @@ the running app and fixed every reproduced gap):
   assets → 943 master rows, 79 production lines, 572 work centers, 3 entity
   kinds; parent join resolves; idempotent on re-run.
 
+**Phase 9 — ITSM MMH-scoped snapshot + demo-data cleanup** (not yet committed —
+see §7 below):
+- `ITSM_MODE=snapshot` (`SnapshotITSMAdapter`) — zero live ITSM calls, reads a
+  new `itsm_hardware_snapshot` landing table populated by
+  `ops/itsm/Export-ItsmMmhSnapshot.ps1` (one MMH-filtered OData call, run on a
+  domain-joined machine — **not yet actually run for real**) +
+  `npm run import:itsm -- <dir>` (full replace per run).
+- `GET /api/itsm/reconcile/unlinked-mmh` — the reverse reconcile direction
+  ("ITSM has it, factorymap doesn't"), and `POST /api/itsm/reconcile/unlinked-mmh/create`
+  to materialise selected snapshot rows into real, **unplaced** local assets
+  (ITSM has no floor-plan geometry, so a human still places them on the map).
+  Both verified end-to-end with fictitious snapshot rows (not real MMH data).
+- At the user's request, **all 45 demo Asset rows were deleted** from the dev
+  DB via the existing per-asset delete endpoint (keeps audit/wall-port/connection
+  cleanup consistent) — building/floor/work-area/section/workstation hierarchy
+  was intentionally left intact, then **repopulated with all 1057 real MMH
+  ITSM hardware assets** (unplaced) — see above.
+
 ## 4. ⚠️ Current DB state gotcha
 
 During phase 8 verification, Matthias's **real MMAG master data was imported
 into the running dev database** (943 `master_assets` rows etc.), on top of the
-demo seed. This is harmless — it's additive, the demo assets still resolve, and
-no app-owned layout was touched — but it means the dev DB is **not** the pristine
-demo right now. To restore the minimal demo:
+demo seed. This is harmless — it's additive, and no app-owned layout was
+touched — but it means `master_assets` is **not** pristine demo data.
+
+**As of phase 9, the `assets` table is no longer demo data either**: all 45
+demo assets were deleted and replaced with **1057 real MMH hardware assets
+from ITSM** (unplaced — none have floor-plan coordinates yet; ITSM has no
+geometry to place them from). `itsm_hardware_snapshot` (1057 rows) and
+`hardware-catalog-items.csv`'s resolved fields are baked into those asset
+rows via `backfillAssetsFromSnapshot()` — re-running the import + backfill
+is idempotent (never overwrites a field that already has a value) and safe
+to repeat once a fresher ITSM export is available. To restore the minimal
+**demo** state instead (e.g. for a pilot/demo walkthrough, not real MMH work):
 
 ```bash
 podman exec factory-map-backend npm run seed        # buildings/floors/assets/users (also clears master data)
@@ -118,10 +145,125 @@ run `npm run import:master -- <dir>` (it can't see host paths directly — the
 
 ## 6. What's deferred / candidate next steps
 
-- **ITSM (Alemba) asset-data reconciliation review** — explicitly the user's
-  next intended topic ("majd átnézzük az itsm-ből kapható asset adatokat"):
-  make sure the fields obtainable from ITSM line up and are reconcilable the
-  same way the IFS data now does.
+- **ITSM asset-data reconciliation + real MMH population — done (Phase 9).**
+  A real, currently-running reconciliation script for this ITSM instance
+  (outside this repo) revealed the live Alemba contract differs from what
+  `RealITSMAdapter` assumed (Kerberos SSO not bearer token, OData `$filter`
+  not free-text, nested nav-property fields not flat captions) — and that the
+  backend's Podman container has no confirmed way to authenticate to ITSM
+  directly. Built `ITSM_MODE=snapshot` instead: `SnapshotITSMAdapter` (zero
+  live ITSM calls) reads a landing table (`itsm_hardware_snapshot`) populated
+  by `ops/itsm/Export-ItsmMmhSnapshot.ps1` (one MMH-filtered OData call, run
+  on a domain-joined machine) + `npm run import:itsm` (full replace). Also
+  added `GET /api/itsm/reconcile/unlinked-mmh` — the reverse direction the
+  per-asset check structurally couldn't cover ("ITSM has it, factorymap
+  doesn't") — and `POST /api/itsm/reconcile/unlinked-mmh/create` (+ UI
+  buttons) to materialise selected snapshot rows into real, **unplaced**
+  local assets (ITSM carries no floor-plan geometry, so placement is manual
+  from the Unplaced Assets page).
+
+  **All 45 demo `Asset` rows were deleted** (hierarchy kept), and **the dev DB
+  is now populated with all 1057 real MMH hardware assets from ITSM**
+  (unplaced), including resolved `type`/`manufacturer`/catalog-item-ID/
+  assigned-person fields — none of which are queryable directly on the
+  Hardware Asset in this ITSM instance:
+  - **Bug found and fixed** in the export script: the person relationship was
+    named wrong (`HardwareAssetIsAssignedToPerson` → real name
+    `HardwareAssetIsUsedByPerson`), so `AssignedPersonName` was silently null
+    in every prior export; also fixed the asset's own display-name field
+    (`Name` → `DisplayName`) and added `CatalogItemId`/`PersonId` capture
+    (both free — already in the same payload once you know the right name).
+  - **`type`**: classified from the *Catalog Item's* own `Type` field (a
+    controlled ITSM vocabulary — Desktop/Notebook/Server/IPC/...), not
+    parsed from text. That field isn't reachable through the Hardware
+    Asset's nav-expansion or the Catalog Items grid's "Export to CSV" by ID
+    — joined by catalog item **display name** instead (`import-itsm-
+    snapshot.ts`; the internal GUID from the Hardware Asset payload has no
+    counterpart in that CSV). "Network Device" is disambiguated by keyword
+    against the catalog item name (switch/router/access_point/other).
+  - **`manufacturer`**: NOT exposed anywhere queryable in this ITSM instance
+    (confirmed — not on the Hardware Asset, not in the Catalog Items
+    grid/CSV export, only visible on each Catalog Item's own individual
+    record form, which would need an Alemba admin to widen that grid's
+    server-side projection to pull in bulk). Derived instead from the first
+    word of the catalog item's display name — an approximation, not an
+    authoritative field.
+  - **Model, OS type/version**: confirmed not populated anywhere in this
+    ITSM instance (Model isn't in the Catalog Items CSV either; the Hardware
+    Asset's Software Assets list is applications only, no OS entry) — not
+    populated, matching upstream reality rather than guessing.
+  - A one-time reference join against a hand-exported `hardware-catalog-
+    items.csv` (618 org-wide catalog items, via the ITSM web UI's Asset
+    Management > Hardware Asset Management > Hardware Catalog Items grid)
+    resolves `type`/`manufacturer` for all assets in one pass; the CSV parser
+    had to special-case ~20 rows with an unescaped inch-mark quote in the
+    display name (`Monitor 24"`) that breaks naive CSV quote-toggling.
+  - `ReconcileService.backfillAssetsFromSnapshot()` (`npm run backfill:itsm`)
+    fills these newly-resolved fields onto already-created assets without
+    recreating them, and never overwrites a field that already has a value.
+
+  See DEVELOPER_GUIDE.md / ARCHITECTURE.md → ITSM Integration for the full
+  data flow and field-mapping table.
+- **Frontend UX pass (Phase 10, same round)** — done:
+  - `AssetDetails.tsx`: filled in previously-unrendered `Asset` fields —
+    Custom Fields card (physical condition, environment, notes, tags, remote
+    access, backup, Windows update, FortiEDR), IFS/CMDB Master Data card,
+    predecessor/successor lifecycle links, created/updated timestamps,
+    Section/Workstation names, expanded Wall Port detail, Move History,
+    richer Connections table (strength/patch-panel/description), software
+    vendor. `work_items` (a whole task-tracking sub-feature with zero UI) was
+    explicitly left out of scope — a separate, larger piece of work.
+  - `Dashboard.tsx`: table view now has a **column picker** (popover next to
+    the card/table toggle) — Type/Status/Manufacturer/IP-Serial/Location/Next
+    Maint. are independently toggleable; choice persists via `localStorage`
+    (`db_columns`), matching the existing `db_*` view-state pattern.
+  - **Bug fixed**: `Asset.toApiResponse()`'s `assigned_person` was gated on
+    `person_id` (a separate, unpopulated local field) instead of
+    `person_itsm_id` — silently hid the name/ITSM-id even when both were
+    present. Also removed a workaround that had faked `person_id` as the raw
+    ITSM GUID to route around this (a real bug, not a fix — showed a GUID
+    mislabeled as "ID"); cleared the 742 assets it had already written to.
+  - **Bug fixed**: `FloorDetails.tsx`'s "No floor plan yet" empty-state banner
+    checked only `floor.svg_background` (the older embedded-image field), not
+    `floor.svg_ref` (the newer file-reference field) — a floor using `svg_ref`
+    showed both the real plan *and* a spurious "upload a plan" prompt on top
+    of it. Map View (which only ever checked `svg_ref`) was unaffected.
+- **Real building data — started (Phase 10)**: demo `Asset` rows were gone
+  already (see §4); **the demo hierarchy itself (1 building, 3 floors, 5 work
+  areas, 4 sections, 3 workstations, 2 network rooms, 2 racks, 3 patch panels,
+  9 wall ports) was also deleted** in this round, via the existing per-object
+  DELETE endpoints bottom-up (respecting the app's own delete guards) — zero
+  real assets were placed on it, so nothing was lost. First **real** building
+  now exists: **Werk1 / Ground Floor (Földszint)**, from a Visio export out of
+  IFS:
+  - The raw Visio→SVG export was full of non-structural detail (furniture,
+    machines, computers, HVAC, sanitary, dimensions, per-asset `HWA Nr.`
+    labels, ...). Visio preserves its original **layer structure** in the SVG
+    export (`<v:layer>` defs + each shape's `v:layerMember`), which let this
+    be filtered **by layer** instead of by hand in Inkscape — built a
+    throwaway Python filter script to prove the approach (5.4MB → 2.5MB,
+    confirmed only structural layers remained), but the user's own manual
+    Visio layer cleanup (exported straight to
+    `backend/src/floorplans/Werk1 floor 0.svg`) converged on almost the exact
+    same result independently and was used as the actual source.
+  - **Scale calibration**: cropped the SVG to its content bounding box via
+    Inkscape CLI (`werk1-floor0-cropped.svg`, `viewBox="0 0 1688.7581
+    842.08991"`), then calibrated `scale_meters_per_unit` (`0.0341`) against
+    two independent Google Maps satellite measurements of the real building
+    (long side ≈55.91m, short side ≈29.61m — closely corroborating the
+    user's own initial "~30×55m" estimate) — the two ratios are ~6% off
+    (expected for hand-drawn-plan vs. satellite-click measurement), so the
+    scale is an average of both axes, not exact.
+  - Building/Floor created directly via the API (not the UI) — hit and fixed
+    a real bug in the process: passing a Hungarian `ö` through an inline
+    shell/curl command corrupted it to `U+FFFD` before it ever reached the
+    server; fixed by writing the JSON payload to a file first (bash/MSYS
+    shell + non-ASCII characters is a real gotcha for any future scripted
+    API calls with non-English names).
+  - **Only one floor of one building done.** The rest of the real
+    building/floor/work-area/section/workstation hierarchy — and the
+    matching Visio→SVG cleanup for each — is the next big chunk of work; see
+    §6 below.
 - **Live Databricks/IFS pull** — the importer eats *exported files* today; a
   live socket is a one-file change in `import-master-data.ts`, gated on access.
 - **No optimistic concurrency control** anywhere (last-write-wins) — a known,
@@ -132,7 +274,11 @@ run `npm run import:master -- <dir>` (it can't see host paths directly — the
   field edit**, not a guided wizard.
 - **`/code-review` pass** over the cumulative diff — must be run by the user;
   the assistant can't trigger it.
-- Real surveyed floor-plan SVGs + real meter scaling (external input).
+- **Remaining real buildings/floors** — Werk1 Ground Floor is done (see
+  above); every other building/floor still needs the same Visio→SVG
+  layer-cleanup + scale-calibration treatment, plus real work
+  areas/sections/workstations placed on each. This is the main remaining
+  body of work — see §6 for a suggested approach.
 
 ## 7. Doc map
 

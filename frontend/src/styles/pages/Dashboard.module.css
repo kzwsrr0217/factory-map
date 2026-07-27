@@ -791,6 +791,58 @@
 
 .viewBtnActive:hover { background: var(--color-primary); color: #fff; }
 
+/* ── Column picker (table view) ─────────────────────── */
+.columnsMenu {
+  position: relative;
+}
+
+.columnsBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 100%;
+  padding: 5px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  transition: background 0.12s, color 0.12s;
+}
+
+.columnsBtn:hover { background: var(--color-bg-secondary); color: var(--color-text-primary); }
+
+.columnsDropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  min-width: 200px;
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+  z-index: 100;
+  padding: 6px 0;
+}
+
+.columnsItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 14px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  text-align: left;
+}
+
+.columnsItem:hover { background: var(--color-bg-secondary); }
+
 /* ── Inline status select (card + table) ─────── */
 .inlineStatusSelect {
   font-size: 0.72rem;

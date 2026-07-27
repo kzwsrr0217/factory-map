@@ -64,6 +64,29 @@
  *       200:
  *         description: Sync result for this record
  *
+ * /itsm/reconcile/unlinked-mmh:
+ *   get:
+ *     tags: [ITSM]
+ *     summary: MMH-scoped ITSM hardware not linked to any local asset (reverse reconcile direction)
+ *     responses:
+ *       200:
+ *         description: List of unlinked ITSM hardware records from the imported MMH snapshot
+ *
+ * /itsm/reconcile/unlinked-mmh/create:
+ *   post:
+ *     tags: [ITSM]
+ *     summary: Create unplaced local assets from selected MMH snapshot rows
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               itsm_guids: { type: array, items: { type: string } }
+ *     responses:
+ *       200:
+ *         description: Created and skipped results
+ *
  * /itsm/assets/{id}/accept-snapshot:
  *   patch:
  *     tags: [ITSM]
@@ -91,6 +114,8 @@ import {
   ignoreReconcileDiff,
   unignoreReconcileDiff,
   unlinkReconcileAsset,
+  unlinkedMmh,
+  createUnlinkedMmhAssets,
 } from '../controllers/itsm.controller';
 import { requireOperator } from '../middleware/auth.middleware';
 import { auditLog, captureAuditBefore } from '../middleware/audit.middleware';
@@ -108,6 +133,14 @@ router.patch('/assets/:id/accept-snapshot', requireOperator, acceptSnapshot);
 // List + summary are built from the LOCAL DB only — they never call ITSM.
 router.get('/reconcile/linked', reconcileLinked);
 router.get('/reconcile/summary', reconcileSummary);
+
+// MMH-scoped ITSM hardware not linked to any local asset (the reverse
+// direction) — built from the imported snapshot table + local DB only.
+router.get('/reconcile/unlinked-mmh', unlinkedMmh);
+
+// Materialise selected snapshot rows into real, unplaced local assets. Local
+// DB write only — never calls ITSM. Body: { itsm_guids: string[] }.
+router.post('/reconcile/unlinked-mmh/create', requireOperator, auditLog('asset'), createUnlinkedMmhAssets);
 
 // Per-asset check: the ONLY endpoint that reads ITSM, and only for one asset,
 // on explicit user action. Nothing is ever written back to ITSM.

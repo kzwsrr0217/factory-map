@@ -20,6 +20,18 @@
  * view returns; adjust it once the live view's exact column names are confirmed.
  * `mapRow()` is defensive so an unexpected/renamed column degrades to null
  * instead of throwing.
+ *
+ * KNOWN GAP (unresolved as of the ITSM asset-data review): a real, currently-
+ * running reconciliation script for this same ITSM instance
+ * (`Run-ItsmValidation.ps1`, outside this repo) shows the live contract differs
+ * from what's assumed here — it authenticates with Windows Integrated/Kerberos
+ * SSO (no bearer token), queries via OData `$filter` (e.g.
+ * `contains(HardwareAssetIsAssignedToLocation/DisplayName/Value,'MMH')`), and
+ * reads fields as nested `{Value}`/nav-property objects rather than flat
+ * captions. The backend runs in a Podman container with no confirmed way to
+ * get that SSO working, so this adapter is not wired up to anything today —
+ * see `SnapshotITSMAdapter` for the path actually in use (import-only, fed by
+ * `ops/itsm/Export-ItsmMmhSnapshot.ps1` run on a domain-joined machine).
  */
 
 import { IITSMAdapter } from './IITSMAdapter';

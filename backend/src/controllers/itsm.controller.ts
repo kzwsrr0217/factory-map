@@ -25,6 +25,8 @@ import {
   unlinkAsset,
   listLinked,
   driftSummary,
+  findUnlinkedMmhAssets,
+  createAssetsFromUnlinkedMmh,
 } from '../services/itsm/ReconcileService';
 import { AppDataSource } from '../config/database';
 import { Asset } from '../entities/Asset.entity';
@@ -173,6 +175,35 @@ export const unlinkReconcileAsset = async (req: Request, res: Response, next: Ne
     if (notFound(message)) { res.status(404).json({ success: false, error: message }); return; }
     next(error);
   }
+};
+
+/**
+ * unlinkedMmh: ITSM hardware in the MMH snapshot that no local asset links to
+ * (hardware_asset_id). Local DB + snapshot table only — never calls ITSM.
+ */
+export const unlinkedMmh = async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    res.json({ success: true, data: await findUnlinkedMmhAssets() });
+  } catch (error) { next(error); }
+};
+
+/**
+ * createUnlinkedMmhAssets: materialise selected MMH snapshot rows into real,
+ * unplaced local assets (see createAssetsFromUnlinkedMmh). Body: { itsm_guids: string[] }.
+ * Local-DB-only write — never calls ITSM.
+ */
+export const createUnlinkedMmhAssets = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const guids = req.body?.itsm_guids;
+    if (!Array.isArray(guids) || guids.length === 0) {
+      res.status(400).json({ success: false, error: 'Body must include a non-empty "itsm_guids" array' });
+      return;
+    }
+    const result = await createAssetsFromUnlinkedMmh(guids.map(String));
+    const created = result.created.map((a) => a.toApiResponse());
+    for (const c of created) io.emit('asset:created', c);
+    res.json({ success: true, data: { created, skipped: result.skipped } });
+  } catch (error) { next(error); }
 };
 
 export const acceptSnapshot = async (req: Request, res: Response, next: NextFunction): Promise<void> => {

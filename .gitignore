@@ -47,3 +47,7 @@ data/
 
 # User-uploaded files (floor plans, imports, etc.)
 uploads/
+
+# Real ITSM export data (Confidential — real serial numbers/MACs/asset tags;
+# the script itself is tracked, its output never is)
+ops/itsm/*.json

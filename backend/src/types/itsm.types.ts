@@ -22,6 +22,8 @@ export interface IITSMHardware {
   organization_name?: string;
   catalog_item_itsm_id?: string;
   catalog_item_name?: string;
+  /** Alemba "Location" nav-property value (the MMH-scope filter field) — distinct from organization_name. */
+  location_name?: string;
   installed_software?: string[];
   related_tickets?: string[];
 }
@@ -121,6 +123,23 @@ export interface IReconcileLinkedAsset {
   last_status: string | null;
   last_at: Date | null;
   diff_count: number | null;
+}
+
+/**
+ * An MMH-scoped ITSM hardware record (from the itsm_hardware_snapshot landing
+ * table) that no local asset links to via hardware_asset_id. Surfaces the
+ * "ITSM has it, factorymap doesn't" direction the per-asset reconcile check
+ * cannot see (it only ever looks up assets that are already linked locally).
+ * Built entirely from the local DB + the imported snapshot — never calls ITSM.
+ */
+export interface IUnlinkedMmhAsset {
+  itsm_guid: string;
+  itsm_id: string;
+  display_name: string;
+  catalog_item_name: string | null;
+  status: string | null;
+  location_name: string | null;
+  itsm_url: string | null;
 }
 
 /** Drift overview aggregated from stored per-asset results — never calls ITSM. */

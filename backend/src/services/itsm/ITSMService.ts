@@ -16,6 +16,7 @@
 import { IITSMAdapter } from './IITSMAdapter';
 import { MockITSMAdapter } from './MockITSMAdapter';
 import { RealITSMAdapter } from './RealITSMAdapter';
+import { SnapshotITSMAdapter } from './SnapshotITSMAdapter';
 import config from '../../config/config';
 
 class ITSMService {
@@ -26,6 +27,9 @@ class ITSMService {
     if (config.itsm.mode === 'mock') {
       console.log('🧪 Using Mock ITSM Adapter');
       this.adapter = new MockITSMAdapter();
+    } else if (config.itsm.mode === 'snapshot') {
+      console.log('📸 Using Snapshot ITSM Adapter (reads itsm_hardware_snapshot only — no live ITSM calls)');
+      this.adapter = new SnapshotITSMAdapter();
     } else {
       console.log('🔌 Using Real ITSM Adapter');
       this.adapter = new RealITSMAdapter();

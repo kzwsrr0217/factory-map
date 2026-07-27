@@ -220,6 +220,13 @@ export interface Asset {
     // Optional footprint polygon (cm, centered on coordinates) — stored but
     // not yet rendered on the map; see docs/DATA_MODEL_MIGRATION.md.
     footprint?: Array<[number, number]> | null;
+    history?: Array<{
+      moved_at: string;
+      from_coordinates: { x: number; y: number };
+      to_coordinates: { x: number; y: number };
+      moved_by?: string;
+      reason?: string;
+    }>;
   };
   custom_fields?: {
     physical_condition?: 'Good' | 'Fair' | 'Poor';
