@@ -106,6 +106,15 @@ export class ItsmHardwareSnapshot {
   @Column({ name: 'person_itsm_id', type: 'nvarchar', length: 100, nullable: true })
   person_itsm_id!: string | null;
 
+  // The Person's human-readable ITSM login-style ID (e.g. "mmhgeza") — NOT
+  // exposed on the Hardware Asset's nav expansion (only the GUID + display
+  // name are, same limitation as the Catalog Item's Manufacturer/Model).
+  // Resolved via a one-time join against an exported Persons CSV (ITSM web
+  // UI: Asset Management > Master Data > Persons, filtered to MMH), keyed by
+  // display name — see import-itsm-snapshot.ts.
+  @Column({ name: 'person_id', type: 'nvarchar', length: 100, nullable: true })
+  person_id!: string | null;
+
   // Stored verbatim (string, not Date) since the export's date format may vary.
   @Column({ name: 'itsm_modified_at', type: 'nvarchar', length: 50, nullable: true })
   itsm_modified_at!: string | null;
@@ -139,6 +148,7 @@ export class ItsmHardwareSnapshot {
       asset_type: this.asset_type,
       assigned_person_name: this.assigned_person_name,
       person_itsm_id: this.person_itsm_id,
+      person_id: this.person_id,
       itsm_modified_at: this.itsm_modified_at,
       imported_at: this.imported_at,
     };

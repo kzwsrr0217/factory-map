@@ -32,6 +32,13 @@
  * field/relationship anywhere in this ITSM instance (its Software Assets
  * list is applications only, no OS entry).
  *
+ * Also joins against an optional `persons.csv` (ITSM web UI: Asset
+ * Management > Master Data > Persons, filtered to MMH > Export to CSV) to
+ * resolve `person_id` — the real ITSM login-style ID (e.g. "mmhgeza"), which
+ * like Manufacturer isn't exposed on the Hardware Asset's nav expansion
+ * (only the Person's GUID + display name are). Same display-name join
+ * rationale as Catalog Items.
+ *
  * Unlike import-master-data.ts (which merges/upserts a soft-join reference
  * table), this is a **full replace**: the table always reflects "MMH hardware
  * assets as of the last export run". A device that moves off-MMH or is
@@ -54,6 +61,7 @@ const str = (v: unknown): string | null => (v == null || v === '' ? null : Strin
 
 const HARDWARE_FILE = 'itsm-mmh-hardware.json';
 const CATALOG_ITEMS_FILE = 'hardware-catalog-items.csv';
+const PERSONS_FILE = 'persons.csv';
 
 // Reads a bare `[...]` array or a `{ items: [...] }` / `{ Items: [...] }` wrapper
 // (matching the shape Alemba's GetViewData itself returns, which the PS export
@@ -84,7 +92,7 @@ interface CatalogItemRef {
 // of 618 names collide, but every colliding pair shares the same Type, so a
 // name-keyed lookup is safe for classification purposes even though it
 // isn't a true 1:1 identity join.
-function normalizeCatalogName(name: string): string {
+function normalizeName(name: string): string {
   return name.trim().toLowerCase();
 }
 
@@ -119,9 +127,39 @@ function readCatalogItems(dir: string): Map<string, CatalogItemRef> {
     if (fields.length !== 6) { skipped++; continue; }
     const [id, displayName, , type] = fields;
     if (!id || !displayName) continue;
-    map.set(normalizeCatalogName(displayName), { id, displayName, type: type || null });
+    map.set(normalizeName(displayName), { id, displayName, type: type || null });
   }
   console.log(`  ✔ ${CATALOG_ITEMS_FILE}: ${map.size} catalog items loaded${skipped > 0 ? ` (${skipped} malformed row(s) skipped)` : ''}`);
+  return map;
+}
+
+// Expected columns: #ID, Display Name, Status, Principal Name, Logon Name,
+// AD Account, Cost Center, Location, Organization, Is Real Person, Time
+// Added, Last Modified (ITSM web UI: Asset Management > Master Data >
+// Persons > Export to CSV). Same display-name join rationale as Catalog
+// Items — the Hardware Asset payload's PersonId is an internal GUID with no
+// counterpart here, only the login-style #ID (e.g. "mmhgeza") does.
+function readPersons(dir: string): Map<string, string> {
+  const map = new Map<string, string>();
+  const full = path.join(dir, PERSONS_FILE);
+  if (!fs.existsSync(full)) {
+    console.log(`  – ${PERSONS_FILE}: not present, skipping person_id enrichment`);
+    return map;
+  }
+  const text = fs.readFileSync(full, 'utf8').replace(/^﻿/, '');
+  const lines = text.split(/\r?\n/).filter((l) => l.trim() !== '');
+  let skipped = 0;
+  for (const line of lines.slice(1)) {
+    const fields = parseCsvLine(line);
+    if (fields.length !== 12) { skipped++; continue; }
+    const [id, displayName] = fields;
+    if (!id || !displayName) continue;
+    // Same collision caveat as Catalog Items — if two rows ever share a
+    // display name, first one wins (whichever the export lists first).
+    const key = normalizeName(displayName);
+    if (!map.has(key)) map.set(key, id);
+  }
+  console.log(`  ✔ ${PERSONS_FILE}: ${map.size} persons loaded${skipped > 0 ? ` (${skipped} malformed row(s) skipped)` : ''}`);
   return map;
 }
 
@@ -175,7 +213,12 @@ function deriveManufacturer(catalogDisplayName: string | null): string | null {
   return first || null;
 }
 
-function mapRow(r: Row, now: Date, catalogItems: Map<string, CatalogItemRef>): Partial<ItsmHardwareSnapshot> | null {
+function mapRow(
+  r: Row,
+  now: Date,
+  catalogItems: Map<string, CatalogItemRef>,
+  persons: Map<string, string>,
+): Partial<ItsmHardwareSnapshot> | null {
   const itsm_id = str(r.HardwareAssetID) ?? str(r.itsm_id);
   const itsm_guid = str(r.Guid) ?? str(r.itsm_guid) ?? itsm_id;
   if (!itsm_id || !itsm_guid) return null;
@@ -184,11 +227,13 @@ function mapRow(r: Row, now: Date, catalogItems: Map<string, CatalogItemRef>): P
   const catalog_item_name = str(r.CatalogItem) ?? str(r.catalog_item_name);
   // Joined by display name, not catalog_itsm_id — the Hardware Asset payload's
   // CatalogItemId is an internal GUID with no counterpart in the CSV (see
-  // normalizeCatalogName). catalog_itsm_id is still stored on the row/asset
+  // normalizeName). catalog_itsm_id is still stored on the row/asset
   // as-is; it's just not the join key here.
-  const catalogRef = catalog_item_name ? catalogItems.get(normalizeCatalogName(catalog_item_name)) : undefined;
+  const catalogRef = catalog_item_name ? catalogItems.get(normalizeName(catalog_item_name)) : undefined;
   const catalogDisplayName = catalog_item_name ?? catalogRef?.displayName ?? null;
   const catalogType = catalogRef?.type ?? null;
+
+  const assigned_person_name = str(r.AssignedPersonName) ?? str(r.assigned_person_name);
 
   return {
     itsm_guid,
@@ -203,8 +248,9 @@ function mapRow(r: Row, now: Date, catalogItems: Map<string, CatalogItemRef>): P
     catalog_itsm_id,
     asset_type: classifyAssetType(catalogType, catalogDisplayName),
     manufacturer: deriveManufacturer(catalogDisplayName),
-    assigned_person_name: str(r.AssignedPersonName) ?? str(r.assigned_person_name),
+    assigned_person_name,
     person_itsm_id: str(r.PersonId) ?? str(r.person_itsm_id),
+    person_id: assigned_person_name ? persons.get(normalizeName(assigned_person_name)) ?? null : null,
     itsm_modified_at: str(r.ModifiedDate) ?? str(r.itsm_modified_at),
     imported_at: now,
   };
@@ -217,16 +263,17 @@ async function importSnapshot(dir: string): Promise<void> {
     return;
   }
   const catalogItems = readCatalogItems(dir);
+  const persons = readPersons(dir);
 
   const now = new Date();
-  const rows = raw.map((r) => mapRow(r, now, catalogItems)).filter((r): r is Partial<ItsmHardwareSnapshot> => r !== null);
+  const rows = raw.map((r) => mapRow(r, now, catalogItems, persons)).filter((r): r is Partial<ItsmHardwareSnapshot> => r !== null);
   const skipped = raw.length - rows.length;
 
   await AppDataSource.transaction(async (manager) => {
     await manager.clear(ItsmHardwareSnapshot);
     const repo = manager.getRepository(ItsmHardwareSnapshot);
     // MSSQL caps a statement at 2100 parameters; chunk to stay well under it.
-    const columnCount = 18;
+    const columnCount = 19;
     const chunk = Math.max(1, Math.floor(1900 / columnCount));
     for (let i = 0; i < rows.length; i += chunk) {
       await repo.insert(rows.slice(i, i + chunk) as ItsmHardwareSnapshot[]);
@@ -235,8 +282,11 @@ async function importSnapshot(dir: string): Promise<void> {
 
   const withType = rows.filter((r) => r.asset_type).length;
   const withManufacturer = rows.filter((r) => r.manufacturer).length;
+  const withPersonName = rows.filter((r) => r.assigned_person_name).length;
+  const withPersonId = rows.filter((r) => r.person_id).length;
   console.log(`  ✔ itsm_hardware_snapshot: ${rows.length} rows replaced${skipped > 0 ? ` (${skipped} skipped — missing HardwareAssetID/Guid)` : ''}`);
   console.log(`    asset_type resolved: ${withType}/${rows.length}, manufacturer derived: ${withManufacturer}/${rows.length}`);
+  console.log(`    person_id resolved: ${withPersonId}/${withPersonName} assigned-person rows`);
 }
 
 function resolveDir(): string {
