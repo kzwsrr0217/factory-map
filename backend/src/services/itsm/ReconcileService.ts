@@ -491,6 +491,7 @@ export async function createAssetsFromUnlinkedMmh(itsmGuids: string[]): Promise<
       org_display_name: row.location_name,
       person_full_name: row.assigned_person_name,
       person_itsm_id: row.person_itsm_id,
+      person_id: row.person_id,
       itsm_modified_at: modifiedAt && !isNaN(modifiedAt.getTime()) ? modifiedAt : null,
       source_of_truth: 'itsm',
       is_managed: true,
@@ -550,6 +551,7 @@ export async function backfillAssetsFromSnapshot(): Promise<IBackfillResult> {
     fill('catalog_itsm_id', row.catalog_itsm_id);
     fill('person_itsm_id', row.person_itsm_id);
     fill('person_full_name', row.assigned_person_name);
+    fill('person_id', row.person_id);
 
     if (changed) {
       await assetRepo.save(asset);

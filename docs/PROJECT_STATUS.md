@@ -264,6 +264,28 @@ run `npm run import:master -- <dir>` (it can't see host paths directly — the
     building/floor/work-area/section/workstation hierarchy — and the
     matching Visio→SVG cleanup for each — is the next big chunk of work; see
     §6 below.
+- **Jest/dev-DB isolation — done (Phase 11).** The test suite (`itsm.test.ts`'s
+  `sync/all` test in particular) ran directly against the dev database —
+  confirmed it had polluted it with 22 mock ITSM records at least once this
+  round. Fixed properly: `jestEnv.ts` (a Jest `setupFiles` entry, guaranteed
+  to run before `config.ts` is ever imported) now redirects
+  `MSSQL_DATABASE` to a `_test`-suffixed name; `testApp.ts` creates that
+  database on first connect (via a raw `mssql` connection to `master`) if it
+  doesn't exist yet, then `synchronize: true` builds the schema fresh. Tests
+  now run against `factorymap_test`, never `factorymap` — verified via a
+  standalone script mimicking the real setup (confirmed 0 assets in the test
+  DB vs. 1057 in dev, both present as separate databases).
+- **Person ID (`mmh####`) enrichment — done (Phase 11).** Same limitation and
+  same fix pattern as Manufacturer: the ITSM login-style Person ID (e.g.
+  `mmhgeza`) isn't exposed on the Hardware Asset's nav expansion (only the
+  Person's GUID + display name are) — resolved via a one-time join against a
+  hand-exported `persons.csv` (ITSM web UI: Asset Management > Master Data >
+  Persons, filtered to `Location contains 'MMH'` > Export to CSV — 1140
+  people), keyed by display name (`import-itsm-snapshot.ts`). Resolved for
+  **644 of 742** assigned-person assets (87%) — the remainder likely aren't
+  in the MMH-filtered Persons export (e.g. a manager based elsewhere) or have
+  a display-name mismatch; not chased further, same as Manufacturer's
+  "approximation, not authoritative" tradeoff.
 - **Live Databricks/IFS pull** — the importer eats *exported files* today; a
   live socket is a one-file change in `import-master-data.ts`, gated on access.
 - **No optimistic concurrency control** anywhere (last-write-wins) — a known,

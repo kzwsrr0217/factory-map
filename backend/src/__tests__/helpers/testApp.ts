@@ -1,9 +1,16 @@
 /**
  * testApp.ts — Shared test setup for supertest integration tests.
  *
- * Connects to the real MSSQL database (the same Docker instance used in
- * development, or the CI test DB). Because server.ts skips startServer() in
- * NODE_ENV=test, we initialise the DB connection here once for all test suites.
+ * Connects to an **isolated `_test` database** on the same SQL Server
+ * instance used in development (see jestEnv.ts, which redirects
+ * MSSQL_DATABASE before config.ts ever reads it) — never the real dev
+ * database. Because server.ts skips startServer() in NODE_ENV=test, we
+ * initialise the DB connection here once for all test suites.
+ *
+ * The `_test` database won't exist yet on a fresh SQL Server instance —
+ * `ensureTestDatabaseCreated()` creates it (via a raw connection to `master`)
+ * before TypeORM connects; `synchronize: true` (non-production) then builds
+ * the schema from the entities on first connect.
  *
  * Also ensures an admin user (admin / Admin@1234) exists so that getAdminToken()
  * can log in reliably against a fresh database with only the synced schema.
@@ -13,12 +20,36 @@
  *   await request(app).get('/api/...')
  */
 import 'reflect-metadata';
+import sql from 'mssql';
 import { connectDatabase, AppDataSource } from '../../config/database';
 import { User } from '../../entities/User.entity';
+import config from '../../config/config';
 import app from '../../server';
 import request from 'supertest';
 
 let initialized = false;
+
+async function ensureTestDatabaseCreated(): Promise<void> {
+  const pool = await sql.connect({
+    server: config.mssql.host,
+    port: config.mssql.port,
+    user: config.mssql.username,
+    password: config.mssql.password,
+    database: 'master',
+    options: {
+      encrypt: config.mssql.encrypt,
+      trustServerCertificate: config.mssql.trustServerCertificate,
+    },
+  });
+  try {
+    await pool.request().query(
+      `IF NOT EXISTS (SELECT name FROM sys.databases WHERE name = N'${config.mssql.database}') ` +
+      `CREATE DATABASE [${config.mssql.database}]`
+    );
+  } finally {
+    await pool.close();
+  }
+}
 
 async function ensureAdminUser(): Promise<void> {
   const repo = AppDataSource.getRepository(User);
@@ -44,6 +75,7 @@ export async function setupTests(): Promise<{
 }> {
   if (!initialized) {
     if (!AppDataSource.isInitialized) {
+      await ensureTestDatabaseCreated();
       await connectDatabase();
     }
     await ensureAdminUser();
