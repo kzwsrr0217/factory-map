@@ -2,7 +2,7 @@
 
 > **Read this first if you're a new session with no prior context.** It's a
 > point-in-time snapshot of where the project stands, why, and what's next.
-> Last updated: 2026-07-27 (Phase 12 — production VM deployment).
+> Last updated: 2026-07-27 (Phase 13 — /code-review fixes; SSO login planned next).
 
 ---
 
@@ -294,8 +294,45 @@ run `npm run import:master -- <dir>` (it can't see host paths directly — the
   endpoint. (Matthias's app explicitly accepts the same trade-off in its PRD.)
 - **No in-app network-capacity report**; **orphaned-asset re-link is a manual
   field edit**, not a guided wizard.
-- **`/code-review` pass** over the cumulative diff — must be run by the user;
-  the assistant can't trigger it.
+- **`/code-review` pass — done (Phase 13).** Full-session review
+  (`6f4d54f..HEAD`, excluding the Werk1 floor-plan SVG/VSDX binaries): 8 finder
+  angles, 1-vote verify, 10 findings surfaced, all fixed. Highlights: two of
+  this session's own new reconcile-accept paths (Assigned Person, Catalog
+  Item) silently no-op'd under `ITSM_MODE=snapshot` — the production default —
+  because `SnapshotITSMAdapter.toHardware()` never populated the
+  `assigned_to_person`/`catalog_item_itsm_id` fields `ReconcileService`'s
+  apply() logic reads; `unlinkAsset()` didn't clear person fields, leaving
+  stale ITSM person data visible after "unlink"; the bulk MMH-asset-create
+  endpoint's audit logging was silently broken (wrong response shape reaching
+  `auditLog` middleware); `jestEnv.ts` had its own dotenv-ordering bug that
+  could silently defeat the Phase-11 test-DB-isolation fix for a local
+  `npm test` run. Also fixed: `network`/`maintenance` presence gates on
+  `Asset.toApiResponse()` excluding `switch_port`/`maint_notes` (same class as
+  the `assigned_person` bug fixed in Phase 10), stale relation state on
+  `AssetDetails.tsx`'s new Replaces/Replaced-By navigation, a PowerShell
+  `ConvertTo-Json` single-record quirk in the export script, and an N+1 query
+  pattern in the two bulk reconcile-service functions (now batched with
+  `In([...])`).
+- **SSO login — planned, blocked on Global IT (App Registration request is
+  slow at this company).** Two paths discussed:
+  1. **Entra ID (Azure AD) OIDC** — the org's mandated approach for
+     approved services, via `@azure/msal-node` + `@azure/msal-browser`,
+     alongside the existing local/LDAP login tabs (same pattern LDAP already
+     established: capabilities flag → dedicated service → controller → route
+     → frontend tab). `config.azure.*` already exists as scaffolding
+     (tenantId/clientId/clientSecret/redirectUri, read only by the
+     `/auth/capabilities` flag today) but needs a real Entra ID App
+     Registration from Global IT before any of it can work — requested, slow.
+  2. **Interim: Windows Integrated Authentication (Kerberos/SPNEGO)** — no
+     App Registration needed, reuses the same AD trust `LdapAuthService`
+     already has. Recommended shape: IIS in front of the Node backend with
+     Windows Authentication enabled (mature, standard for intranet apps) —
+     IIS negotiates the Kerberos ticket and forwards the verified AD username
+     to the app in a header, which the app trusts and maps to a local `User`
+     via the same auto-provisioning logic `LdapAuthService` already has. Not
+     yet implemented — the user asked for the write-up first; next step is
+     confirming whether to proceed with this on the Windows Server VM
+     (docs/DEPLOYMENT.md).
 - **Remaining real buildings/floors** — Werk1 Ground Floor is done (see
   above); every other building/floor still needs the same Visio→SVG
   layer-cleanup + scale-calibration treatment, plus real work
