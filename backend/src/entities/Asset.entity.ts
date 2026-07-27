@@ -427,7 +427,7 @@ export class Asset {
         storage: this.storage,
         gpu: this.gpu,
       } : undefined,
-      network: (this.ip_address || this.hostname || this.vlan || this.dhcp_static) ? {
+      network: (this.ip_address || this.hostname || this.vlan || this.switch_port || this.dhcp_static) ? {
         ip_address: this.ip_address,
         hostname: this.hostname,
         vlan: this.vlan,
@@ -492,7 +492,7 @@ export class Asset {
         winupdate_date: this.winupdate_date,
         fortiedr_active: this.fortiedr_active,
       },
-      maintenance: (this.maint_last_date || this.maint_next_date || this.maint_interval_days) ? {
+      maintenance: (this.maint_last_date || this.maint_next_date || this.maint_interval_days || this.maint_notes) ? {
         last_date: this.maint_last_date,
         next_date: this.maint_next_date,
         interval_days: this.maint_interval_days,

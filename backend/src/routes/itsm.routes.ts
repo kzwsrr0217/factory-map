@@ -140,7 +140,10 @@ router.get('/reconcile/unlinked-mmh', unlinkedMmh);
 
 // Materialise selected snapshot rows into real, unplaced local assets. Local
 // DB write only — never calls ITSM. Body: { itsm_guids: string[] }.
-router.post('/reconcile/unlinked-mmh/create', requireOperator, auditLog('asset'), createUnlinkedMmhAssets);
+// Audited manually inside the controller (one row per created asset) rather
+// than via auditLog('asset') — that middleware expects a single created
+// entity or an array of them, not this endpoint's {created, skipped} shape.
+router.post('/reconcile/unlinked-mmh/create', requireOperator, createUnlinkedMmhAssets);
 
 // Per-asset check: the ONLY endpoint that reads ITSM, and only for one asset,
 // on explicit user action. Nothing is ever written back to ITSM.

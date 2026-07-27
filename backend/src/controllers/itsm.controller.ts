@@ -30,6 +30,7 @@ import {
 } from '../services/itsm/ReconcileService';
 import { AppDataSource } from '../config/database';
 import { Asset } from '../entities/Asset.entity';
+import { AuditLog } from '../entities/AuditLog.entity';
 import { io } from '../server';
 import { AuthRequest } from '../middleware/auth.middleware';
 
@@ -192,7 +193,7 @@ export const unlinkedMmh = async (_req: Request, res: Response, next: NextFuncti
  * unplaced local assets (see createAssetsFromUnlinkedMmh). Body: { itsm_guids: string[] }.
  * Local-DB-only write — never calls ITSM.
  */
-export const createUnlinkedMmhAssets = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+export const createUnlinkedMmhAssets = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
     const guids = req.body?.itsm_guids;
     if (!Array.isArray(guids) || guids.length === 0) {
@@ -202,6 +203,28 @@ export const createUnlinkedMmhAssets = async (req: Request, res: Response, next:
     const result = await createAssetsFromUnlinkedMmh(guids.map(String));
     const created = result.created.map((a) => a.toApiResponse());
     for (const c of created) io.emit('asset:created', c);
+
+    // Written manually rather than via the auditLog middleware — that
+    // middleware expects a single created entity (or an array of them), not
+    // this bulk endpoint's {created, skipped} response shape. One row per
+    // created asset, matching the pattern in asset.controller.ts's replaceAsset.
+    const user = req.user;
+    if (user) {
+      const logRepo = AppDataSource.getRepository(AuditLog);
+      await Promise.all(created.map((c) => logRepo.save(logRepo.create({
+        user_id: user.id, username: user.username, action: 'create',
+        entity_type: 'asset', document_id: c._id,
+        diff: {
+          display_name: c.basic_info?.display_name,
+          type: c.basic_info?.type,
+          status: c.basic_info?.status,
+          manufacturer: c.basic_info?.manufacturer,
+          serial_number: c.basic_info?.serial_number,
+          note: 'Created from an unlinked MMH ITSM snapshot row',
+        },
+      })).catch(() => { /* audit failure must never fail the request */ })));
+    }
+
     res.json({ success: true, data: { created, skipped: result.skipped } });
   } catch (error) { next(error); }
 };

@@ -16,6 +16,7 @@
  * (which fields matter, how they compare, how they are written back) are all in
  * one place. Status and MAC comparisons route through `statusMapping.ts`.
  */
+import { In } from 'typeorm';
 import { AppDataSource } from '../../config/database';
 import { Asset } from '../../entities/Asset.entity';
 import { ItsmHardwareSnapshot } from '../../entities/ItsmHardwareSnapshot.entity';
@@ -387,6 +388,12 @@ export async function unlinkAsset(assetId: string): Promise<Asset> {
   asset.reconcile_last_at = null;
   asset.reconcile_last_status = null;
   asset.reconcile_diff_count = null;
+  // The assigned-person data came from ITSM (person_itsm_id/person_id/
+  // person_full_name) — clear it along with the rest of the link so an
+  // unlinked asset doesn't keep showing a stale ITSM-sourced assignee.
+  asset.person_itsm_id = null;
+  asset.person_id = null;
+  asset.person_full_name = null;
   await assetRepo.save(asset);
   return asset;
 }
@@ -465,15 +472,35 @@ export async function createAssetsFromUnlinkedMmh(itsmGuids: string[]): Promise<
   const assetRepo = AppDataSource.getRepository(Asset);
   const result: ICreateAssetsFromMmhResult = { created: [], skipped: [] };
 
+  // Batch both lookups up front instead of one round-trip per guid — this can
+  // be called with the entire unlinked-MMH list at once (hundreds of rows).
+  const uniqueGuids = [...new Set(itsmGuids)];
+  const rows = uniqueGuids.length > 0
+    ? await snapshotRepo.find({ where: { itsm_guid: In(uniqueGuids) } })
+    : [];
+  const rowByGuid = new Map(rows.map((r) => [r.itsm_guid, r]));
+
+  const itsmIds = rows.map((r) => r.itsm_id);
+  const existingAssets = itsmIds.length > 0
+    ? await assetRepo.find({ where: { hardware_asset_id: In(itsmIds) } })
+    : [];
+  const existingIdByHardwareId = new Map(existingAssets.map((a) => [a.hardware_asset_id!, a.id]));
+  // Also guards against two rows in the SAME batch resolving to the same
+  // hardware_asset_id, since existingAssets alone can't catch that.
+  const claimedHardwareIds = new Set(existingIdByHardwareId.keys());
+
+  const toCreate: Asset[] = [];
   for (const guid of itsmGuids) {
-    const row = await snapshotRepo.findOne({ where: { itsm_guid: guid } });
+    const row = rowByGuid.get(guid);
     if (!row) { result.skipped.push({ itsm_guid: guid, error: 'Not found in the imported snapshot' }); continue; }
 
-    const existing = await assetRepo.findOne({ where: { hardware_asset_id: row.itsm_id } });
-    if (existing) { result.skipped.push({ itsm_guid: guid, error: `Already linked locally (asset ${existing.id})` }); continue; }
+    const existingId = existingIdByHardwareId.get(row.itsm_id);
+    if (existingId) { result.skipped.push({ itsm_guid: guid, error: `Already linked locally (asset ${existingId})` }); continue; }
+    if (claimedHardwareIds.has(row.itsm_id)) { result.skipped.push({ itsm_guid: guid, error: 'Duplicate hardware_asset_id within this batch' }); continue; }
+    claimedHardwareIds.add(row.itsm_id);
 
     const modifiedAt = row.itsm_modified_at ? new Date(row.itsm_modified_at) : null;
-    const asset = assetRepo.create({
+    toCreate.push(assetRepo.create({
       display_name: row.display_name ?? row.itsm_id,
       hardware_asset_id: row.itsm_id,
       itsm_guid: row.itsm_guid,
@@ -497,10 +524,11 @@ export async function createAssetsFromUnlinkedMmh(itsmGuids: string[]): Promise<
       is_managed: true,
       sync_status: 'success',
       last_synced: new Date(),
-    });
-    await assetRepo.save(asset);
-    result.created.push(asset);
+    }));
   }
+
+  if (toCreate.length > 0) await assetRepo.save(toCreate);
+  result.created.push(...toCreate);
 
   return result;
 }
@@ -532,9 +560,17 @@ export async function backfillAssetsFromSnapshot(): Promise<IBackfillResult> {
     .getMany();
 
   const result: IBackfillResult = { checked: linked.length, updated: 0, fieldsWritten: 0 };
+  if (linked.length === 0) return result;
 
+  // One batched snapshot lookup for every linked asset instead of one
+  // round-trip per row — this runs over the entire linked-asset set (~1000+).
+  const hardwareIds = linked.map((a) => a.hardware_asset_id!);
+  const rows = await snapshotRepo.find({ where: { itsm_id: In(hardwareIds) } });
+  const rowByHardwareId = new Map(rows.map((r) => [r.itsm_id, r]));
+
+  const toSave: Asset[] = [];
   for (const asset of linked) {
-    const row = await snapshotRepo.findOne({ where: { itsm_id: asset.hardware_asset_id! } });
+    const row = rowByHardwareId.get(asset.hardware_asset_id!);
     if (!row) continue;
 
     let changed = false;
@@ -553,10 +589,12 @@ export async function backfillAssetsFromSnapshot(): Promise<IBackfillResult> {
     fill('person_full_name', row.assigned_person_name);
     fill('person_id', row.person_id);
 
-    if (changed) {
-      await assetRepo.save(asset);
-      result.updated++;
-    }
+    if (changed) toSave.push(asset);
+  }
+
+  if (toSave.length > 0) {
+    await assetRepo.save(toSave);
+    result.updated = toSave.length;
   }
 
   return result;
