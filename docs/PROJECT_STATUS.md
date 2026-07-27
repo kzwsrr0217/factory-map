@@ -2,7 +2,7 @@
 
 > **Read this first if you're a new session with no prior context.** It's a
 > point-in-time snapshot of where the project stands, why, and what's next.
-> Last updated: 2026-07-27.
+> Last updated: 2026-07-27 (Phase 12 — production VM deployment).
 
 ---
 
@@ -302,6 +302,26 @@ run `npm run import:master -- <dir>` (it can't see host paths directly — the
   areas/sections/workstations placed on each. This is the main remaining
   body of work — see §6 for a suggested approach.
 
+- **Production VM deployment — done (Phase 12), not yet run against a real
+  VM.** `docker-compose.prod.yml` + `frontend/Dockerfile.prod` (static CRA
+  build served by `nginx`, no dev servers/bind-mounts) + `.env.prod.example`,
+  for a Windows Server VM reachable by the team over the corp VLAN
+  (IP/hostname access, no TLS in this scope). MSSQL is never published to the
+  host — only the frontend and backend ports need a VLAN firewall rule.
+  `docs/DEPLOYMENT.md` covers the full walkthrough: Podman/WSL2 prerequisites,
+  the exact firewall rule, first-deploy steps, first-admin bootstrap (there's
+  no public register endpoint — a one-off `ts-node` snippet creates it),
+  MSSQL backup/restore, and the ITSM snapshot-import procedure adapted to
+  copy the exported files *onto* the VM rather than pulling from Alemba
+  directly (same read-only/no-live-calls constraint as dev).
+  Verified locally: both prod images build clean, the frontend container
+  actually serves (`index.html` + SPA deep-link fallback both 200), and the
+  build-arg → baked-in `REACT_APP_API_URL` pipeline was confirmed present in
+  the built JS bundle. **Not yet verified**: an actual deploy onto a real VM —
+  no VM has been provisioned yet.
+- **Next up**: the `/code-review` pass mentioned above (cheap, high value,
+  keeps getting bumped), then an actual VM deploy once IT provisions one.
+
 ## 7. Doc map
 
 | Doc | What's in it |
@@ -311,5 +331,6 @@ run `npm run import:master -- <dir>` (it can't see host paths directly — the
 | [DATA_STRUCTURE.md](DATA_STRUCTURE.md) | **factorymap vs. shopfloor_visualizer** entity/table comparison + ingest parity |
 | [DATA_MODEL_MIGRATION.md](DATA_MODEL_MIGRATION.md) | Phase-by-phase (1-8) history with per-phase verification logs |
 | [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) | API reference, DB schema, ITSM + master-data import, conventions |
+| [DEPLOYMENT.md](DEPLOYMENT.md) | Production VM deployment: compose, nginx, firewall, backup/restore, ITSM import on the VM |
 | [USER_GUIDE.md](USER_GUIDE.md) | End-user walkthrough of every page |
 | [ADMIN_GUIDE.md](ADMIN_GUIDE.md) | Install, env vars, user management, backup |
