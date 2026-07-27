@@ -962,6 +962,14 @@ cd backend && npm audit
 cd frontend && npm audit
 ```
 
+### Deploying to a shared VM
+
+`docker-compose.yml` above is dev-only (dev servers, bind-mounted source, MSSQL
+port published for local `sqlcmd`/GUI access). For an internal VM deployment
+reachable by others on the corp VLAN, see [docs/DEPLOYMENT.md](DEPLOYMENT.md)
+— it uses `docker-compose.prod.yml` (static frontend build via nginx, compiled
+backend, MSSQL never published to the host) and `.env.prod.example`.
+
 ---
 
 ## Code Conventions
