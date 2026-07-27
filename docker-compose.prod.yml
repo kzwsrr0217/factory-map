@@ -1,0 +1,121 @@
+# Production compose file for the VM deployment (see docs/DEPLOYMENT.md).
+#
+# Differs from docker-compose.yml (dev) in three ways:
+#   1. No source bind-mounts / dev servers — backend runs the compiled
+#      dist/server.js, frontend is a static build served by nginx
+#      (frontend/Dockerfile.prod).
+#   2. MSSQL is never published to the host — only reachable from the other
+#      containers on factory-map-network. Never open 1433 on the VLAN.
+#   3. Secrets (JWT_SECRET, MSSQL_SA_PASSWORD) and origins (CORS_ORIGIN,
+#      REACT_APP_API_URL) must be real values for this deployment, not the
+#      dev defaults — config.ts refuses to start in production without them.
+#
+# Usage: cp .env.prod.example .env.prod, fill it in, then:
+#   docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --build
+
+services:
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: factory-map-mssql
+    restart: unless-stopped
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: ${MSSQL_PASSWORD}
+      MSSQL_PID: Developer
+    volumes:
+      - mssql_data:/var/opt/mssql
+    networks:
+      - factory-map-network
+    healthcheck:
+      test: /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$$MSSQL_SA_PASSWORD" -No -Q "SELECT 1" || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  mssql-setup:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: factory-map-mssql-setup
+    restart: on-failure
+    depends_on:
+      mssql:
+        condition: service_healthy
+    networks:
+      - factory-map-network
+    environment:
+      MSSQL_SA_PASSWORD: ${MSSQL_PASSWORD}
+      MSSQL_DATABASE: ${MSSQL_DATABASE}
+    command:
+      - /bin/bash
+      - -c
+      - >-
+        SQL="IF NOT EXISTS (SELECT name FROM sys.databases WHERE name = N'$$MSSQL_DATABASE')
+        CREATE DATABASE [$$MSSQL_DATABASE];" &&
+        /opt/mssql-tools18/bin/sqlcmd -S mssql -U sa -P "$$MSSQL_SA_PASSWORD" -No -Q "$$SQL" &&
+        echo 'Database ready'
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: factory-map-backend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      BACKEND_PORT: ${BACKEND_PORT}
+      PORT: ${BACKEND_PORT}
+      MSSQL_HOST: mssql
+      MSSQL_PORT: 1433
+      MSSQL_USER: sa
+      MSSQL_PASSWORD: ${MSSQL_PASSWORD}
+      MSSQL_DATABASE: ${MSSQL_DATABASE}
+      MSSQL_TRUST_CERT: "true"
+      JWT_SECRET: ${JWT_SECRET}
+      ITSM_MODE: ${ITSM_MODE:-snapshot}
+      ITSM_MOCK_API_URL: ${ITSM_MOCK_API_URL:-}
+      ITSM_REAL_API_URL: ${ITSM_REAL_API_URL:-}
+      ITSM_API_KEY: ${ITSM_API_KEY:-}
+      ITSM_WEB_URL: ${ITSM_WEB_URL:-}
+      ITSM_VIEW_ID: ${ITSM_VIEW_ID:-}
+      ITSM_COLUMN_MAP: ${ITSM_COLUMN_MAP:-}
+      ITSM_SYNC_INTERVAL: ${ITSM_SYNC_INTERVAL:-300000}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-factory-map@company.local}
+      TEAMS_WEBHOOK_URL: ${TEAMS_WEBHOOK_URL:-}
+      CORS_ORIGIN: ${CORS_ORIGIN}
+      DOCKER_ENV: "true"
+    ports:
+      - "${BACKEND_PORT}:${BACKEND_PORT}"
+    depends_on:
+      mssql-setup:
+        condition: service_completed_successfully
+    networks:
+      - factory-map-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+      args:
+        REACT_APP_API_URL: ${REACT_APP_API_URL}
+        REACT_APP_PUBLIC_BASE_URL: ${REACT_APP_PUBLIC_BASE_URL}
+    container_name: factory-map-frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT}:80"
+    depends_on:
+      - backend
+    networks:
+      - factory-map-network
+
+volumes:
+  mssql_data:
+    driver: local
+
+networks:
+  factory-map-network:
+    driver: bridge
