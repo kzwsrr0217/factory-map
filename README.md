@@ -267,6 +267,7 @@ E2E tests run against the live app (`http://localhost:5174` frontend + `http://l
 
 | Document | Contents |
 |----------|----------|
+| [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) | **Start here for a cold read** — point-in-time status & handoff: where the project stands, why, what's next |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | System diagram, data model, design patterns |
 | [docs/DATA_STRUCTURE.md](docs/DATA_STRUCTURE.md) | Entity/table reference, mapped against shopfloor_visualizer's data model for comparison |
 | [docs/DATA_MODEL_MIGRATION.md](docs/DATA_MODEL_MIGRATION.md) | Phase-by-phase history of how the data model evolved, with verification notes |

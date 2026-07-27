@@ -301,59 +301,6 @@ the cumulative diff was also recommended, but that has to be run by the user
   `(90, 110)` to `(200, 150)` and confirmed via the API that the position
   persisted (`updated_at` changed).
 
-## What phase 8 did (this change)
-
-**Ingest parity with shopfloor_visualizer's real export.** Phases 1-3 gave
-`master_assets`/`production_lines`/`work_centers`/`entity_kinds` a *minimal*
-column set (enough to prove the join). Phase 8 widens them to the **full**
-column set of Matthias's actual export shapes — verified against his real
-ingest scripts and sample data, not guessed — and adds the importer that eats
-those files. This is the first phase where a real (exported) IFS/CMDB dataset
-flows in end-to-end; still no *live* Databricks/IFS socket (that's a one-line
-swap in the importer when access is confirmed).
-
-Sources inspected directly (in `shopfloor_visualizer/`):
-`databricks-ingest/ingest-mmag-machines.py` and `ingest-mmag-ot-assets.py`
-(both querying the same `ot_governance_prd.gold.ot_asset` Databricks table
-with different column projections), `ifs-ingest/get_workcenters.py`
-(IFS Cloud OData for work centers + production lines), and the real sample
-exports `masterData.json` (528 machines), `OTAssetData.json` (580 OT assets),
-`production_lines.json` (79), `workcenters.json` (572), `entity_kinds.json`.
-
-- **New optional columns, all nullable** (a plain hand-seeded row still works;
-  a richer export fills more):
-  - `master_assets`: `ifs_machine_part_no` (= his "objectType", the Object-ID
-    prefix before the first `-`), plus the OT-assets-projection fields
-    `ifs_part_no`, `ifs_part_description`, `ifs_serial_state`,
-    `ifs_operational_condition`, `ifs_server_path`, `cmdb_model`,
-    `cmdb_serial_number`.
-  - `production_lines`: `contract` (IFS site).
-  - `work_centers`: `contract`, `objstate` (Active/…), `department_no`,
-    `cost_center_id`.
-  - `entity_kinds`: `model`, `model_scale`, `preserve_model_colors` (his 3D
-    fields — factorymap has no 3D view, but stores them so entity_kinds.json
-    round-trips losslessly), and `geometry_type` now also accepts `'object'`.
-  - Migration `1732300000000-AddIfsExportOptionalColumns.ts` (additive, all
-    nullable — no data migration).
-- **`backend/src/scripts/import-master-data.ts`** (new, `npm run import:master
-  -- <dir>`): idempotent, layout-safe upsert of all five files. Merges the
-  machines and OT-assets shapes into one `master_assets` row per `ifs_id`
-  (an OT asset's `parent_id` becomes `ifs_machine_id`, exactly his
-  machine↔device parent join). Field-agnostic (copies only the keys a row
-  actually has, mirroring his ingest scripts' "genau die Spalten, die QUERY
-  liefert" design) and never touches app-owned layout — a re-import that drops
-  a row just makes that asset unmatched (Orphaned Assets), never deleted.
-  Column count drives chunk size to stay under MSSQL's 2100-parameter cap.
-- **Frontend**: `AssetMasterData` type + the AssetDetailsModal "Master Data
-  (IFS/CMDB)" section gained the new CMDB detail (model, serial number).
-- **Verified end-to-end** against his real MMAG export: importer merged 528
-  machines + 580 OT assets → 943 master rows, 79 production lines, 572 work
-  centers, 3 entity kinds; spot-checked that an OT asset (`444444-615`) carries
-  its full CMDB detail and that its `parent_id` (`325557-316`) resolves to a
-  real machine row; confirmed idempotency (re-run stays at 943, no
-  duplication); confirmed the three list endpoints expose the new columns and
-  `GET /assets?include_master=true` still resolves without regression.
-
 ## What phase 7 did (this change)
 
 Not a data-model extension like phases 1-6 — a **live-use-case audit**: working
@@ -453,6 +400,59 @@ any entity; concurrent edits are last-write-wins). Fixing this properly needs
 a version column plus a conditional-update check on every mutating endpoint —
 a deliberate, larger architectural change, not a live-audit bug fix.
 
+## What phase 8 did (this change)
+
+**Ingest parity with shopfloor_visualizer's real export.** Phases 1-3 gave
+`master_assets`/`production_lines`/`work_centers`/`entity_kinds` a *minimal*
+column set (enough to prove the join). Phase 8 widens them to the **full**
+column set of Matthias's actual export shapes — verified against his real
+ingest scripts and sample data, not guessed — and adds the importer that eats
+those files. This is the first phase where a real (exported) IFS/CMDB dataset
+flows in end-to-end; still no *live* Databricks/IFS socket (that's a one-line
+swap in the importer when access is confirmed).
+
+Sources inspected directly (in `shopfloor_visualizer/`):
+`databricks-ingest/ingest-mmag-machines.py` and `ingest-mmag-ot-assets.py`
+(both querying the same `ot_governance_prd.gold.ot_asset` Databricks table
+with different column projections), `ifs-ingest/get_workcenters.py`
+(IFS Cloud OData for work centers + production lines), and the real sample
+exports `masterData.json` (528 machines), `OTAssetData.json` (580 OT assets),
+`production_lines.json` (79), `workcenters.json` (572), `entity_kinds.json`.
+
+- **New optional columns, all nullable** (a plain hand-seeded row still works;
+  a richer export fills more):
+  - `master_assets`: `ifs_machine_part_no` (= his "objectType", the Object-ID
+    prefix before the first `-`), plus the OT-assets-projection fields
+    `ifs_part_no`, `ifs_part_description`, `ifs_serial_state`,
+    `ifs_operational_condition`, `ifs_server_path`, `cmdb_model`,
+    `cmdb_serial_number`.
+  - `production_lines`: `contract` (IFS site).
+  - `work_centers`: `contract`, `objstate` (Active/…), `department_no`,
+    `cost_center_id`.
+  - `entity_kinds`: `model`, `model_scale`, `preserve_model_colors` (his 3D
+    fields — factorymap has no 3D view, but stores them so entity_kinds.json
+    round-trips losslessly), and `geometry_type` now also accepts `'object'`.
+  - Migration `1732300000000-AddIfsExportOptionalColumns.ts` (additive, all
+    nullable — no data migration).
+- **`backend/src/scripts/import-master-data.ts`** (new, `npm run import:master
+  -- <dir>`): idempotent, layout-safe upsert of all five files. Merges the
+  machines and OT-assets shapes into one `master_assets` row per `ifs_id`
+  (an OT asset's `parent_id` becomes `ifs_machine_id`, exactly his
+  machine↔device parent join). Field-agnostic (copies only the keys a row
+  actually has, mirroring his ingest scripts' "genau die Spalten, die QUERY
+  liefert" design) and never touches app-owned layout — a re-import that drops
+  a row just makes that asset unmatched (Orphaned Assets), never deleted.
+  Column count drives chunk size to stay under MSSQL's 2100-parameter cap.
+- **Frontend**: `AssetMasterData` type + the AssetDetailsModal "Master Data
+  (IFS/CMDB)" section gained the new CMDB detail (model, serial number).
+- **Verified end-to-end** against his real MMAG export: importer merged 528
+  machines + 580 OT assets → 943 master rows, 79 production lines, 572 work
+  centers, 3 entity kinds; spot-checked that an OT asset (`444444-615`) carries
+  its full CMDB detail and that its `parent_id` (`325557-316`) resolves to a
+  real machine row; confirmed idempotency (re-run stays at 943, no
+  duplication); confirmed the three list endpoints expose the new columns and
+  `GET /assets?include_master=true` still resolves without regression.
+
 ## What's deferred to a later phase (not started)
 
 - **Real floor plan content.** The demo SVG is intentionally a rough
@@ -478,56 +478,12 @@ a deliberate, larger architectural change, not a live-audit bug fix.
 - **Removing the legacy Alemba/ITSM fields from `Asset`** — only once an
   IFS-backed reconcile path is built and confirmed to cover what Alemba
   currently provides.
-- **Any live IFS/Databricks connection** — unchanged from phase 1: still
-  nothing calls out to IFS or Databricks anywhere in the app.
-
-**Phase 7:**
-- All fixes verified against the running dev stack via purpose-written
-  Node scripts (`podman exec factory-map-backend node -e/...`) hitting the
-  live API as `admin`, plus `tsc --noEmit` on both `backend/` and
-  `frontend/` after every change — no automated test suite run this phase
-  (deferred per explicit instruction; the user runs it manually).
-- Rack/room delete guards: creating an asset mounted in a rack, then
-  attempting to delete that rack/room, confirmed 400 with the exact
-  mounted-count message; unmounting first confirmed the delete then succeeds.
-- Wall port collisions: two wall ports assigned to the same patch-panel port
-  or the same switch port both confirmed rejected with 409; a self-update
-  (relabeling a port without changing its assignment) confirmed it does not
-  false-positive against its own row.
-- Rack/patch-panel replace: patch panels and mounted assets confirmed
-  transferred with U-positions intact, the emptied old rack/panel confirmed
-  gone (404) afterward, and a genuine U-position collision confirmed
-  blocking a second replace attempt with 409 rather than silently
-  overlapping — also verified end-to-end through the actual browser UI
-  (the 🔁 button), not just the API.
-- Switch replacement: a `WallPort.switch_asset_id` pointing at a switch that
-  was then replaced confirmed re-pointed at the replacement asset.
-- Retired-asset exclusion: for each of `getMaintenanceCounts`,
-  `Maintenance.tsx`, `AssetReports.tsx`, `UnplacedAssets.tsx`,
-  `AlertService.checkAndSend()`, and `ReconcileService`, created an
-  overdue/linked asset, confirmed it counted, replaced it, confirmed the
-  count/list dropped back down / the entry disappeared.
-- ITSM sync zombie-resurrection: replaced a seeded ITSM-linked asset,
-  ran `POST /api/itsm/sync-all`, confirmed `last_synced` was unchanged
-  (proving the sync skipped it) rather than bumped to "now".
-- `is_placed` recompute: mounted an asset in a rack (`is_placed: true`),
-  cleared `rack_id` via PATCH, confirmed `is_placed` flipped back to `false`
-  (previously stayed stuck at `true`).
-- Future maintenance date: `POST /assets` with `maintenance.last_date` in
-  2099 confirmed rejected (422); the same request with today's date, and a
-  same-day PATCH update (the "mark maintenance done" pattern), both
-  confirmed still succeed — no regression on the normal flow.
-- Bulk import: reproduced the exact payload shape `CsvImportModal.tsx`/
-  `AssetImportModal.tsx` send (empty-string hierarchy fields) against
-  `POST /assets/bulk` directly, confirmed 400 "Invalid uuid" before the fix
-  and a successful create after switching those fields to `null`.
-- RBAC: created a throwaway `viewer` user, confirmed 403 from the API on
-  asset PATCH/DELETE/POST and user creation, confirmed 200 on `GET /assets`;
-  test user removed afterward.
-- Error-message surfacing: triggered a real guard (deleting a room with
-  mounted assets) through the actual browser UI and confirmed via a network
-  request inspection + immediate DOM read that the toast shows the specific
-  backend message, not the generic "Delete failed".
+- **A live IFS/Databricks socket** — phase 8 added the importer that eats
+  the *exported* JSON files (`npm run import:master`), and the DB now holds a
+  real MMAG dataset imported that way. What's still deferred is a *live* pull
+  (the importer querying Databricks/IFS directly instead of reading files) —
+  a one-file change in `import-master-data.ts`, gated on access confirmation,
+  touching nothing downstream.
 
 ## Considered and rejected: NetworkRack/PatchPanel/WallPort → EntityKind
 
@@ -659,3 +615,66 @@ infrastructure model stays as its own, richer set of tables.
   visual change.
 - Frontend test suite: unchanged, 60/66 (same 2 pre-existing failures).
 - Full backend test suite: 22 suites, 255 tests, all passing after the change.
+
+**Phase 7:**
+- All fixes verified against the running dev stack via purpose-written
+  Node scripts (`podman exec factory-map-backend node -e/...`) hitting the
+  live API as `admin`, plus `tsc --noEmit` on both `backend/` and
+  `frontend/` after every change — no automated test suite run this phase
+  (deferred per explicit instruction; the user runs it manually).
+- Rack/room delete guards: creating an asset mounted in a rack, then
+  attempting to delete that rack/room, confirmed 400 with the exact
+  mounted-count message; unmounting first confirmed the delete then succeeds.
+- Wall port collisions: two wall ports assigned to the same patch-panel port
+  or the same switch port both confirmed rejected with 409; a self-update
+  (relabeling a port without changing its assignment) confirmed it does not
+  false-positive against its own row.
+- Rack/patch-panel replace: patch panels and mounted assets confirmed
+  transferred with U-positions intact, the emptied old rack/panel confirmed
+  gone (404) afterward, and a genuine U-position collision confirmed
+  blocking a second replace attempt with 409 rather than silently
+  overlapping — also verified end-to-end through the actual browser UI
+  (the 🔁 button), not just the API.
+- Switch replacement: a `WallPort.switch_asset_id` pointing at a switch that
+  was then replaced confirmed re-pointed at the replacement asset.
+- Retired-asset exclusion: for each of `getMaintenanceCounts`,
+  `Maintenance.tsx`, `AssetReports.tsx`, `UnplacedAssets.tsx`,
+  `AlertService.checkAndSend()`, and `ReconcileService`, created an
+  overdue/linked asset, confirmed it counted, replaced it, confirmed the
+  count/list dropped back down / the entry disappeared.
+- ITSM sync zombie-resurrection: replaced a seeded ITSM-linked asset,
+  ran `POST /api/itsm/sync-all`, confirmed `last_synced` was unchanged
+  (proving the sync skipped it) rather than bumped to "now".
+- `is_placed` recompute: mounted an asset in a rack (`is_placed: true`),
+  cleared `rack_id` via PATCH, confirmed `is_placed` flipped back to `false`
+  (previously stayed stuck at `true`).
+- Future maintenance date: `POST /assets` with `maintenance.last_date` in
+  2099 confirmed rejected (422); the same request with today's date, and a
+  same-day PATCH update (the "mark maintenance done" pattern), both
+  confirmed still succeed — no regression on the normal flow.
+- Bulk import: reproduced the exact payload shape `CsvImportModal.tsx`/
+  `AssetImportModal.tsx` send (empty-string hierarchy fields) against
+  `POST /assets/bulk` directly, confirmed 400 "Invalid uuid" before the fix
+  and a successful create after switching those fields to `null`.
+- RBAC: created a throwaway `viewer` user, confirmed 403 from the API on
+  asset PATCH/DELETE/POST and user creation, confirmed 200 on `GET /assets`;
+  test user removed afterward.
+- Error-message surfacing: triggered a real guard (deleting a room with
+  mounted assets) through the actual browser UI and confirmed via a network
+  request inspection + immediate DOM read that the toast shows the specific
+  backend message, not the generic "Delete failed".
+
+**Phase 8:**
+- Importer run against shopfloor_visualizer's real MMAG export inside the
+  backend container: merged 528 machines + 580 OT assets into 943
+  `master_assets` rows, 79 production lines, 572 work centers, 3 entity kinds.
+- Parent join confirmed: OT asset `444444-615` carries its full CMDB detail
+  (`cmdb_serial_number`, `cmdb_os`, …) and its `parent_id` `325557-316`
+  resolves to a real machine row (`ifs_machine_part_no` populated).
+- Idempotency confirmed: a second run stays at 943 rows (upsert, no
+  duplication).
+- New optional columns confirmed exposed via `GET /entity-kinds`,
+  `/production-lines`, `/work-centers`; `GET /assets?include_master=true`
+  still resolves with no regression.
+- `tsc --noEmit` clean on both backend and frontend; schema applied via
+  `synchronize: true` in dev (migration `1732300000000` is the prod path).
