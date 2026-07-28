@@ -2,7 +2,7 @@
 
 > **Read this first if you're a new session with no prior context.** It's a
 > point-in-time snapshot of where the project stands, why, and what's next.
-> Last updated: 2026-07-27 (Phase 13 — /code-review fixes; SSO login planned next).
+> Last updated: 2026-07-28 (Phase 14 — production VM deployment verified live).
 
 ---
 
@@ -339,25 +339,70 @@ run `npm run import:master -- <dir>` (it can't see host paths directly — the
   areas/sections/workstations placed on each. This is the main remaining
   body of work — see §6 for a suggested approach.
 
-- **Production VM deployment — done (Phase 12), not yet run against a real
-  VM.** `docker-compose.prod.yml` + `frontend/Dockerfile.prod` (static CRA
-  build served by `nginx`, no dev servers/bind-mounts) + `.env.prod.example`,
-  for a Windows Server VM reachable by the team over the corp VLAN
-  (IP/hostname access, no TLS in this scope). MSSQL is never published to the
-  host — only the frontend and backend ports need a VLAN firewall rule.
-  `docs/DEPLOYMENT.md` covers the full walkthrough: Podman/WSL2 prerequisites,
-  the exact firewall rule, first-deploy steps, first-admin bootstrap (there's
-  no public register endpoint — a one-off `ts-node` snippet creates it),
-  MSSQL backup/restore, and the ITSM snapshot-import procedure adapted to
-  copy the exported files *onto* the VM rather than pulling from Alemba
-  directly (same read-only/no-live-calls constraint as dev).
-  Verified locally: both prod images build clean, the frontend container
-  actually serves (`index.html` + SPA deep-link fallback both 200), and the
-  build-arg → baked-in `REACT_APP_API_URL` pipeline was confirmed present in
-  the built JS bundle. **Not yet verified**: an actual deploy onto a real VM —
-  no VM has been provisioned yet.
+- **Production VM deployment — done and verified live (Phase 14).**
+  `docker-compose.prod.yml` + `frontend/Dockerfile.prod` (static CRA build
+  served by `nginx`, no dev servers/bind-mounts) + `.env.prod.example`,
+  deployed for real onto `srvmmh112vm.maxonmotor.com` (Windows Server 2022,
+  domain-joined), reachable by the team over the corp VLAN (IP/hostname
+  access, no TLS in this scope). MSSQL is never published to the host.
+  **Confirmed working**: logged in as `admin` from a completely different
+  machine on the VLAN, not just the VM itself.
+
+  Real-VM deployment surfaced several gaps the local-only verification
+  couldn't — all now fixed and folded into `docs/DEPLOYMENT.md` so the next
+  deploy doesn't rediscover them:
+  - `winget` isn't present on this Windows Server image; browser-downloaded
+    installers are the fallback for Podman/Compose/Git/WSL updates.
+  - This VM's corporate network blocks command-line HTTP clients
+    (PowerShell, `wsl.exe`'s own updater — both 403'd) while still allowing
+    normal browser downloads. Every internet-dependent prerequisite step had
+    to go through a browser instead. Once WSL2/Podman were actually running,
+    though, image pulls *from inside* the Podman VM worked fine (`podman pull
+    docker.io/library/hello-world` succeeded) — a different, apparently
+    unrestricted network path from the same corporate network.
+  - This VM had the legacy "inbox" `wsl.exe` (no `--version` flag), not the
+    modern Microsoft Store-distributed WSL app Podman's machine needs
+    (≥1.2.5) — needed a manual kernel package + `.msixbundle` install via
+    browser, since `wsl --update`/`--web-download` were both blocked.
+  - **Migrating to a genuinely fresh database fails** — every migration in
+    this repo is an incremental delta on a schema dev environments always got
+    via `synchronize: true`; there was never a from-scratch migration because
+    nobody had deployed to an empty DB before. Fixed by running
+    `connectDatabase()` once with `NODE_ENV=development` (synchronize builds
+    the current full schema from the entities) then manually baselining the
+    `typeorm_migrations` table so future real migrations apply normally. Now
+    documented as a first-deploy step, not just a one-off fix.
+  - **Podman on Windows only bound published ports to `127.0.0.1`**, not all
+    interfaces — `localhost:4000` worked, the VM's own real IP/hostname
+    didn't, no matter what the firewall allowed. Fixed with
+    `netsh interface portproxy` (bridges 0.0.0.0 → 127.0.0.1 per port) — a
+    routing fix, unrelated to any firewall/security boundary.
+  - This org's firewall/security is managed centrally — local
+    `New-NetFirewallRule` changes risk being silently overridden by policy
+    refresh, or may not be the right channel at all. In practice, intra-VLAN
+    traffic between two machines was already reachable without an explicit
+    local rule once the port-binding fix above was in place; a formal request
+    to whoever manages the central firewall is still worth sending so this
+    is a documented, intentional allow rather than an accident of default
+    policy that could get closed later.
+  - Testing via `localhost:8080` on the VM itself (instead of the real
+    `<VM-HOST>:8080`) causes a CORS failure at login (`CORS_ORIGIN` is
+    configured for the real hostname), which the frontend shows as a generic
+    "Invalid username or password" — misleading unless you check DevTools.
+  - No public user-registration endpoint exists by design (`/api/users`
+    requires an authenticated admin already) — the one-off `ts-node`
+    bootstrap snippet in `docs/DEPLOYMENT.md` is the intended first-admin path
+    for a fresh database, used here successfully.
+
+  **Deferred from this round** (user's own call): creating real team accounts
+  (item 2) and the MSSQL backup schedule (§4) — "will do later" / "will
+  check". The database is currently empty of real asset data (fresh schema,
+  no ITSM import run yet) — §5's manual snapshot-import procedure is ready
+  whenever that's wanted.
 - **Next up**: the `/code-review` pass mentioned above (cheap, high value,
-  keeps getting bumped), then an actual VM deploy once IT provisions one.
+  keeps getting bumped); team account creation; MSSQL backup scheduling; the
+  ITSM snapshot import onto this VM; formalizing the firewall allow with
+  whoever manages it centrally.
 
 ## 7. Doc map
 

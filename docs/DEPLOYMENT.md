@@ -41,6 +41,14 @@ per-seat licensing for organizational use):
 winget install -e --id RedHat.Podman
 ```
 
+`winget` often isn't present on a Windows Server image (it ships with Win10/11
+via the Microsoft Store, not Server) — if that command isn't recognized,
+download and run the installer directly in a **browser** instead: search the
+releases at `https://github.com/containers/podman/releases/latest` for the
+Windows `.exe`/`.msi` installer asset. Podman **Desktop** (the GUI variant)
+also works fine and is a reasonable alternative — it bundles the CLI and
+usually walks through the machine setup below automatically on first launch.
+
 Then, in a **new** PowerShell window (so PATH picks up the fresh install):
 
 ```powershell
@@ -51,7 +59,30 @@ podman info
 
 `podman machine start` does the one-time work of creating the WSL2-backed
 Podman VM — expect this first run to take a few minutes. `podman info`
-succeeding confirms the machine is up.
+succeeding confirms the machine is up. If the installer didn't add itself to
+PATH (`podman: not recognized` even in a fresh window), either add
+`%LOCALAPPDATA%\Programs\Podman` to your user `PATH` via
+`[Environment]::SetEnvironmentVariable("Path", $env:Path + ";$env:LOCALAPPDATA\Programs\Podman", "User")`
+— note this needs a **logoff or reboot** to take effect in a remote-console
+session, opening a "new" window isn't enough — or just call it by full path /
+`Set-Alias podman "$env:LOCALAPPDATA\Programs\Podman\podman.exe"` for the
+current session in the meantime.
+
+If `podman machine init`/`start` complains about the WSL version being too
+old, this VM likely has the legacy "inbox" `wsl.exe` (bundled with the OS
+image) rather than the newer Microsoft Store-distributed WSL app —
+`wsl --version` not being a recognized flag confirms this. Update it with
+`wsl --update --web-download` (pulls from GitHub instead of the Microsoft
+Store, which a restrictive corporate proxy is more likely to allow); if that
+also fails, download the `.msixbundle` from
+`https://github.com/microsoft/WSL/releases/latest` in a browser and install
+it with `Add-AppxPackage -Path "<downloaded file>"`. **Corporate networks
+that heavily restrict outbound traffic may block command-line HTTP clients
+(PowerShell, `wsl.exe`'s own updater) while still allowing normal browser
+downloads** — if `winget`/`wsl --update` hit a 403 or similar, downloading
+the same artifact via a browser instead is the reliable fallback throughout
+this whole prerequisites section (git, Podman, WSL kernel/app updates,
+Compose — all of it).
 
 **1c. Install the Compose CLI** (`docker-compose.prod.yml` needs a compose
 front-end — Podman itself doesn't parse compose files):
@@ -60,7 +91,25 @@ front-end — Podman itself doesn't parse compose files):
 winget install -e --id Docker.DockerCompose
 ```
 
+Same `winget`-missing fallback as above: download
+`docker-compose-windows-x86_64.exe` from
+`https://github.com/docker/compose/releases/latest` in a browser, rename it
+to `docker-compose.exe`, and drop it in the same folder as `podman.exe`
+(`%LOCALAPPDATA%\Programs\Podman`) so it ends up on the same PATH entry.
 Verify with `docker-compose --version` in a new shell.
+
+Once network access from inside the WSL2 VM is proven working (the acid test
+below), it's worth confirming compose can actually reach it too — this is
+what `docker-compose ... up --build` will exercise for real (pulling base
+images, running `npm install` during the build):
+
+```powershell
+podman pull docker.io/library/hello-world
+```
+
+This is a genuinely different network path than plain PowerShell commands —
+even if `winget`/`wsl --update` were blocked above, image pulls from inside
+the Podman VM may still work fine (they did in practice here).
 
 **1d. Make Podman start on boot.** The `podman machine` VM is tied to the
 Windows account that ran `podman machine init` (its state lives under that
@@ -75,10 +124,27 @@ one-time setup step.)
 **1e. Git.** `winget install -e --id Git.Git` if it isn't already present, to
 clone/pull the repo.
 
-## 2. Firewall / VLAN rule
+## 2. Port binding + firewall / VLAN rule
 
-Only **two ports** need to be reachable from the VLAN — pick values (defaults
-`8080` and `4000`) and open exactly those in Windows Firewall:
+**Known Podman-on-Windows quirk**: published container ports (`ports:` in the
+compose file) sometimes only bind to `127.0.0.1` on the Windows host, not all
+interfaces — check with `netstat -an | findstr :4000`; if it shows
+`127.0.0.1:4000` rather than `0.0.0.0:4000`, `localhost:4000` will work but
+nothing else (not the VM's own real IP, not other machines on the VLAN) will
+ever reach it, no matter what the firewall allows. Fix with a Windows-level
+port proxy bridging "listen on all interfaces" → "forward to where Podman
+actually put it" (a standard workaround for this exact class of WSL2/Docker
+Desktop/Podman limitation, and unrelated to any firewall/security policy —
+it doesn't open anything, just fixes local routing):
+
+```powershell
+netsh interface portproxy add v4tov4 listenport=4000 listenaddress=0.0.0.0 connectport=4000 connectaddress=127.0.0.1
+netsh interface portproxy add v4tov4 listenport=8080 listenaddress=0.0.0.0 connectport=8080 connectaddress=127.0.0.1
+netsh interface portproxy show all   # verify
+```
+
+Separately, only **two ports** need to be reachable from the VLAN — pick
+values (defaults `8080` and `4000`) and open exactly those:
 
 - `FRONTEND_PORT` (default `8080`) — the app itself.
 - `BACKEND_PORT` (default `4000`) — the API + Socket.io (the frontend talks
@@ -91,6 +157,16 @@ doesn't publish it at all, so there's nothing to open regardless.
 New-NetFirewallRule -DisplayName "factory-map frontend" -Direction Inbound -LocalPort 8080 -Protocol TCP -Action Allow
 New-NetFirewallRule -DisplayName "factory-map backend"  -Direction Inbound -LocalPort 4000 -Protocol TCP -Action Allow
 ```
+
+**If security/firewall is managed centrally** at your organization (GPO-pushed
+Windows Firewall policy, or a separate network-level firewall/ACL), creating
+local rules yourself may get silently overridden on the next policy refresh,
+or may simply not be the right channel — send whoever manages it a request to
+allow inbound TCP on these two ports to this VM's hostname/IP from the VLAN,
+same as any other network-change request. In practice, intra-VLAN traffic
+between two machines may already be permitted by the central policy even
+without an explicit local rule — worth just testing reachability from another
+machine before assuming the ticket is required.
 
 ## 3. First-time deploy
 
@@ -125,6 +201,36 @@ Run migrations (schema `synchronize` is off in production by design — see
 ```bash
 docker exec factory-map-backend npm run migration:run
 ```
+
+**On a genuinely fresh database, this will fail** — every migration in this
+repo is an incremental delta written on top of a schema that dev environments
+always got via `synchronize: true`; there's no "create everything from
+scratch" migration, because until now nobody had deployed to a truly empty
+database. Expect an error like `Cannot find the object "assets" because it
+does not exist`. TypeORM rolls the failed migration back cleanly (each runs
+in its own transaction), so this is safe to hit — fix it once, in order:
+
+1. **Build the full current schema from the entities**, overriding just this
+   one command's environment (not the running container) so `synchronize`
+   turns on for a single pass:
+   ```powershell
+   podman exec -e NODE_ENV=development factory-map-backend node -e "require('./dist/config/database').connectDatabase().then(() => process.exit(0)).catch((e) => { console.error(e); process.exit(1); })"
+   ```
+   Expect a long stream of `CREATE TABLE`/`CREATE INDEX` statements ending in
+   "SQL Server connected successfully". This matches exactly what the
+   migrations would have produced, since the entities are the current source
+   of truth and migrations were written to keep pace with them.
+2. **Baseline the migration history** so TypeORM knows these are already
+   accounted for (get the exact list from `backend/src/migrations/*.ts`'s
+   exported class names — the migration below matches the set as of this
+   writing; add any newer ones the same way):
+   ```powershell
+   podman exec factory-map-mssql /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "<MSSQL_PASSWORD>" -No -d factorymap -Q "INSERT INTO typeorm_migrations (timestamp, name) VALUES (1732000000000,'AddMasterAssetAndIfsJoin1732000000000'),(1732100000000,'AddOrgHierarchyAndEntityKind1732100000000'),(1732200000000,'AddConnectionPairId1732200000000'),(1732300000000,'AddIfsExportOptionalColumns1732300000000'),(1732400000000,'AddItsmHardwareSnapshot1732400000000'),(1732500000000,'AddItsmSnapshotCatalogAndPersonIds1732500000000'),(1732600000000,'AddItsmSnapshotPersonId1732600000000')"
+   ```
+3. Re-run `docker exec factory-map-backend npm run migration:run` — it
+   should now say "No migrations are pending". Every *future* migration
+   (added after this point) will apply normally from here on; this baseline
+   step is only ever needed once, on the first deploy to a fresh database.
 
 Verify:
 
@@ -161,6 +267,14 @@ for the team through the UI (User Management) — this bootstrap step is only
 ever needed once per fresh database.
 
 From there, people on the VLAN reach the app at `http://<VM-HOST>:8080`.
+**Always browse to it using that exact hostname/port** — including when
+testing from the VM itself. Browsing via `localhost:8080` instead will load
+the page fine but then fail login with a CORS error (`Access-Control-Allow-Origin`
+mismatch), since `CORS_ORIGIN` is configured for `<VM-HOST>:8080` specifically,
+not `localhost`. The frontend shows this as a generic "Invalid username or
+password" — check the browser DevTools Network/Console tab if login fails
+unexpectedly to tell a real credential problem apart from a connectivity/CORS
+one.
 
 ## 4. Backup / restore (MSSQL volume)
 
