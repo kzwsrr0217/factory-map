@@ -53,3 +53,10 @@ uploads/
 # Real ITSM export data (Confidential — real serial numbers/MACs/asset tags;
 # the script itself is tracked, its output never is)
 ops/itsm/*.json
+
+# Physical inventory survey tool + its exports (Internal/Confidential — real
+# HWA/serial numbers, informal employee names; never belongs in a public repo).
+# import-inventory-survey.ts itself is tracked, its input data never is.
+/IT_Eszkoz_Nyilvantarto.exe
+/eszkozok.json*
+/inventory-corrections.json
