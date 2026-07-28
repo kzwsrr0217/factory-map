@@ -305,6 +305,15 @@ export class Asset {
   @Column({ name: 'tags', type: 'simple-json', nullable: true })
   tags!: string[] | null;
 
+  // Free-text network/security classification (e.g. "Client Operation" vs
+  // "Operation Technology") from the physical inventory survey — devices in
+  // different domains need separating for VLAN/segmentation purposes. Kept
+  // as free text rather than an enum since the set of values isn't fixed by
+  // this app; see backend/src/scripts/import-inventory-survey.ts.
+  @Column({ name: 'network_domain', type: 'nvarchar', length: 100, nullable: true })
+  @Index()
+  network_domain!: string | null;
+
   @Column({ name: 'object_id', type: 'nvarchar', length: 100, nullable: true })
   @Index()
   object_id!: string | null;
@@ -491,6 +500,7 @@ export class Asset {
         backup_status: this.backup_status,
         winupdate_date: this.winupdate_date,
         fortiedr_active: this.fortiedr_active,
+        network_domain: this.network_domain,
       },
       maintenance: (this.maint_last_date || this.maint_next_date || this.maint_interval_days || this.maint_notes) ? {
         last_date: this.maint_last_date,

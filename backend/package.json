@@ -15,6 +15,8 @@
     "import:master": "ts-node src/scripts/import-master-data.ts",
     "import:itsm": "ts-node src/scripts/import-itsm-snapshot.ts",
     "backfill:itsm": "ts-node src/scripts/backfill-itsm-fields.ts",
+    "import:inventory": "ts-node src/scripts/import-inventory-survey.ts",
+    "reconcile:report": "ts-node src/scripts/reconcile-report.ts",
     "test": "jest --runInBand --forceExit --passWithNoTests",
     "test:watch": "jest --watch",
     "migration:generate": "typeorm-ts-node-commonjs migration:generate -d src/data-source.ts",

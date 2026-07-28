@@ -866,6 +866,77 @@ Note: the bulk sync no longer touches `AssetSoftware` rows (an earlier version
 deleted them without re-creating — software lists are only populated by the
 per-asset `syncAsset` path, which resolves `installed_software`).
 
+## Physical Inventory Survey Import
+
+A separate, lightweight Python tool ("IT_Eszkoz_Nyilvantarto") lets IT staff
+walk a building and record every device found: which ITSM Hardware Asset it
+is (`azonosito_mod: "HWA"`, with the HWA number) or, for devices ITSM doesn't
+track at all (mostly monitors — `azonosito_mod: "EGYEB"`, "other"), its
+device type/serial number instead — plus where it physically sits and who
+uses it. It exports JSON like:
+
+```json
+{ "verzio": 1, "mentve": "...", "eszkozok": [
+  { "terulet": "Client Operation", "epulet": "werk 1", "emelet": "0",
+    "helyszin": "hr", "work_area": "recepcio", "szemely": "", "megjegyzes": "recepcio",
+    "azonosito_mod": "HWA", "hwa": "hwa26255", "eszkoz_tipus": "", "sorozatszam": "",
+    "id": "...", "letrehozva": "...", "modositva": "..." }
+] }
+```
+
+`import-inventory-survey.ts` (`npm run import:inventory -- <dir>`) imports
+this. The tool's own 4-level hierarchy maps directly onto factorymap's
+Building → Floor → WorkArea → Section: `epulet`/`emelet` → Building/Floor
+(matched by name, with `emelet` also tried as `Floor.floor_number` since the
+survey uses a bare number like `"0"` where the app's Floor name is
+descriptive — e.g. "Ground Floor (Földszint)"), `helyszin` → **WorkArea**,
+and the tool's own `work_area` field (same name as the app's `WorkArea`
+entity, but one level more granular — don't confuse the two) → **Section**.
+
+Two outcomes per row:
+- **`HWA` rows** update an already-existing asset (linked via the ITSM
+  snapshot pipeline above) with its real-world placement + assigned person.
+  A row whose `hwa` matches no known asset is reported, not guessed at — it
+  likely still needs the unlinked-MMH bulk-create step run first, or has a
+  typo.
+- **`EGYEB` rows** create a new **local-only** asset
+  (`source_of_truth: 'local'`) — not in ITSM at all yet. factorymap never
+  writes to ITSM, so someone registers these by hand in Alemba later; once
+  that's done, a human links the real HWA via the existing "search ITSM
+  record" UI on the asset edit form (`hardware_asset_id`/`itsm_guid` are
+  editable on an existing asset, not just at creation), and the normal
+  reconcile flow takes over from there. Re-running the import matches an
+  existing local asset by serial number, so a refined/re-run survey doesn't
+  create duplicates.
+
+**Dry run by default — this doubles as a validation tool.** Building/Floor
+must already exist; WorkArea/Section (the actual map areas) must too — this
+script never invents hierarchy, it only matches by name (diacritic/case/
+whitespace-insensitive) and reports what didn't match. Fix typos/nicknames
+via an optional `inventory-corrections.json` in the same directory:
+```json
+{ "persons": { "gorog tomi": "Görög Tamás" },
+  "helyszin": { "hr": "HR" },
+  "work_area": { "hr iroda": "HR Iroda" } }
+```
+Re-run (still dry-run) until the report is clean, then add `--apply` to
+commit. Person matching (`szemely`) is best-effort against names already
+known from the ITSM snapshot (`itsm_hardware_snapshot.assigned_person_name`)
+— informal survey names without diacritics won't all match; unmatched ones
+are still kept as free-text `person_full_name`, correctable by hand later,
+same tradeoff as the ITSM person-ID enrichment. `terulet` (e.g. "Client
+Operation" vs "Operation Technology" — a network/VLAN-segmentation
+classification, not a location) is stored verbatim on `network_domain`.
+
+**After importing**, `reconcile-report.ts` (`npm run reconcile:report --
+[--csv=<path>]`) gives the "what's different now" view the per-asset "Check
+ITSM" button can't: it runs that same read-only diff check
+(`ReconcileService.reconcileAsset` — zero live ITSM calls under
+`ITSM_MODE=snapshot`) across every ITSM-linked asset and reports in-sync vs.
+differing counts plus every field-level diff, and separately lists every
+still-local-only asset (grouped by type) as the backlog of devices someone
+still needs to register in Alemba.
+
 ## IFS/CMDB Master-Data Import
 
 Separate from ITSM (Alemba) reconcile above: the **read-only IFS/CMDB master
