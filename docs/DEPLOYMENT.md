@@ -19,16 +19,61 @@ that changes). Uses `docker-compose.prod.yml`, which differs from the dev
 
 ## 1. Prerequisites on the VM
 
-- Windows Server, domain-joined, with **Podman Desktop** (or Docker Desktop)
-  installed — same tool you already use locally, just on the server. Podman
-  Desktop on Windows needs WSL2 enabled (`wsl --install` / the "Windows
-  Subsystem for Linux" feature) since containers run in a Linux VM under the
-  hood.
-- Podman/Docker's own service should be set to start automatically on boot
-  (Podman Desktop → Settings, or the WSL2 distro's default-start behavior) —
-  otherwise a VM reboot silently takes the app down until someone logs in.
-- `git` available on the VM (to clone/pull the repo), or some other way of
-  getting the repo contents onto it.
+Windows Server, domain-joined. Run these from an elevated PowerShell prompt
+on the VM itself (e.g. via a BeyondTrust/remote-console session):
+
+**1a. Enable WSL2** (containers run in a lightweight Linux VM under the hood
+— this is required even though the app itself is "just" running on Windows):
+
+```powershell
+wsl --install --no-distribution
+```
+
+This enables the Windows-Subsystem-for-Linux and Virtual-Machine-Platform
+features and installs the WSL2 kernel in one step. **Reboot the VM** after
+this if prompted — a feature-enable on Windows Server almost always requires
+one before WSL2 will actually work.
+
+**1b. Install Podman** (the same tool used locally — avoids Docker Desktop's
+per-seat licensing for organizational use):
+
+```powershell
+winget install -e --id RedHat.Podman
+```
+
+Then, in a **new** PowerShell window (so PATH picks up the fresh install):
+
+```powershell
+podman machine init
+podman machine start
+podman info
+```
+
+`podman machine start` does the one-time work of creating the WSL2-backed
+Podman VM — expect this first run to take a few minutes. `podman info`
+succeeding confirms the machine is up.
+
+**1c. Install the Compose CLI** (`docker-compose.prod.yml` needs a compose
+front-end — Podman itself doesn't parse compose files):
+
+```powershell
+winget install -e --id Docker.DockerCompose
+```
+
+Verify with `docker-compose --version` in a new shell.
+
+**1d. Make Podman start on boot.** The `podman machine` VM is tied to the
+Windows account that ran `podman machine init` (its state lives under that
+user's profile), so the startup task must run as **that same account**, not
+SYSTEM. Easiest done via Task Scheduler's GUI (`taskschd.msc`): New Task →
+trigger "At startup" → action `podman machine start` → on the General tab,
+"Run whether user is logged on or not" with that account's credentials. (A
+one-line `schtasks`/`Register-ScheduledTask` equivalent needs that account's
+password supplied non-interactively, which isn't worth scripting for a
+one-time setup step.)
+
+**1e. Git.** `winget install -e --id Git.Git` if it isn't already present, to
+clone/pull the repo.
 
 ## 2. Firewall / VLAN rule
 
@@ -61,7 +106,9 @@ Edit `.env.prod`:
   `REACT_APP_API_URL` must match exactly what ends up in the address bar
   (scheme + host + port), or the browser will reject the API calls as
   cross-origin.
-- Generate a real `JWT_SECRET`: `openssl rand -hex 32`.
+- Generate a real `JWT_SECRET`. From PowerShell (no `openssl` needed on a
+  plain Windows Server box):
+  `-join ((1..64) | ForEach-Object { '{0:x}' -f (Get-Random -Max 16) })`
 - Pick a real `MSSQL_PASSWORD` (8+ chars, 3 of 4 of upper/lower/digit/symbol).
 - Leave `ITSM_MODE=snapshot` — this deployment has no path to live Alemba
   access (see §5), same constraint as the dev environment.
@@ -69,7 +116,7 @@ Edit `.env.prod`:
 Build and start:
 
 ```bash
-docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --build
+docker-compose --env-file .env.prod -f docker-compose.prod.yml up -d --build
 ```
 
 Run migrations (schema `synchronize` is off in production by design — see
@@ -162,7 +209,7 @@ Re-run this whenever you refresh the snapshot (it's a full replace of
 
 ```bash
 git pull
-docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --build
+docker-compose --env-file .env.prod -f docker-compose.prod.yml up -d --build
 docker exec factory-map-backend npm run migration:run
 ```
 
