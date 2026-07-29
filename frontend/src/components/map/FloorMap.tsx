@@ -39,6 +39,7 @@ import { Workstation } from '../../services/workstation.service';
 import Tooltip from '../common/Tooltip';
 import ConfirmDialog from '../common/ConfirmDialog';
 import { getAssetIcon, ASSET_TYPE_MAP } from '../../utils/assetTypes';
+import { resolveWorkareaColor } from '../../utils/workareaColors';
 import { entityKindService, EntityKind } from '../../services/entityKind.service';
 import { workCenterService, WorkCenter } from '../../services/workCenter.service';
 import { productionLineService, ProductionLine } from '../../services/productionLine.service';
@@ -1581,6 +1582,22 @@ const FloorMap: React.FC<FloorMapProps> = ({
           const capacity = workarea.metadata?.capacity || 0;
           const utilization = capacity > 0 ? Math.min(assetsInArea.length / capacity, 1) : 0;
           const utilizationColor = utilization > 0.8 ? '#ef4444' : utilization > 0.6 ? '#f59e0b' : '#10b981';
+          const areaColor = resolveWorkareaColor(workarea);
+
+          // The name (left-aligned) and the type/production-line label
+          // (right-aligned) share one line, so on a narrow area they used to
+          // overlap into unreadable mush ("Aworkspacenbert office"). Only draw
+          // the type when it demonstrably fits alongside the name — and account
+          // for the asset-count badge, which occupies the same right corner.
+          const displayName = workarea.name.length > 22 ? workarea.name.slice(0, 20) + '…' : workarea.name;
+          const typeText = [workarea.type, workarea.production_line_code ? `PL ${workarea.production_line_code}` : null]
+            .filter(Boolean)
+            .join(' · ');
+          const badgeSpace = assetsInArea.length > 0 ? 28 : 0;
+          // Rough advance widths for the 12px bold name / 11px type labels —
+          // an estimate is fine here, it only gates whether to draw at all.
+          const estimatedNeed = 8 + displayName.length * 6.7 + 10 + typeText.length * 5.6 + badgeSpace + 8;
+          const showTypeLabel = typeText !== '' && width >= estimatedNeed;
 
           return (
             <g key={workarea._id}>
@@ -1589,9 +1606,9 @@ const FloorMap: React.FC<FloorMapProps> = ({
                 y={y}
                 width={width}
                 height={height}
-                fill="#ddd6fe"
+                fill={areaColor.fill}
                 fillOpacity="0.7"
-                stroke="#7c3aed"
+                stroke={areaColor.stroke}
                 strokeWidth="3"
                 rx="8"
                 className={`${styles.workarea} ${isDragging ? styles.dragging : ''}`}
@@ -1683,13 +1700,13 @@ const FloorMap: React.FC<FloorMapProps> = ({
                   strokeWidth="3"
                   paintOrder="stroke"
                 >
-                  {workarea.name.length > 22 ? workarea.name.slice(0, 20) + '…' : workarea.name}
+                  {displayName}
                 </text>
               )}
 
-              {(workarea.type || workarea.production_line_code) && (
+              {showTypeLabel && (
                 <text
-                  x={x + width - 8}
+                  x={x + width - 8 - badgeSpace}
                   y={y + 17}
                   textAnchor="end"
                   className={styles.workareaType}
@@ -1699,9 +1716,7 @@ const FloorMap: React.FC<FloorMapProps> = ({
                   strokeWidth="2"
                   paintOrder="stroke"
                 >
-                  {[workarea.type, workarea.production_line_code ? `PL ${workarea.production_line_code}` : null]
-                    .filter(Boolean)
-                    .join(' · ')}
+                  {typeText}
                 </text>
               )}
 

@@ -10,6 +10,7 @@ import Modal from '../common/Modal';
 import Button from '../common/Button';
 import Input from '../common/Input';
 import { workareaService, WorkArea } from '../../services/workarea.service';
+import { WORKAREA_COLORS, resolveWorkareaColor } from '../../utils/workareaColors';
 import { useToast } from '../../contexts/ToastContext';
 import styles from '../../styles/components/WorkAreaFormModal.module.css';
 
@@ -33,6 +34,7 @@ const WorkAreaFormModal: React.FC<WorkAreaFormModalProps> = ({
     type: '',
     supervisor: '',
     capacity: '',
+    color: '',
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
@@ -45,6 +47,9 @@ const WorkAreaFormModal: React.FC<WorkAreaFormModalProps> = ({
         type: workarea.type || '',
         supervisor: workarea.metadata?.supervisor || '',
         capacity: workarea.metadata?.capacity?.toString() || '',
+        // Show the colour it currently renders with (auto-derived when unset),
+        // so opening the form doesn't look like "no colour chosen".
+        color: workarea.metadata?.color || resolveWorkareaColor(workarea).fill,
       });
     } else {
       setFormData({
@@ -52,6 +57,7 @@ const WorkAreaFormModal: React.FC<WorkAreaFormModalProps> = ({
         type: '',
         supervisor: '',
         capacity: '',
+        color: '',
       });
     }
     setErrors({});
@@ -83,8 +89,11 @@ const WorkAreaFormModal: React.FC<WorkAreaFormModalProps> = ({
         type: formData.type || undefined,
         coordinates: workarea?.coordinates || { x: 0, y: 0 }, // Keep existing or default
         metadata: {
+          // Preserve any metadata keys this form doesn't manage.
+          ...(workarea?.metadata ?? {}),
           supervisor: formData.supervisor || undefined,
           capacity: formData.capacity ? Number(formData.capacity) : undefined,
+          color: formData.color || undefined,
         },
       };
 
@@ -156,6 +165,28 @@ const WorkAreaFormModal: React.FC<WorkAreaFormModalProps> = ({
             onChange={(e) => setFormData({ ...formData, capacity: e.target.value })}
             error={errors.capacity}
           />
+        </div>
+
+        <div className={styles.colorField}>
+          <span className={styles.colorLabel}>Map Colour</span>
+          <div className={styles.colorSwatches}>
+            {WORKAREA_COLORS.map((c) => (
+              <button
+                key={c.fill}
+                type="button"
+                title={c.label}
+                aria-label={c.label}
+                aria-pressed={formData.color === c.fill}
+                className={`${styles.colorSwatch} ${formData.color === c.fill ? styles.colorSwatchActive : ''}`}
+                style={{ background: c.fill, borderColor: c.stroke }}
+                onClick={() => setFormData({ ...formData, color: c.fill })}
+              />
+            ))}
+          </div>
+          <p className={styles.colorHelper}>
+            Distinguishes neighbouring areas on the floor plan. Leave unset and a
+            colour is assigned automatically.
+          </p>
         </div>
 
         <div className={styles.note}>
