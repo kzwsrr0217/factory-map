@@ -2,7 +2,7 @@
 
 > **Read this first if you're a new session with no prior context.** It's a
 > point-in-time snapshot of where the project stands, why, and what's next.
-> Last updated: 2026-07-28 (Phase 14 — production VM deployment verified live).
+> Last updated: 2026-07-28 (Phase 15 — physical inventory survey import + bulk reconcile report).
 
 ---
 
@@ -399,10 +399,49 @@ run `npm run import:master -- <dir>` (it can't see host paths directly — the
   check". The database is currently empty of real asset data (fresh schema,
   no ITSM import run yet) — §5's manual snapshot-import procedure is ready
   whenever that's wanted.
-- **Next up**: the `/code-review` pass mentioned above (cheap, high value,
-  keeps getting bumped); team account creation; MSSQL backup scheduling; the
-  ITSM snapshot import onto this VM; formalizing the firewall allow with
-  whoever manages it centrally.
+- **Physical inventory survey import + bulk reconcile report — done (Phase
+  15).** IT built a small Python walk-around tool ("IT_Eszkoz_Nyilvantarto",
+  lives outside this repo) to physically inventory every device in a
+  building: each entry records either the HWA number (`azonosito_mod:
+  "HWA"`) or — for devices ITSM doesn't track at all yet, mostly monitors —
+  a device type + serial number (`"EGYEB"`), plus a 4-level location
+  (`epulet`/`emelet`/`helyszin`/`work_area`, mapping directly onto Building
+  → Floor → WorkArea → Section; note the tool's `work_area` field is one
+  level *below* the app's WorkArea) and an informal person name. First real
+  dataset: Werk1 floor 0, 123 devices.
+  - `import-inventory-survey.ts` (`npm run import:inventory -- <dir>
+    [--apply]`) — **dry-run by default, doubles as the validation tool** the
+    user asked for: never invents hierarchy, matches everything by
+    diacritic/case/whitespace-folded name, and reports every unmatched
+    building/floor/WorkArea/Section/person/HWA so typos can be fixed via an
+    optional `inventory-corrections.json` (`{"persons": {"gorog tomi":
+    "Görög Tamás"}, ...}`) before `--apply` writes anything. HWA rows update
+    the existing linked asset's placement/person/notes; EGYEB rows create
+    **local-only** assets (`source_of_truth: 'local'`), deduped by serial
+    number on re-runs. The plan: once those get registered in Alemba by hand
+    (factorymap still never writes to ITSM), a human links the HWA via the
+    existing asset-edit "search ITSM record" UI and normal reconcile takes
+    over — user's own suggested workflow.
+  - `network_domain` added to Asset (+ migration 1732700000000) for the
+    survey's `terulet` ("Client Operation" vs "Operation Technology") — a
+    VLAN/segmentation classification, deliberately not a location field.
+  - `reconcile-report.ts` (`npm run reconcile:report -- [--csv=<path>]`) —
+    the post-import "list of differences" the user asked for: reuses
+    `reconcileAsset()` in bulk across all linked assets (in-sync / diffs /
+    missing counts + every field-level diff), and separately lists all
+    still-local-only assets grouped by type as the Alemba-registration
+    backlog.
+  - Verified with a dry run against the real 123-device survey export (69
+    matched for update, 48 for create, unmatched lists exactly as expected
+    for a dev DB with no WorkAreas drawn yet) and `reconcile:report` across
+    the 1057-asset dev DB. **Not yet applied anywhere** — real usage waits
+    on WorkAreas/Sections being drawn on the Werk1 map and on running it
+    against the VM's database.
+- **Next up**: draw the Werk1 floor-0 WorkAreas/Sections on the map, then
+  run the survey import for real (on the VM); a `/code-review` pass over the
+  Phase 15 code; team account creation; MSSQL backup scheduling; the ITSM
+  snapshot import onto the VM; formalizing the firewall allow with whoever
+  manages it centrally.
 
 ## 7. Doc map
 
