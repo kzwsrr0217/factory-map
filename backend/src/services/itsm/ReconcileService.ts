@@ -60,6 +60,36 @@ function textEquals(local: string | null, itsm: string | null): boolean {
   return (local ?? '').trim().toLowerCase() === (itsm ?? '').trim().toLowerCase();
 }
 
+// MSSQL rejects any single statement with more than 2100 parameters (error
+// 8003). Both bulk shapes in this file blow past that on a full-snapshot run:
+// an `In([...])` lookup spends one parameter per value (~1000+ guids), and a
+// bulk insert spends one per column per row — Asset has ~80 columns, so ~1000
+// rows is ~80,000 parameters. Everything bulk here has to be chunked; see
+// import-itsm-snapshot.ts for the same guard on the snapshot table.
+const MSSQL_PARAM_BUDGET = 1900; // 2100 minus headroom
+const ASSET_COLUMN_COUNT = 81;
+const ASSET_SAVE_CHUNK = Math.max(1, Math.floor(MSSQL_PARAM_BUDGET / ASSET_COLUMN_COUNT));
+
+function chunked<T>(items: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
+
+/** `repo.find({ where: { [field]: In(values) } })`, chunked to respect the parameter cap. */
+async function findByIn<T extends import('typeorm').ObjectLiteral>(
+  repo: import('typeorm').Repository<T>,
+  field: keyof T & string,
+  values: string[],
+): Promise<T[]> {
+  const out: T[] = [];
+  for (const part of chunked(values, MSSQL_PARAM_BUDGET)) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    out.push(...(await repo.find({ where: { [field]: In(part) } as any })));
+  }
+  return out;
+}
+
 /**
  * The comparable-field table. Add a row here to make a new field participate in
  * reconciliation — the report, the accept endpoint and the UI all derive from it.
@@ -473,17 +503,13 @@ export async function createAssetsFromUnlinkedMmh(itsmGuids: string[]): Promise<
   const result: ICreateAssetsFromMmhResult = { created: [], skipped: [] };
 
   // Batch both lookups up front instead of one round-trip per guid — this can
-  // be called with the entire unlinked-MMH list at once (hundreds of rows).
+  // be called with the entire unlinked-MMH list at once (1000+ rows).
   const uniqueGuids = [...new Set(itsmGuids)];
-  const rows = uniqueGuids.length > 0
-    ? await snapshotRepo.find({ where: { itsm_guid: In(uniqueGuids) } })
-    : [];
+  const rows = await findByIn(snapshotRepo, 'itsm_guid', uniqueGuids);
   const rowByGuid = new Map(rows.map((r) => [r.itsm_guid, r]));
 
   const itsmIds = rows.map((r) => r.itsm_id);
-  const existingAssets = itsmIds.length > 0
-    ? await assetRepo.find({ where: { hardware_asset_id: In(itsmIds) } })
-    : [];
+  const existingAssets = await findByIn(assetRepo, 'hardware_asset_id', itsmIds);
   const existingIdByHardwareId = new Map(existingAssets.map((a) => [a.hardware_asset_id!, a.id]));
   // Also guards against two rows in the SAME batch resolving to the same
   // hardware_asset_id, since existingAssets alone can't catch that.
@@ -527,7 +553,7 @@ export async function createAssetsFromUnlinkedMmh(itsmGuids: string[]): Promise<
     }));
   }
 
-  if (toCreate.length > 0) await assetRepo.save(toCreate);
+  if (toCreate.length > 0) await assetRepo.save(toCreate, { chunk: ASSET_SAVE_CHUNK });
   result.created.push(...toCreate);
 
   return result;
@@ -565,7 +591,7 @@ export async function backfillAssetsFromSnapshot(): Promise<IBackfillResult> {
   // One batched snapshot lookup for every linked asset instead of one
   // round-trip per row — this runs over the entire linked-asset set (~1000+).
   const hardwareIds = linked.map((a) => a.hardware_asset_id!);
-  const rows = await snapshotRepo.find({ where: { itsm_id: In(hardwareIds) } });
+  const rows = await findByIn(snapshotRepo, 'itsm_id', hardwareIds);
   const rowByHardwareId = new Map(rows.map((r) => [r.itsm_id, r]));
 
   const toSave: Asset[] = [];
@@ -593,7 +619,7 @@ export async function backfillAssetsFromSnapshot(): Promise<IBackfillResult> {
   }
 
   if (toSave.length > 0) {
-    await assetRepo.save(toSave);
+    await assetRepo.save(toSave, { chunk: ASSET_SAVE_CHUNK });
     result.updated = toSave.length;
   }
 
