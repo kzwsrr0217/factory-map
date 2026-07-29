@@ -350,6 +350,12 @@ interface FloorMapProps {
   activeConnectionTypes?: Set<string>;
   unplacedAssets?: Asset[];
   onPlaceUnplaced?: (assetId: string, x: number, y: number) => void;
+  // Unplaced assets NOT yet assigned to any floor (e.g. freshly ITSM-created
+  // assets with no hierarchy at all). Offered through the tray's search box —
+  // placing one is expected to also assign it to this floor (the page's
+  // onPlaceUnplaced handler does that). Kept separate from unplacedAssets so
+  // the default tray list stays floor-scoped instead of showing 1000+ rows.
+  searchableUnplacedAssets?: Asset[];
   allAssets?: Asset[];
   onNavigateToAsset?: (assetId: string, floorId: string) => void;
   wallPorts?: WallPort[];
@@ -403,6 +409,7 @@ const FloorMap: React.FC<FloorMapProps> = ({
   activeConnectionTypes,
   unplacedAssets = [],
   onPlaceUnplaced,
+  searchableUnplacedAssets = [],
   allAssets = [],
   onNavigateToAsset,
   wallPorts = [],
@@ -542,6 +549,7 @@ const FloorMap: React.FC<FloorMapProps> = ({
   const [renameValue, setRenameValue] = useState('');
   const [placingAsset, setPlacingAsset] = useState<Asset | null>(null);
   const [unplacedTrayOpen, setUnplacedTrayOpen] = useState(true);
+  const [unplacedSearch, setUnplacedSearch] = useState('');
 
   // Tooltip state
   const [tooltip, setTooltip] = useState<{
@@ -2406,49 +2414,80 @@ const FloorMap: React.FC<FloorMapProps> = ({
         document.body
       )}
       {/* Unplaced Assets Tray */}
-      {unplacedAssets.length > 0 && !unplacedTrayOpen && (
+      {(unplacedAssets.length > 0 || searchableUnplacedAssets.length > 0) && !unplacedTrayOpen && (
         <button
           className={styles.unplacedToggle}
           onClick={() => setUnplacedTrayOpen(true)}
           title="Show unplaced assets"
         >
-          📦 {unplacedAssets.length} unplaced
+          📦 {unplacedAssets.length > 0 ? `${unplacedAssets.length} unplaced` : 'Place assets…'}
         </button>
       )}
-      {unplacedAssets.length > 0 && unplacedTrayOpen && (
-        <div className={styles.unplacedTray}>
-          <div className={styles.unplacedTrayHeader}>
-            📦 Unplaced ({unplacedAssets.length})
-            <button className={styles.popoverClose} onClick={() => setUnplacedTrayOpen(false)}>✕</button>
+      {(unplacedAssets.length > 0 || searchableUnplacedAssets.length > 0) && unplacedTrayOpen && (() => {
+        const q = unplacedSearch.trim().toLowerCase();
+        const matches = (a: Asset) =>
+          !q ||
+          a.basic_info.display_name.toLowerCase().includes(q) ||
+          (a.basic_info.serial_number ?? '').toLowerCase().includes(q) ||
+          (a.custom_fields?.object_id ?? '').toLowerCase().includes(q) ||
+          (a.itsm?.hardware_asset_id ?? '').toLowerCase().includes(q);
+        const floorMatches = unplacedAssets.filter(matches);
+        // The floor-less pool can be 1000+ rows — only surface it when the
+        // user actually searches, and cap the result list.
+        const globalMatches = q ? searchableUnplacedAssets.filter(matches).slice(0, 30) : [];
+        const renderItem = (asset: Asset) => {
+          const isPlacing = placingAsset?._id === asset._id;
+          return (
+            <button
+              key={asset._id}
+              className={`${styles.unplacedItem} ${isPlacing ? styles.unplacedItemPlacing : ''}`}
+              onClick={() => setPlacingAsset(isPlacing ? null : asset)}
+              title={isPlacing ? 'Click on the map to place this asset (Esc to cancel)' : 'Click to select for placement'}
+            >
+              <span className={styles.unplacedItemIcon}>{getAssetIcon(asset.basic_info.type)}</span>
+              <span className={styles.unplacedItemInfo}>
+                <span className={styles.unplacedItemName}>
+                  {asset.basic_info.display_name.length > 20
+                    ? asset.basic_info.display_name.slice(0, 18) + '…'
+                    : asset.basic_info.display_name}
+                </span>
+                {asset.custom_fields?.object_id && (
+                  <span className={styles.unplacedItemId}>{asset.custom_fields.object_id}</span>
+                )}
+              </span>
+              {isPlacing && <span className={styles.unplacedItemPlacingBadge}>📍</span>}
+            </button>
+          );
+        };
+        return (
+          <div className={styles.unplacedTray}>
+            <div className={styles.unplacedTrayHeader}>
+              📦 Unplaced ({unplacedAssets.length})
+              <button className={styles.popoverClose} onClick={() => setUnplacedTrayOpen(false)}>✕</button>
+            </div>
+            {searchableUnplacedAssets.length > 0 && (
+              <input
+                className={styles.unplacedTraySearch}
+                value={unplacedSearch}
+                onChange={(e) => setUnplacedSearch(e.target.value)}
+                placeholder={`Search ${searchableUnplacedAssets.length} unassigned assets…`}
+              />
+            )}
+            <div className={styles.unplacedTrayList}>
+              {floorMatches.map(renderItem)}
+              {globalMatches.length > 0 && (
+                <div className={styles.unplacedTrayDivider}>
+                  Not on this floor yet — placing assigns them here
+                </div>
+              )}
+              {globalMatches.map(renderItem)}
+              {q && floorMatches.length === 0 && globalMatches.length === 0 && (
+                <div className={styles.unplacedTrayDivider}>No matches</div>
+              )}
+            </div>
           </div>
-          <div className={styles.unplacedTrayList}>
-            {unplacedAssets.map(asset => {
-              const isPlacing = placingAsset?._id === asset._id;
-              return (
-                <button
-                  key={asset._id}
-                  className={`${styles.unplacedItem} ${isPlacing ? styles.unplacedItemPlacing : ''}`}
-                  onClick={() => setPlacingAsset(isPlacing ? null : asset)}
-                  title={isPlacing ? 'Click on the map to place this asset (Esc to cancel)' : 'Click to select for placement'}
-                >
-                  <span className={styles.unplacedItemIcon}>{getAssetIcon(asset.basic_info.type)}</span>
-                  <span className={styles.unplacedItemInfo}>
-                    <span className={styles.unplacedItemName}>
-                      {asset.basic_info.display_name.length > 20
-                        ? asset.basic_info.display_name.slice(0, 18) + '…'
-                        : asset.basic_info.display_name}
-                    </span>
-                    {asset.custom_fields?.object_id && (
-                      <span className={styles.unplacedItemId}>{asset.custom_fields.object_id}</span>
-                    )}
-                  </span>
-                  {isPlacing && <span className={styles.unplacedItemPlacingBadge}>📍</span>}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Placing mode banner */}
       {placingAsset && (
