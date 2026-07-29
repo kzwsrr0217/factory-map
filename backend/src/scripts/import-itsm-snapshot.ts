@@ -280,12 +280,17 @@ async function importSnapshot(dir: string): Promise<void> {
     }
   });
 
-  const withType = rows.filter((r) => r.asset_type).length;
+  // Counts genuinely-classified rows, NOT just non-null ones —
+  // classifyAssetType() always returns a bucket (falling back to 'other'), so
+  // `r.asset_type` being set says nothing about whether the Catalog Items CSV
+  // join actually resolved anything. Reporting that as "resolved" made a run
+  // with no CSV at all still claim 100%.
+  const withType = rows.filter((r) => r.asset_type && r.asset_type !== 'other').length;
   const withManufacturer = rows.filter((r) => r.manufacturer).length;
   const withPersonName = rows.filter((r) => r.assigned_person_name).length;
   const withPersonId = rows.filter((r) => r.person_id).length;
   console.log(`  ✔ itsm_hardware_snapshot: ${rows.length} rows replaced${skipped > 0 ? ` (${skipped} skipped — missing HardwareAssetID/Guid)` : ''}`);
-  console.log(`    asset_type resolved: ${withType}/${rows.length}, manufacturer derived: ${withManufacturer}/${rows.length}`);
+  console.log(`    asset_type classified (excl. 'other' fallback): ${withType}/${rows.length}, manufacturer derived: ${withManufacturer}/${rows.length}`);
   console.log(`    person_id resolved: ${withPersonId}/${withPersonName} assigned-person rows`);
 }
 
