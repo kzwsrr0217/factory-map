@@ -39,7 +39,7 @@ import { Workstation } from '../../services/workstation.service';
 import Tooltip from '../common/Tooltip';
 import ConfirmDialog from '../common/ConfirmDialog';
 import { getAssetIcon, ASSET_TYPE_MAP } from '../../utils/assetTypes';
-import { resolveWorkareaColor } from '../../utils/workareaColors';
+import { resolveWorkareaColor, buildZoneColorMap } from '../../utils/workareaColors';
 import { entityKindService, EntityKind } from '../../services/entityKind.service';
 import { workCenterService, WorkCenter } from '../../services/workCenter.service';
 import { productionLineService, ProductionLine } from '../../services/productionLine.service';
@@ -474,6 +474,10 @@ const FloorMap: React.FC<FloorMapProps> = ({
       return at - bt;
     });
   }, [workareas]);
+
+  // One colour per zone across this floor, so rooms in the same zone match and
+  // different zones stay visually distinct (see workareaColors.ts).
+  const zoneColors = useMemo(() => buildZoneColorMap(workareas), [workareas]);
 
   // Same reasoning as workareasByPaintOrder above, for assets — the `assets`
   // prop is fetched display_name-ASC (see asset.controller.ts getAllAssets),
@@ -1582,7 +1586,7 @@ const FloorMap: React.FC<FloorMapProps> = ({
           const capacity = workarea.metadata?.capacity || 0;
           const utilization = capacity > 0 ? Math.min(assetsInArea.length / capacity, 1) : 0;
           const utilizationColor = utilization > 0.8 ? '#ef4444' : utilization > 0.6 ? '#f59e0b' : '#10b981';
-          const areaColor = resolveWorkareaColor(workarea);
+          const areaColor = resolveWorkareaColor(workarea, zoneColors);
 
           // The name (left-aligned) and the type/production-line label
           // (right-aligned) share one line, so on a narrow area they used to
@@ -1590,6 +1594,10 @@ const FloorMap: React.FC<FloorMapProps> = ({
           // the type when it demonstrably fits alongside the name — and account
           // for the asset-count badge, which occupies the same right corner.
           const displayName = workarea.name.length > 22 ? workarea.name.slice(0, 20) + '…' : workarea.name;
+          // `type` doubles as the zone/group name (e.g. several rooms under
+          // "HR"), which is also what drives the shared colour — so it's worth
+          // showing when it fits. Areas in the same zone therefore read as one
+          // group both by colour and by this label.
           const typeText = [workarea.type, workarea.production_line_code ? `PL ${workarea.production_line_code}` : null]
             .filter(Boolean)
             .join(' · ');
