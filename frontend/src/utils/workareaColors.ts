@@ -4,8 +4,14 @@
  * Every work area used to render in the same violet, which made adjacent
  * areas (e.g. several offices along one corridor) impossible to tell apart.
  * A work area can now carry an explicit colour in `metadata.color`; when it
- * doesn't, `resolveWorkareaColor` derives one deterministically from its id so
- * existing areas are immediately distinguishable without anyone editing them.
+ * doesn't, `resolveWorkareaColor` derives one deterministically.
+ *
+ * The auto-derived colour keys off the work area's **`type`** (its zone /
+ * group — e.g. several rooms all belonging to "HR"), falling back to the id
+ * when no type is set. That means same-zone areas share a colour, which is
+ * how the map conveys "these rooms are all one department" — the physical
+ * survey's `helyszín` level maps onto `type` for exactly this reason (see
+ * backend/src/scripts/import-inventory-survey.ts).
  *
  * Deterministic (not random) so a colour never changes between reloads, and
  * not index-based so it doesn't shift when areas are added/removed/reordered.
@@ -49,7 +55,14 @@ function hashString(s: string): number {
  * that matches a known palette entry, otherwise one derived from its id.
  */
 export function resolveWorkareaColor(
-  workarea: { _id?: string; metadata?: { color?: string } | null },
+  workarea: { _id?: string; type?: string | null; metadata?: { color?: string } | null },
+  /**
+   * Optional zone→colour assignment from `buildZoneColorMap`. Pass it when
+   * rendering a whole floor so distinct zones are guaranteed distinct colours;
+   * omit it for single-area contexts (e.g. the form's swatch preview), which
+   * fall back to hashing.
+   */
+  zoneColors?: Map<string, WorkareaColor>,
 ): WorkareaColor {
   const explicit = workarea.metadata?.color;
   if (explicit) {
@@ -60,6 +73,39 @@ export function resolveWorkareaColor(
     // silently falling back to violet.
     return { fill: explicit, stroke: explicit, label: 'Custom' };
   }
+  // Zone/group first, so every room in the same zone matches. Normalised so
+  // "HR" / "hr" / " Hr " don't split one zone across three colours.
+  const zone = (workarea.type ?? '').trim().toLowerCase();
+  if (zone) {
+    return zoneColors?.get(zone) ?? WORKAREA_COLORS[hashString(zone) % WORKAREA_COLORS.length];
+  }
   if (!workarea._id) return DEFAULT_WORKAREA_COLOR;
   return WORKAREA_COLORS[hashString(workarea._id) % WORKAREA_COLORS.length];
+}
+
+/**
+ * Assigns each distinct zone on a floor its own palette entry.
+ *
+ * Hashing alone collides too easily to be useful here — with 8 colours, the
+ * real Werk1 zone set ("cummins" and "mernoki iroda") already landed on the
+ * same fill, which defeats the whole point of colouring by zone. Assigning by
+ * index over the alphabetically-sorted zone list instead guarantees distinct
+ * colours for up to WORKAREA_COLORS.length zones per floor.
+ *
+ * Tradeoff: adding or renaming a zone can shift other zones' colours, since
+ * the index depends on the full set. That's accepted because the set is small
+ * and stable in practice, distinctness matters more than absolute permanence,
+ * and an explicit `metadata.color` always wins anyway.
+ */
+export function buildZoneColorMap(
+  workareas: Array<{ type?: string | null }>,
+): Map<string, WorkareaColor> {
+  const zones = [...new Set(
+    workareas
+      .map((w) => (w.type ?? '').trim().toLowerCase())
+      .filter((z) => z !== ''),
+  )].sort();
+  const map = new Map<string, WorkareaColor>();
+  zones.forEach((zone, i) => map.set(zone, WORKAREA_COLORS[i % WORKAREA_COLORS.length]));
+  return map;
 }

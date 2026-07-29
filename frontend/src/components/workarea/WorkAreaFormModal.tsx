@@ -38,7 +38,25 @@ const WorkAreaFormModal: React.FC<WorkAreaFormModalProps> = ({
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
+  // Existing zone names across all work areas, so a new room can be typed into
+  // an existing zone instead of accidentally creating "hr" next to "HR".
+  const [zoneSuggestions, setZoneSuggestions] = useState<string[]>([]);
   const toast = useToast();
+
+  useEffect(() => {
+    if (!isOpen) return;
+    workareaService
+      .getWorkAreas()
+      .then((areas) => {
+        const seen = new Map<string, string>();
+        for (const a of areas) {
+          const z = (a.type ?? '').trim();
+          if (z && !seen.has(z.toLowerCase())) seen.set(z.toLowerCase(), z);
+        }
+        setZoneSuggestions([...seen.values()].sort((a, b) => a.localeCompare(b)));
+      })
+      .catch(() => {});
+  }, [isOpen]);
 
   useEffect(() => {
     if (workarea) {
@@ -142,12 +160,18 @@ const WorkAreaFormModal: React.FC<WorkAreaFormModalProps> = ({
         />
 
         <Input
-          label="Type"
-          placeholder="e.g., Production, Storage, Testing"
+          label="Zone / Group"
+          placeholder="e.g., HR, Cummins, Maintenance"
           value={formData.type}
           onChange={(e) => setFormData({ ...formData, type: e.target.value })}
-          helperText="Category or function of this work area"
+          list="workarea-zone-suggestions"
+          helperText="Areas sharing a zone get the same map colour and read as one group — e.g. several offices all under HR. Matches the physical survey's 'helyszín' level."
         />
+        <datalist id="workarea-zone-suggestions">
+          {zoneSuggestions.map((z) => (
+            <option key={z} value={z} />
+          ))}
+        </datalist>
 
         <div className={styles.row}>
           <Input

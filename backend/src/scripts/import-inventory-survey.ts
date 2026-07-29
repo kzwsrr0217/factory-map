@@ -7,8 +7,9 @@
  * — e.g. monitors — its type/serial number instead (`azonosito_mod:
  * "EGYEB"`, Hungarian for "other"), plus where it physically sits
  * (building/floor/`helyszín`/`work area` — a 4-level hierarchy matching
- * factorymap's Building → Floor → WorkArea → Section exactly, with
- * `helyszín` = WorkArea and the tool's own `work_area` field = Section) and
+ * factorymap's hierarchy, with the tool's `work_area` (the room) = WorkArea
+ * and `helyszín` (the zone grouping several rooms) = that WorkArea's `type`
+ * field — Sections are not used, see matchWorkArea) and
  * who uses it (`személy`, free text, not necessarily matching a real name).
  *
  * Two outcomes per row:
@@ -26,7 +27,7 @@
  *    so re-importing a refined survey doesn't create duplicates.
  *
  * DRY RUN BY DEFAULT — this doubles as a validation tool. Building/Floor
- * always need to already exist; WorkArea/Section (the physical map areas)
+ * always need to already exist; WorkAreas (the physical map areas)
  * also need to already exist (drawn on the map first) — this script never
  * invents hierarchy, it only matches by name (case/diacritic-insensitive)
  * and reports what didn't match, so typos/nicknames can be fixed via an
@@ -57,7 +58,6 @@ import { Asset } from '../entities/Asset.entity';
 import { Building } from '../entities/Building.entity';
 import { Floor } from '../entities/Floor.entity';
 import { WorkArea } from '../entities/WorkArea.entity';
-import { Section } from '../entities/Section.entity';
 import { ItsmHardwareSnapshot } from '../entities/ItsmHardwareSnapshot.entity';
 
 interface SurveyRow {
@@ -204,16 +204,36 @@ function matchFloor(floors: Floor[], buildingId: string, emelet: string | undefi
   return inBuilding.find((f) => fold(f.name) === fold(corrected)) ?? null;
 }
 
-function matchWorkArea(workAreas: WorkArea[], floorId: string, helyszin: string | undefined, corrections: Corrections): WorkArea | null {
-  const corrected = correct(corrections.helyszin, (helyszin ?? '').trim());
-  if (!corrected) return null;
-  return workAreas.find((w) => w.floor_id === floorId && fold(w.name) === fold(corrected)) ?? null;
-}
-
-function matchSection(sections: Section[], workAreaId: string, workAreaField: string | undefined, corrections: Corrections): Section | null {
-  const corrected = correct(corrections.work_area, (workAreaField ?? '').trim());
-  if (!corrected) return null;
-  return sections.find((s) => s.workarea_id === workAreaId && fold(s.name) === fold(corrected)) ?? null;
+/**
+ * Matches the survey's `work_area` (the fine-grained room — "recepcio",
+ * "hr iroda", "cummins rotor 1") against WorkArea.name, optionally narrowed by
+ * the survey's `helyszin` (the zone — "hr", "cummins") against WorkArea.type.
+ *
+ * Note the deliberate mapping: WorkArea holds the ROOM, and its `type` field
+ * holds the ZONE. Sections aren't used, because a Section has no width/height
+ * in the schema and therefore can't be drawn on the floor map at all — the
+ * rooms are what people actually draw, so the rooms have to be WorkAreas. The
+ * zone lives on `type`, which also drives the shared map colour so all rooms
+ * in one zone read as a group (see frontend/src/utils/workareaColors.ts).
+ *
+ * `helyszin` is used as a tiebreak rather than a hard filter: it disambiguates
+ * same-named rooms in different zones without rejecting a room whose zone
+ * simply hasn't been filled in on the map yet.
+ */
+function matchWorkArea(
+  workAreas: WorkArea[],
+  floorId: string,
+  helyszin: string | undefined,
+  workAreaField: string | undefined,
+  corrections: Corrections,
+): WorkArea | null {
+  const room = correct(corrections.work_area, (workAreaField ?? '').trim());
+  const zone = correct(corrections.helyszin, (helyszin ?? '').trim());
+  if (!room) return null;
+  const byName = workAreas.filter((w) => w.floor_id === floorId && fold(w.name) === fold(room));
+  if (byName.length === 0) return null;
+  if (byName.length === 1 || !zone) return byName[0];
+  return byName.find((w) => fold(w.type) === fold(zone)) ?? byName[0];
 }
 
 interface PlannedUpdate {
@@ -231,7 +251,6 @@ interface ImportPlan {
   toCreate: PlannedCreate[];
   unmatchedBuildingOrFloor: SurveyRow[];
   unmatchedWorkArea: Set<string>;
-  unmatchedSection: Set<string>;
   unmatchedPerson: Set<string>;
   unmatchedHwa: SurveyRow[];
 }
@@ -240,7 +259,6 @@ async function planImport(rows: SurveyRow[], corrections: Corrections): Promise<
   const buildings = await AppDataSource.getRepository(Building).find();
   const floors = await AppDataSource.getRepository(Floor).find();
   const workAreas = await AppDataSource.getRepository(WorkArea).find();
-  const sections = await AppDataSource.getRepository(Section).find();
   const personIndex = await buildPersonIndex();
   const assetRepo = AppDataSource.getRepository(Asset);
 
@@ -272,7 +290,6 @@ async function planImport(rows: SurveyRow[], corrections: Corrections): Promise<
     toCreate: [],
     unmatchedBuildingOrFloor: [],
     unmatchedWorkArea: new Set(),
-    unmatchedSection: new Set(),
     unmatchedPerson: new Set(),
     unmatchedHwa: [],
   };
@@ -282,14 +299,11 @@ async function planImport(rows: SurveyRow[], corrections: Corrections): Promise<
     const floor = building ? matchFloor(floors, building.id, row.emelet, corrections) : null;
     if (!building || !floor) { plan.unmatchedBuildingOrFloor.push(row); continue; }
 
-    const workArea = matchWorkArea(workAreas, floor.id, row.helyszin, corrections);
-    if (!workArea && (row.helyszin ?? '').trim()) plan.unmatchedWorkArea.add(row.helyszin!.trim());
-
     const workAreaField = (row.work_area ?? '').trim();
-    let section: Section | null = null;
-    if (workArea && workAreaField && fold(workAreaField) !== fold(row.helyszin)) {
-      section = matchSection(sections, workArea.id, workAreaField, corrections);
-      if (!section) plan.unmatchedSection.add(workAreaField);
+    const workArea = matchWorkArea(workAreas, floor.id, row.helyszin, workAreaField, corrections);
+    if (!workArea && workAreaField) {
+      // Reported as "zone / room" so it's obvious which rectangle to draw.
+      plan.unmatchedWorkArea.add(`${(row.helyszin ?? '?').trim()} / ${workAreaField}`);
     }
 
     const person = matchPerson(personIndex, row.szemely, corrections);
@@ -299,7 +313,9 @@ async function planImport(rows: SurveyRow[], corrections: Corrections): Promise<
       building_id: building.id,
       floor_id: floor.id,
       workarea_id: workArea?.id ?? null,
-      section_id: section?.id ?? null,
+      // Sections deliberately unused — see matchWorkArea's note. The room is
+      // the WorkArea, so there's no finer level left for the survey to fill.
+      section_id: null,
       person_full_name: person.fullName,
       person_itsm_id: person.itsmId,
       person_id: person.personId,
@@ -363,12 +379,8 @@ function printReport(plan: ImportPlan): void {
     for (const u of uniq) console.log(`   - ${u}`);
   }
   if (plan.unmatchedWorkArea.size > 0) {
-    console.log(`\n⚠️  ${plan.unmatchedWorkArea.size} distinct "helyszín" name(s) not found on the matched floor — draw the WorkArea on the map, or add a "helyszin" correction:`);
-    for (const u of plan.unmatchedWorkArea) console.log(`   - "${u}"`);
-  }
-  if (plan.unmatchedSection.size > 0) {
-    console.log(`\n⚠️  ${plan.unmatchedSection.size} distinct "work area" name(s) not found — draw the Section on the map, or add a "work_area" correction:`);
-    for (const u of plan.unmatchedSection) console.log(`   - "${u}"`);
+    console.log(`\n⚠️  ${plan.unmatchedWorkArea.size} distinct zone/room pair(s) not found on the matched floor — draw the WorkArea (its name = the room, its Zone/Group = the helyszín), or add a "work_area"/"helyszin" correction:`);
+    for (const u of plan.unmatchedWorkArea) console.log(`   - ${u}`);
   }
   if (plan.unmatchedPerson.size > 0) {
     console.log(`\n⚠️  ${plan.unmatchedPerson.size} distinct person name(s) didn't match anyone known from ITSM — add a "persons" correction if it's a typo/nickname, otherwise it's kept as free text:`);
@@ -416,7 +428,7 @@ async function main(): Promise<void> {
     printReport(plan);
 
     if (!apply) {
-      console.log(`\nℹ️  Dry run only — nothing was written. Fix what's flagged above (via ${CORRECTIONS_FILE} in the same directory, or by drawing missing WorkAreas/Sections on the map), re-run to confirm it's clean, then pass --apply to commit.`);
+      console.log(`\nℹ️  Dry run only — nothing was written. Fix what's flagged above (via ${CORRECTIONS_FILE} in the same directory, or by drawing missing WorkAreas on the map), re-run to confirm it's clean, then pass --apply to commit.`);
       return;
     }
     await applyPlan(plan);

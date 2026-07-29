@@ -885,13 +885,26 @@ uses it. It exports JSON like:
 ```
 
 `import-inventory-survey.ts` (`npm run import:inventory -- <dir>`) imports
-this. The tool's own 4-level hierarchy maps directly onto factorymap's
-Building → Floor → WorkArea → Section: `epulet`/`emelet` → Building/Floor
-(matched by name, with `emelet` also tried as `Floor.floor_number` since the
-survey uses a bare number like `"0"` where the app's Floor name is
-descriptive — e.g. "Ground Floor (Földszint)"), `helyszin` → **WorkArea**,
-and the tool's own `work_area` field (same name as the app's `WorkArea`
-entity, but one level more granular — don't confuse the two) → **Section**.
+this. Hierarchy mapping:
+
+| Survey field | factorymap | Notes |
+|---|---|---|
+| `epulet` | `Building.name` | Matched by name (diacritic/case/whitespace-folded, so "werk 1" matches "Werk1"). |
+| `emelet` | `Floor` | Tried as `floor_number` first, since the survey uses a bare number like `"0"` where the app's Floor name is descriptive ("Ground Floor (Földszint)", "EG"); falls back to name match. |
+| `work_area` (the room) | **`WorkArea.name`** | Note the tool's `work_area` field is *finer-grained* than it sounds — "recepcio", "hr iroda", "cummins rotor 1". These are the rectangles people actually draw. |
+| `helyszin` (the zone) | **`WorkArea.type`** | The grouping above the room — "hr", "cummins". Several WorkAreas share one zone. Used as a *tiebreak* when two rooms on a floor share a name, not a hard filter, so a room whose zone isn't filled in yet still matches. |
+
+**Why `Section` is deliberately unused**: a `Section` has `coord_x`/`coord_y`
+but **no width/height** in the schema, so it cannot be drawn as a rectangle on
+the floor map at all. The rooms are what users draw and click, so the rooms
+have to be `WorkArea`s — which leaves `type` as the natural home for the zone.
+That also makes the zone drive the shared map colour (see
+`frontend/src/utils/workareaColors.ts`): every room in one zone renders in the
+same colour, which is how the map conveys "these four offices are all HR".
+`buildZoneColorMap` assigns colours by index over the floor's sorted zone list
+rather than by hash, because hashing collided on the real Werk1 zone set
+("cummins" and "mernoki iroda" landed on the same fill). An explicit
+`metadata.color` on a work area always overrides the automatic choice.
 
 Two outcomes per row:
 - **`HWA` rows** update an already-existing asset (linked via the ITSM
@@ -910,10 +923,12 @@ Two outcomes per row:
   create duplicates.
 
 **Dry run by default — this doubles as a validation tool.** Building/Floor
-must already exist; WorkArea/Section (the actual map areas) must too — this
-script never invents hierarchy, it only matches by name (diacritic/case/
-whitespace-insensitive) and reports what didn't match. Fix typos/nicknames
-via an optional `inventory-corrections.json` in the same directory:
+must already exist, and so must the WorkAreas (drawn on the map, with the
+room as the name and the zone in the Zone/Group field) — this script never
+invents hierarchy, it only matches by name (diacritic/case/
+whitespace-insensitive) and reports unmatched pairs as `zone / room`. Fix
+typos/nicknames via an optional `inventory-corrections.json` in the same
+directory:
 ```json
 { "persons": { "gorog tomi": "Görög Tamás" },
   "helyszin": { "hr": "HR" },
