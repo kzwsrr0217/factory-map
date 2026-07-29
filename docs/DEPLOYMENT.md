@@ -143,6 +143,45 @@ netsh interface portproxy add v4tov4 listenport=8080 listenaddress=0.0.0.0 conne
 netsh interface portproxy show all   # verify
 ```
 
+Note that `podman ps` / `podman port` will *claim* the port is published on
+`0.0.0.0` even when the real Windows-side listener is loopback-only — don't
+trust it, trust `netstat`.
+
+> ### ⚠️ The portproxy breaks on every container recreate — read before rebuilding
+>
+> **Podman must bind the port BEFORE the portproxy rule exists.** If the
+> portproxy already holds `0.0.0.0:<port>` when a container is created, podman's
+> host-side port publish silently fails, and the portproxy then forwards
+> `0.0.0.0:4000 → 127.0.0.1:4000` — which is *itself*. Every request loops back
+> and closes instantly: the browser shows `net::ERR_EMPTY_RESPONSE`,
+> `Invoke-RestMethod` says "the connection was closed unexpectedly", and the
+> backend logs show **no incoming requests at all** (it's healthy and connected
+> to SQL Server, it just never sees the traffic). `netstat` gives it away:
+> `0.0.0.0:4000` listening with no matching `127.0.0.1:4000` listener, plus a
+> long tail of `127.0.0.1:4000 → 127.0.0.1:xxxxx TIME_WAIT` — the wreckage of
+> the loop.
+>
+> Any `docker-compose ... up -d --build` that recreates a container triggers
+> this. (A container compose leaves alone — "Running" rather than "Started" in
+> its output — keeps working, which is why the frontend can serve the login page
+> while the API is dead.) `podman restart` does **not** fix it: the container
+> reuses the same broken port config rather than retrying the bind.
+>
+> So on every rebuild/redeploy, do it in this order:
+> ```powershell
+> netsh interface portproxy delete v4tov4 listenport=4000 listenaddress=0.0.0.0
+> netsh interface portproxy delete v4tov4 listenport=8080 listenaddress=0.0.0.0
+> docker-compose --env-file .env.prod -f docker-compose.prod.yml up -d --build
+> netstat -an | findstr LISTENING | findstr ":4000 :8080"   # confirm podman bound them
+> netsh interface portproxy add v4tov4 listenport=4000 listenaddress=0.0.0.0 connectport=4000 connectaddress=127.0.0.1
+> netsh interface portproxy add v4tov4 listenport=8080 listenaddress=0.0.0.0 connectport=8080 connectaddress=127.0.0.1
+> ```
+> If a container was already recreated with the rule in place, `podman restart`
+> won't help — force a real recreate after deleting the rule:
+> `docker-compose --env-file .env.prod -f docker-compose.prod.yml up -d --force-recreate backend`.
+> Last-resort reset of podman's whole port-forwarding state:
+> `podman machine stop; podman machine start`.
+
 Separately, only **two ports** need to be reachable from the VLAN — pick
 values (defaults `8080` and `4000`) and open exactly those:
 
@@ -321,14 +360,27 @@ Re-run this whenever you refresh the snapshot (it's a full replace of
 
 ## 6. Upgrades / redeploys
 
-```bash
+Recreating a container silently breaks the port proxy (see the warning in §2),
+so the portproxy rules have to come down before the rebuild and go back up
+after — otherwise the app comes back up "healthy" but unreachable:
+
+```powershell
+cd C:\factory-map
 git pull
+netsh interface portproxy delete v4tov4 listenport=4000 listenaddress=0.0.0.0
+netsh interface portproxy delete v4tov4 listenport=8080 listenaddress=0.0.0.0
 docker-compose --env-file .env.prod -f docker-compose.prod.yml up -d --build
-docker exec factory-map-backend npm run migration:run
+podman exec factory-map-backend npm run migration:run
+netstat -an | findstr LISTENING | findstr ":4000 :8080"
+netsh interface portproxy add v4tov4 listenport=4000 listenaddress=0.0.0.0 connectport=4000 connectaddress=127.0.0.1
+netsh interface portproxy add v4tov4 listenport=8080 listenaddress=0.0.0.0 connectport=8080 connectaddress=127.0.0.1
+Invoke-RestMethod http://<VM-HOST>:4000/health
 ```
 
 `migration:run` is a no-op if there's nothing new to apply, so it's safe to
-run on every deploy as a matter of habit.
+run on every deploy as a matter of habit. The closing `/health` check against
+the **real hostname** (not `localhost`) is the one that actually proves the
+deploy is reachable — `localhost` works even when the portproxy is broken.
 
 ## Later: HTTPS
 
