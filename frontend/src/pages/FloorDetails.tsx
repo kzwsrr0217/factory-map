@@ -52,6 +52,10 @@ const FloorDetails: React.FC = () => {
   const [sections, setSections] = useState<Section[]>([]);
   const [workstations, setWorkstations] = useState<Workstation[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
+  // Unplaced assets with NO floor at all (e.g. bulk-created from the ITSM
+  // snapshot — ITSM has no geometry, so they arrive hierarchy-less). Offered
+  // through the map tray's search box; placing one assigns it to this floor.
+  const [floorlessAssets, setFloorlessAssets] = useState<Asset[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editMode, setEditMode] = useState(false);
@@ -130,6 +134,12 @@ const FloorDetails: React.FC = () => {
         (asset) => asset.hierarchy.floor_id === floorId
       );
       setAssets(floorAssets);
+      // Excludes replaced assets (successor_id) for the same reason the
+      // Unplaced Assets page does — a decommissioned device is unplaced on
+      // purpose and should never be offered for placement.
+      setFloorlessAssets(allAssets.filter(
+        (asset) => !asset.is_placed && !asset.successor_id && !asset.hierarchy.floor_id
+      ));
     } catch (err) {
       console.error('Error loading floor details:', err);
       setError('Failed to load floor details. Please try again.');
@@ -227,8 +237,13 @@ const FloorDetails: React.FC = () => {
   };
 
   const handlePlaceUnplacedAsset = useCallback(async (assetId: string, x: number, y: number) => {
-    const asset = assets.find(a => a._id === assetId);
-    if (!asset) return;
+    // The asset may come from this floor's own unplaced list, or from the
+    // floor-less pool (tray search) — in the latter case placing it here also
+    // assigns it to this building/floor.
+    const fromFloor = assets.find(a => a._id === assetId);
+    const fromFloorless = floorlessAssets.find(a => a._id === assetId);
+    const asset = fromFloor ?? fromFloorless;
+    if (!asset || !floor) return;
 
     const snappedWorkarea = workareas.find(wa => {
       const waX = wa.coordinates?.x ?? 0;
@@ -238,25 +253,28 @@ const FloorDetails: React.FC = () => {
       return x >= waX && x <= waX + waW && y >= waY && y <= waY + waH;
     }) ?? null;
 
-    setAssets(prev => prev.map(a =>
-      a._id === assetId
-        ? {
-            ...a,
-            location: { ...a.location, coordinates: { x, y } },
-            hierarchy: {
-              ...a.hierarchy,
-              workarea_id: snappedWorkarea ? snappedWorkarea._id : a.hierarchy.workarea_id,
-            },
-          }
-        : a
-    ));
+    const newHierarchy = {
+      ...asset.hierarchy,
+      building_id: asset.hierarchy.building_id ?? floor.building_id,
+      floor_id: floor._id,
+      workarea_id: snappedWorkarea ? snappedWorkarea._id : asset.hierarchy.workarea_id,
+    };
+    const updatedLocal: Asset = {
+      ...asset,
+      is_placed: true,
+      location: { ...asset.location, coordinates: { x, y } },
+      hierarchy: newHierarchy,
+    };
+    if (fromFloorless) {
+      setFloorlessAssets(prev => prev.filter(a => a._id !== assetId));
+      setAssets(prev => [...prev, updatedLocal]);
+    } else {
+      setAssets(prev => prev.map(a => (a._id === assetId ? updatedLocal : a)));
+    }
     try {
       await assetService.updateAsset(assetId, {
         location: { ...asset.location, coordinates: { x, y }, icon_type: asset.location.icon_type || 'computer' },
-        hierarchy: {
-          ...asset.hierarchy,
-          workarea_id: snappedWorkarea ? snappedWorkarea._id : asset.hierarchy.workarea_id,
-        },
+        hierarchy: newHierarchy,
       });
       const suffix = snappedWorkarea ? ` → ${snappedWorkarea.name}` : '';
       toast.success(`${asset.basic_info.display_name} placed on map${suffix}`);
@@ -265,7 +283,7 @@ const FloorDetails: React.FC = () => {
       toast.error('Failed to place asset.');
       if (id) loadFloorDetails(id);
     }
-  }, [assets, workareas, id, toast]);
+  }, [assets, floorlessAssets, floor, workareas, id, toast]);
 
   // Map handlers with debounce — each updates local state immediately (so
   // dragging feels instant), then persists only the last position/size via
@@ -634,6 +652,7 @@ const FloorDetails: React.FC = () => {
           workstations={workstations}
           onWorkstationMove={editMode ? handleWorkstationMove : undefined}
           unplacedAssets={unplacedAssets}
+          searchableUnplacedAssets={floorlessAssets}
           onPlaceUnplaced={handlePlaceUnplacedAsset}
           connectionMode={wireMode}
           selectedAssetsForConnection={selectedForConnection}

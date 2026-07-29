@@ -448,6 +448,29 @@
   color: var(--color-text-primary);
 }
 
+.unplacedTraySearch {
+  margin: var(--spacing-xs) var(--spacing-xs) 0;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  background: var(--color-bg-primary, #fff);
+  color: var(--color-text-primary);
+}
+
+.unplacedTraySearch:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+
+.unplacedTrayDivider {
+  padding: var(--spacing-xs) var(--spacing-sm);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  border-top: 1px solid var(--color-border);
+  margin-top: 2px;
+}
+
 .unplacedTrayList {
   overflow-y: auto;
   padding: var(--spacing-xs);
