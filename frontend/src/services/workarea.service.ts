@@ -27,6 +27,14 @@ export interface WorkArea {
   metadata?: {
     supervisor?: string;
     capacity?: number;
+    /**
+     * Map fill colour, as one of WORKAREA_COLORS' hex values. Stored in
+     * metadata rather than its own column to match how supervisor/capacity
+     * are already handled (no migration needed). When unset, the map derives
+     * a stable colour from the work area's id so neighbouring areas are
+     * still distinguishable — see workareaColors.ts.
+     */
+    color?: string;
     [key: string]: any;
   };
   created_at?: string;
