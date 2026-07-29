@@ -51,8 +51,11 @@ data/
 uploads/
 
 # Real ITSM export data (Confidential — real serial numbers/MACs/asset tags;
-# the script itself is tracked, its output never is)
+# the script itself is tracked, its output never is). `ops/results/` is where
+# the PS export script's output lands on the deployed VM.
 ops/itsm/*.json
+ops/results/
+ops/**/*.csv
 
 # Physical inventory survey tool + its exports (Internal/Confidential — real
 # HWA/serial numbers, informal employee names; never belongs in a public repo).
