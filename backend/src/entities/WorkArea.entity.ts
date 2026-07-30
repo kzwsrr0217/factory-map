@@ -43,6 +43,30 @@ export class WorkArea {
   @Column({ type: 'nvarchar', length: 200 })
   name!: string;
 
+  /**
+   * The zone (bigger named area) this room belongs to — see Zone.entity.ts.
+   * Nullable: a room can sit on a floor without being grouped yet.
+   *
+   * **Soft join, no FK** — deliberately, and not just for the N+1 reason the
+   * Asset hierarchy cites. A real FK here creates two cascade paths from
+   * `floors` to `work_areas` (directly, and via `zones`), which SQL Server
+   * rejects outright ("may cause cycles or multiple cascade paths"). The zone
+   * is resolved in the controller instead, and zone deletion clears this
+   * column explicitly. Same pattern as `production_line_code` below.
+   */
+  @Column({ name: 'zone_id', type: 'nvarchar', nullable: true })
+  @Index('IDX_work_areas_zone_id')
+  zone_id!: string | null;
+
+  /** Populated by the controller from `zone_id` — not a TypeORM relation. */
+  zone?: { id: string; name: string; color: string | null } | null;
+
+  /**
+   * @deprecated Superseded by `zone_id`. This column briefly doubled as the
+   * zone name (there was no Zone entity yet), and the AddZoneLevel migration
+   * converted every distinct value into a real Zone row. Kept for one release
+   * so that conversion stays auditable/reversible; nothing reads it.
+   */
   @Column({ name: 'area_type', type: 'nvarchar', length: 100, nullable: true })
   type!: string | null;
 
@@ -79,7 +103,10 @@ export class WorkArea {
       _id: this.id,
       floor_id: this.floor_id,
       name: this.name,
-      type: this.type,
+      zone_id: this.zone_id,
+      // Present only when the caller joined the relation; the map needs the
+      // name/colour to draw the zone halo without a second round-trip.
+      zone: this.zone ? { _id: this.zone.id, name: this.zone.name, color: this.zone.color } : null,
       coordinates: { x: this.coord_x, y: this.coord_y },
       dimensions: { width: this.dim_width, height: this.dim_height },
       production_line_code: this.production_line_code,
