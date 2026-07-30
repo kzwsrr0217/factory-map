@@ -439,6 +439,21 @@ const AssetFormModal: React.FC<AssetFormModalProps> = ({
       // deliberately cleared it (e.g. after switching building).
       const newFloorId = formData.floor_id || null;
       const floorChanged = !!asset && (asset.hierarchy.floor_id || null) !== newFloorId;
+      // Map coordinates only mean anything relative to a floor plan, and the
+      // backend derives `is_placed` from them alone (asset.controller.ts's
+      // isPlacedFromCoords). Saving non-zero coordinates with no floor would
+      // therefore mark the asset placed while it belongs to no map at all —
+      // it would vanish from every floor view AND from the unplaced lists
+      // (which require !is_placed), leaving it findable only by search.
+      // Reachable simply by changing Building, since that clears the floor.
+      // Zeroing here keeps it in the recoverable "unplaced" state instead.
+      const keepCoordinates = newFloorId !== null;
+      const coordinates = keepCoordinates
+        ? {
+            x: formData.coordinates_x !== '' ? Number(formData.coordinates_x) : 0,
+            y: formData.coordinates_y !== '' ? Number(formData.coordinates_y) : 0,
+          }
+        : { x: 0, y: 0 };
       const payload: Partial<Asset> = {
         basic_info: {
           display_name: formData.display_name,
@@ -466,10 +481,7 @@ const AssetFormModal: React.FC<AssetFormModalProps> = ({
           workstation_id: floorChanged ? null : (asset?.hierarchy?.workstation_id || null),
         },
         location: {
-          coordinates: {
-            x: formData.coordinates_x !== '' ? Number(formData.coordinates_x) : 0,
-            y: formData.coordinates_y !== '' ? Number(formData.coordinates_y) : 0,
-          },
+          coordinates,
           description: formData.location_description || undefined,
         },
         itsm: {
@@ -882,6 +894,14 @@ const AssetFormModal: React.FC<AssetFormModalProps> = ({
               helperText={!errors.coordinates_y && !validateCoordinate('coordinates_y') && formData.coordinates_y ? `Position: ${formData.coordinates_y}px` : 'Vertical position on floor'}
             />
           </div>
+
+          {!formData.floor_id && (Number(formData.coordinates_x) !== 0 || Number(formData.coordinates_y) !== 0) && (
+            <p className={styles.helperText}>
+              ⚠️ Coordinates need a floor to mean anything, so they&apos;ll be reset
+              on save and this asset will move to Unplaced Assets. Pick a floor
+              above to keep its position on the map.
+            </p>
+          )}
 
           <Textarea
             label="Location Description"

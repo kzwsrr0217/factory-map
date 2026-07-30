@@ -786,7 +786,6 @@ const FloorDetails: React.FC = () => {
         onSuccess={handleWorkareaFormSuccess}
         floorId={id || ''}
         workarea={editingWorkarea}
-        existingWorkareas={workareas}
       />
 
       {/* WorkArea Details Modal */}

@@ -22,7 +22,10 @@
       "Bash(docker-compose up *)",
       "Read(//c/tmp/**)",
       "Bash(node -e \"let d='';process.stdin.on\\('data',c=>d+=c\\);process.stdin.on\\('end',\\(\\)=>{const j=JSON.parse\\(d\\).data; console.log\\(JSON.stringify\\(j.name\\)\\)}\\)\")",
-      "Bash(xxd \"/c/temporary/floor-patch.json\")"
+      "Bash(xxd \"/c/temporary/floor-patch.json\")",
+      "Read(//tmp/**)",
+      "Bash(python -c \"import sys,json;a=json.load\\(sys.stdin\\)['data'];print\\('asset reverted -> is_placed:',a['is_placed'],'| bld:',a['hierarchy']['building_id']\\)\")",
+      "Bash(rm -f /tmp/tok)"
     ]
   }
 }

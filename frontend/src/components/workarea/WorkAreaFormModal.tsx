@@ -10,6 +10,7 @@ import Modal from '../common/Modal';
 import Button from '../common/Button';
 import Input from '../common/Input';
 import { workareaService, WorkArea } from '../../services/workarea.service';
+import { useWorkareas } from '../../hooks/queries/useWorkareas';
 import { WORKAREA_COLORS, distinctZones } from '../../utils/workareaColors';
 import { useToast } from '../../contexts/ToastContext';
 import styles from '../../styles/components/WorkAreaFormModal.module.css';
@@ -20,12 +21,6 @@ interface WorkAreaFormModalProps {
   onSuccess: () => void;
   floorId: string;
   workarea?: WorkArea | null;
-  /**
-   * Work areas already loaded by the parent, used only to suggest existing
-   * zone names. Passed in rather than refetched here so opening the form
-   * doesn't re-download the whole table every time.
-   */
-  existingWorkareas?: WorkArea[];
 }
 
 const WorkAreaFormModal: React.FC<WorkAreaFormModalProps> = ({
@@ -34,7 +29,6 @@ const WorkAreaFormModal: React.FC<WorkAreaFormModalProps> = ({
   onSuccess,
   floorId,
   workarea,
-  existingWorkareas = [],
 }) => {
   const [formData, setFormData] = useState({
     name: '',
@@ -47,9 +41,15 @@ const WorkAreaFormModal: React.FC<WorkAreaFormModalProps> = ({
   const [submitting, setSubmitting] = useState(false);
   const toast = useToast();
 
-  // Existing zone names, so a new room joins an existing zone instead of
-  // accidentally creating "hr" beside "HR".
-  const zoneSuggestions = useMemo(() => distinctZones(existingWorkareas), [existingWorkareas]);
+  // Zone names from EVERY work area, not just this floor's — zones span floors
+  // ("HR" exists on the ground floor, "Cummins" on another), and the whole
+  // point of suggesting them is that a new room joins an existing zone rather
+  // than spawning "hr" beside "HR". A floor-scoped list would be empty on a
+  // brand-new floor, exactly when the guard matters most. The shared query
+  // hook keeps this to one cached request app-wide, and its create/update
+  // mutations invalidate it, so new zones appear without a manual refetch.
+  const { data: allWorkareas = [] } = useWorkareas();
+  const zoneSuggestions = useMemo(() => distinctZones(allWorkareas), [allWorkareas]);
 
   useEffect(() => {
     if (workarea) {
