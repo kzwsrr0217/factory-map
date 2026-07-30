@@ -35,9 +35,8 @@ function seedHandlers() {
   return [
     rest.get(`${API}/buildings`,    (_req, res, ctx) => res(ctx.json({ success: true, data: [SEED_BUILDING] }))),
     rest.get(`${API}/floors`,       (_req, res, ctx) => res(ctx.json({ success: true, data: [] }))),
+    rest.get(`${API}/zones`,        (_req, res, ctx) => res(ctx.json({ success: true, data: [] }))),
     rest.get(`${API}/workareas`,    (_req, res, ctx) => res(ctx.json({ success: true, data: [] }))),
-    rest.get(`${API}/sections`,     (_req, res, ctx) => res(ctx.json({ success: true, data: [] }))),
-    rest.get(`${API}/workstations`, (_req, res, ctx) => res(ctx.json({ success: true, data: [] }))),
     rest.get(`${API}/assets`,       (_req, res, ctx) => res(ctx.json({ success: true, data: [SEED_ASSET] }))),
   ];
 }

@@ -1,22 +1,21 @@
 /**
  * WorkAreaDetailsModal.tsx — Drill-down panel for a single work area.
  *
- * Displays the work area metadata and its child sections. From here users can:
- *   - Create / delete sections (opens SectionFormModal).
- *   - Create workstations within a section (opens WorkstationFormModal).
- *   - Delete workstations (inline with ConfirmDialog).
+ * Shows the work area's metadata (including its Zone) and the assets in it.
  *
- * Assets assigned to workstations in this work area are listed under each
- * workstation row. All mutation actions call their respective services and
- * trigger a local list reload via `loadSections()`.
+ * **Sections and Workstations are retired levels.** The hierarchy is
+ * Building > Floor > Zone > WorkArea; the two deeper levels caused more
+ * confusion than they resolved (a Section has no geometry, so it could never be
+ * drawn on the map at all) and nothing creates them any more. Their tabs appear
+ * only while a work area still has such rows, and offer deletion only — so
+ * existing data stays visible and can be cleaned up, and the UI becomes plain
+ * 4-level on its own once it is gone.
  */
 import React, { useState } from 'react';
 import Modal from '../common/Modal';
 import Button from '../common/Button';
 import Badge from '../common/Badge';
 import ConfirmDialog from '../common/ConfirmDialog';
-import SectionFormModal from '../section/SectionFormModal';
-import WorkstationFormModal from '../workstation/WorkstationFormModal';
 import { WorkArea } from '../../services/workarea.service';
 import { Asset } from '../../services/asset.service';
 import { Section, sectionService } from '../../services/section.service';
@@ -48,15 +47,10 @@ const WorkAreaDetailsModal: React.FC<WorkAreaDetailsModalProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<'info' | 'sections' | 'workstations' | 'assets'>('info');
   
-  // Section modals
-  const [sectionFormOpen, setSectionFormOpen] = useState(false);
-  const [editingSection, setEditingSection] = useState<Section | null>(null);
+  // Legacy-level cleanup dialogs — deletion only, no create/edit.
   const [deletingSection, setDeletingSection] = useState<Section | null>(null);
   const [deleteSectionDialogOpen, setDeleteSectionDialogOpen] = useState(false);
   
-  // Workstation modals
-  const [workstationFormOpen, setWorkstationFormOpen] = useState(false);
-  const [editingWorkstation, setEditingWorkstation] = useState<Workstation | null>(null);
   const [deletingWorkstation, setDeletingWorkstation] = useState<Workstation | null>(null);
   const [deleteWorkstationDialogOpen, setDeleteWorkstationDialogOpen] = useState(false);
   
@@ -66,17 +60,6 @@ const WorkAreaDetailsModal: React.FC<WorkAreaDetailsModalProps> = ({
   if (!workarea) return null;
 
   // Section handlers
-  const handleAddSection = () => {
-    setEditingSection(null);
-    setSectionFormOpen(true);
-  };
-
-  const handleEditSection = (section: Section, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setEditingSection(section);
-    setSectionFormOpen(true);
-  };
-
   const handleDeleteSection = (section: Section, e: React.MouseEvent) => {
     e.stopPropagation();
     setDeletingSection(section);
@@ -101,17 +84,6 @@ const WorkAreaDetailsModal: React.FC<WorkAreaDetailsModalProps> = ({
   };
 
   // Workstation handlers
-  const handleAddWorkstation = () => {
-    setEditingWorkstation(null);
-    setWorkstationFormOpen(true);
-  };
-
-  const handleEditWorkstation = (workstation: Workstation, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setEditingWorkstation(workstation);
-    setWorkstationFormOpen(true);
-  };
-
   const handleDeleteWorkstation = (workstation: Workstation, e: React.MouseEvent) => {
     e.stopPropagation();
     setDeletingWorkstation(workstation);
@@ -133,10 +105,6 @@ const WorkAreaDetailsModal: React.FC<WorkAreaDetailsModalProps> = ({
       setDeleteWorkstationDialogOpen(false);
       setDeletingWorkstation(null);
     }
-  };
-
-  const handleFormSuccess = () => {
-    onRefresh();
   };
 
   const footer = (
@@ -163,18 +131,22 @@ const WorkAreaDetailsModal: React.FC<WorkAreaDetailsModalProps> = ({
             >
               Information
             </button>
-            <button
-              className={`${styles.tab} ${activeTab === 'sections' ? styles.active : ''}`}
-              onClick={() => setActiveTab('sections')}
-            >
-              Sections ({sections.length})
-            </button>
-            <button
-              className={`${styles.tab} ${activeTab === 'workstations' ? styles.active : ''}`}
-              onClick={() => setActiveTab('workstations')}
-            >
-              Workstations ({workstations.length})
-            </button>
+            {sections.length > 0 && (
+              <button
+                className={`${styles.tab} ${activeTab === 'sections' ? styles.active : ''}`}
+                onClick={() => setActiveTab('sections')}
+              >
+                Sections ({sections.length})
+              </button>
+            )}
+            {workstations.length > 0 && (
+              <button
+                className={`${styles.tab} ${activeTab === 'workstations' ? styles.active : ''}`}
+                onClick={() => setActiveTab('workstations')}
+              >
+                Workstations ({workstations.length})
+              </button>
+            )}
             <button
               className={`${styles.tab} ${activeTab === 'assets' ? styles.active : ''}`}
               onClick={() => setActiveTab('assets')}
@@ -193,10 +165,10 @@ const WorkAreaDetailsModal: React.FC<WorkAreaDetailsModalProps> = ({
                     <span className={styles.label}>Name:</span>
                     <span className={styles.value}>{workarea.name}</span>
                   </div>
-                  {workarea.type && (
+                  {workarea.zone?.name && (
                     <div className={styles.infoItem}>
-                      <span className={styles.label}>Type:</span>
-                      <span className={styles.value}>{workarea.type}</span>
+                      <span className={styles.label}>Zone:</span>
+                      <span className={styles.value}>{workarea.zone.name}</span>
                     </div>
                   )}
                   {workarea.production_line_code && (
@@ -233,14 +205,6 @@ const WorkAreaDetailsModal: React.FC<WorkAreaDetailsModalProps> = ({
 
                 <div className={styles.stats}>
                   <div className={styles.statItem}>
-                    <span className={styles.statValue}>{sections.length}</span>
-                    <span className={styles.statLabel}>Sections</span>
-                  </div>
-                  <div className={styles.statItem}>
-                    <span className={styles.statValue}>{workstations.length}</span>
-                    <span className={styles.statLabel}>Workstations</span>
-                  </div>
-                  <div className={styles.statItem}>
                     <span className={styles.statValue}>{assets.length}</span>
                     <span className={styles.statLabel}>Assets</span>
                   </div>
@@ -248,18 +212,18 @@ const WorkAreaDetailsModal: React.FC<WorkAreaDetailsModalProps> = ({
               </div>
             )}
 
-            {/* Sections Tab */}
-            {activeTab === 'sections' && (
+            {/* Sections Tab — retired level, kept for cleanup only */}
+            {activeTab === 'sections' && sections.length > 0 && (
               <div className={styles.section}>
                 <div className={styles.sectionHeader}>
                   <h3>Sections in {workarea.name}</h3>
-                  <Button variant="primary" size="sm" onClick={handleAddSection}>
-                    + Add Section
-                  </Button>
                 </div>
+                <p className={styles.legacyNote}>
+                  Sections are a retired level — the hierarchy is Building &gt; Floor
+                  &gt; Zone &gt; Work Area. These rows are left over and can be deleted.
+                </p>
 
-                {sections.length > 0 ? (
-                  <div className={styles.itemsList}>
+                <div className={styles.itemsList}>
                     {sections.map((section) => (
                       <div key={section._id} className={styles.item}>
                         <div className={styles.itemIcon}>🏭</div>
@@ -272,13 +236,6 @@ const WorkAreaDetailsModal: React.FC<WorkAreaDetailsModalProps> = ({
                         </div>
                         <div className={styles.itemActions}>
                           <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={(e) => handleEditSection(section, e)}
-                          >
-                            Edit
-                          </Button>
-                          <Button
                             variant="danger"
                             size="sm"
                             onClick={(e) => handleDeleteSection(section, e)}
@@ -288,30 +245,22 @@ const WorkAreaDetailsModal: React.FC<WorkAreaDetailsModalProps> = ({
                         </div>
                       </div>
                     ))}
-                  </div>
-                ) : (
-                  <div className={styles.empty}>
-                    <p>No sections in this work area</p>
-                    <Button variant="primary" onClick={handleAddSection}>
-                      + Add First Section
-                    </Button>
-                  </div>
-                )}
+                </div>
               </div>
             )}
 
-            {/* Workstations Tab */}
-            {activeTab === 'workstations' && (
+            {/* Workstations Tab — retired level, kept for cleanup only */}
+            {activeTab === 'workstations' && workstations.length > 0 && (
               <div className={styles.section}>
                 <div className={styles.sectionHeader}>
                   <h3>Workstations in {workarea.name}</h3>
-                  <Button variant="primary" size="sm" onClick={handleAddWorkstation}>
-                    + Add Workstation
-                  </Button>
                 </div>
+                <p className={styles.legacyNote}>
+                  Workstations are a retired level — assets sit directly in a work
+                  area now. These rows are left over and can be deleted.
+                </p>
 
-                {workstations.length > 0 ? (
-                  <div className={styles.itemsList}>
+                <div className={styles.itemsList}>
                     {workstations.map((workstation) => (
                       <div key={workstation._id} className={styles.item}>
                         <div className={styles.itemIcon}>🔧</div>
@@ -335,13 +284,6 @@ const WorkAreaDetailsModal: React.FC<WorkAreaDetailsModalProps> = ({
                         </Badge>
                         <div className={styles.itemActions}>
                           <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={(e) => handleEditWorkstation(workstation, e)}
-                          >
-                            Edit
-                          </Button>
-                          <Button
                             variant="danger"
                             size="sm"
                             onClick={(e) => handleDeleteWorkstation(workstation, e)}
@@ -351,15 +293,7 @@ const WorkAreaDetailsModal: React.FC<WorkAreaDetailsModalProps> = ({
                         </div>
                       </div>
                     ))}
-                  </div>
-                ) : (
-                  <div className={styles.empty}>
-                    <p>No workstations in this work area</p>
-                    <Button variant="primary" onClick={handleAddWorkstation}>
-                      + Add First Workstation
-                    </Button>
-                  </div>
-                )}
+                </div>
               </div>
             )}
 
@@ -409,24 +343,6 @@ const WorkAreaDetailsModal: React.FC<WorkAreaDetailsModalProps> = ({
           </div>
         </div>
       </Modal>
-
-      {/* Section Form Modal */}
-      <SectionFormModal
-        isOpen={sectionFormOpen}
-        onClose={() => setSectionFormOpen(false)}
-        onSuccess={handleFormSuccess}
-        workareaId={workarea._id}
-        section={editingSection}
-      />
-
-      {/* Workstation Form Modal */}
-      <WorkstationFormModal
-        isOpen={workstationFormOpen}
-        onClose={() => setWorkstationFormOpen(false)}
-        onSuccess={handleFormSuccess}
-        sectionId={sections[0]?._id || ''} // Simple: use first section or require selection
-        workstation={editingWorkstation}
-      />
 
       {/* Delete Section Confirmation */}
       <ConfirmDialog

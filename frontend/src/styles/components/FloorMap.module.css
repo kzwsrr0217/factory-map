@@ -139,6 +139,16 @@
   user-select: none;
 }
 
+/* Zone name, drawn once above a zone's top-left room. Wide letter-spacing and
+   caps set it apart from the room names inside, which are the same colour family.
+   `fill` comes from the zone colour inline, so it isn't set here. */
+.zoneLabel {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  user-select: none;
+}
+
 /* Assets */
 .asset {
   transition: all var(--transition-base);

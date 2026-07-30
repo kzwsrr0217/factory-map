@@ -161,6 +161,10 @@ export const handlers = [
     })),
   ),
 
+  rest.get(`${API}/zones`, (_req, res, ctx) =>
+    res(ctx.json({ success: true, data: [] })),
+  ),
+
   rest.get(`${API}/workareas`, (_req, res, ctx) =>
     res(ctx.json({ success: true, data: [] })),
   ),

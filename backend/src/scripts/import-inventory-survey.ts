@@ -7,9 +7,9 @@
  * — e.g. monitors — its type/serial number instead (`azonosito_mod:
  * "EGYEB"`, Hungarian for "other"), plus where it physically sits
  * (building/floor/`helyszín`/`work area` — a 4-level hierarchy matching
- * factorymap's hierarchy, with the tool's `work_area` (the room) = WorkArea
- * and `helyszín` (the zone grouping several rooms) = that WorkArea's `type`
- * field — Sections are not used, see matchWorkArea) and
+ * factorymap's Building > Floor > Zone > WorkArea exactly, with the tool's
+ * `work_area` (the room) = WorkArea and `helyszín` = that room's Zone —
+ * Sections are not used, see matchWorkArea) and
  * who uses it (`személy`, free text, not necessarily matching a real name).
  *
  * Two outcomes per row:
@@ -57,6 +57,7 @@ import { Asset } from '../entities/Asset.entity';
 import { Building } from '../entities/Building.entity';
 import { Floor } from '../entities/Floor.entity';
 import { WorkArea } from '../entities/WorkArea.entity';
+import { Zone } from '../entities/Zone.entity';
 import { ItsmHardwareSnapshot } from '../entities/ItsmHardwareSnapshot.entity';
 import { chunkForEntity, findByIn } from '../utils/mssqlBatch';
 
@@ -205,23 +206,33 @@ function matchFloor(floors: Floor[], buildingId: string, emelet: string | undefi
 }
 
 /**
+ * Zones keyed by `floorId + '|' + foldedName`, so the survey's `helyszin`
+ * resolves to a real Zone row without a per-row query.
+ */
+function indexZones(zones: Zone[]): Map<string, Zone> {
+  const index = new Map<string, Zone>();
+  for (const zone of zones) index.set(`${zone.floor_id}|${fold(zone.name)}`, zone);
+  return index;
+}
+
+/**
  * Matches the survey's `work_area` (the fine-grained room — "recepcio",
  * "hr iroda", "cummins rotor 1") against WorkArea.name, optionally narrowed by
- * the survey's `helyszin` (the zone — "hr", "cummins") against WorkArea.type.
+ * the survey's `helyszin` (the zone — "hr", "cummins") against the room's Zone.
  *
- * Note the deliberate mapping: WorkArea holds the ROOM, and its `type` field
- * holds the ZONE. Sections aren't used, because a Section has no width/height
- * in the schema and therefore can't be drawn on the floor map at all — the
- * rooms are what people actually draw, so the rooms have to be WorkAreas. The
- * zone lives on `type`, which also drives the shared map colour so all rooms
- * in one zone read as a group (see frontend/src/utils/workareaColors.ts).
+ * The survey's 4 levels map straight onto the app's:
+ * `epulet` = Building, `emelet` = Floor, `helyszin` = **Zone**,
+ * `work_area` = **WorkArea** (the room). Sections aren't used, because a Section
+ * has no width/height in the schema and so can't be drawn on the floor map at
+ * all — the rooms are what people actually draw.
  *
  * `helyszin` is used as a tiebreak rather than a hard filter: it disambiguates
  * same-named rooms in different zones without rejecting a room whose zone
- * simply hasn't been filled in on the map yet.
+ * simply hasn't been assigned on the map yet.
  */
 function matchWorkArea(
   workAreas: WorkArea[],
+  zoneIndex: Map<string, Zone>,
   floorId: string,
   helyszin: string | undefined,
   workAreaField: string | undefined,
@@ -229,15 +240,15 @@ function matchWorkArea(
 ): WorkArea | null {
   const room = correct(corrections.work_area, (workAreaField ?? '').trim());
   if (!room) return null;
-  const zone = correct(corrections.helyszin, (helyszin ?? '').trim());
+  const zoneName = correct(corrections.helyszin, (helyszin ?? '').trim());
   // Folded once, not per candidate — fold() does an NFD normalise plus a
   // per-codepoint loop, and this runs for every survey row.
   const foldedRoom = fold(room);
-  const foldedZone = fold(zone);
   const byName = workAreas.filter((w) => w.floor_id === floorId && fold(w.name) === foldedRoom);
   if (byName.length === 0) return null;
-  if (byName.length === 1 || !zone) return byName[0];
-  return byName.find((w) => fold(w.type) === foldedZone) ?? byName[0];
+  if (byName.length === 1 || !zoneName) return byName[0];
+  const zone = zoneIndex.get(`${floorId}|${fold(zoneName)}`);
+  return (zone ? byName.find((w) => w.zone_id === zone.id) : undefined) ?? byName[0];
 }
 
 interface PlannedUpdate {
@@ -263,6 +274,7 @@ async function planImport(rows: SurveyRow[], corrections: Corrections): Promise<
   const buildings = await AppDataSource.getRepository(Building).find();
   const floors = await AppDataSource.getRepository(Floor).find();
   const workAreas = await AppDataSource.getRepository(WorkArea).find();
+  const zoneIndex = indexZones(await AppDataSource.getRepository(Zone).find());
   const personIndex = await buildPersonIndex();
   const assetRepo = AppDataSource.getRepository(Asset);
 
@@ -304,7 +316,7 @@ async function planImport(rows: SurveyRow[], corrections: Corrections): Promise<
     if (!building || !floor) { plan.unmatchedBuildingOrFloor.push(row); continue; }
 
     const workAreaField = (row.work_area ?? '').trim();
-    const workArea = matchWorkArea(workAreas, floor.id, row.helyszin, workAreaField, corrections);
+    const workArea = matchWorkArea(workAreas, zoneIndex, floor.id, row.helyszin, workAreaField, corrections);
     if (!workArea && workAreaField) {
       // Reported as "zone / room" so it's obvious which rectangle to draw.
       plan.unmatchedWorkArea.add(`${(row.helyszin ?? '?').trim()} / ${workAreaField}`);
@@ -383,7 +395,7 @@ function printReport(plan: ImportPlan): void {
     for (const u of uniq) console.log(`   - ${u}`);
   }
   if (plan.unmatchedWorkArea.size > 0) {
-    console.log(`\n⚠️  ${plan.unmatchedWorkArea.size} distinct zone/room pair(s) not found on the matched floor — draw the WorkArea (its name = the room, its Zone/Group = the helyszín), or add a "work_area"/"helyszin" correction:`);
+    console.log(`\n⚠️  ${plan.unmatchedWorkArea.size} distinct zone/room pair(s) not found on the matched floor — draw the WorkArea (its name = the room, its Zone = the helyszín), or add a "work_area"/"helyszin" correction:`);
     for (const u of plan.unmatchedWorkArea) console.log(`   - ${u}`);
   }
   if (plan.unmatchedPerson.size > 0) {

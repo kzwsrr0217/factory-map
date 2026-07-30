@@ -40,7 +40,6 @@ import { assetService, Asset, AssetStatus } from '../../services/asset.service';
 import { hierarchyService, Building } from '../../services/hierarchy.service';
 import { floorService, Floor } from '../../services/floor.service';
 import { workareaService, WorkArea } from '../../services/workarea.service';
-import { sectionService, Section } from '../../services/section.service';
 import { networkService, WallPort } from '../../services/network.service';
 import { ASSET_TYPE_OPTIONS } from '../../utils/assetTypes';
 import { ASSET_TEMPLATES } from '../../utils/assetTemplates';
@@ -79,7 +78,6 @@ const AssetFormModal: React.FC<AssetFormModalProps> = ({
   // beats a request per selection change.
   const [floors, setFloors] = useState<Floor[]>([]);
   const [workareas, setWorkareas] = useState<WorkArea[]>([]);
-  const [sections, setSections] = useState<Section[]>([]);
   const [allAssets, setAllAssets] = useState<AssetOption[]>([]);
   const [wallPorts, setWallPorts] = useState<WallPort[]>([]);
   const [wallPortId, setWallPortId] = useState<string>('');
@@ -107,7 +105,6 @@ const AssetFormModal: React.FC<AssetFormModalProps> = ({
     building_id: string;
     floor_id: string;
     workarea_id: string;
-    section_id: string;
     coordinates_x: string;
     coordinates_y: string;
     location_description: string;
@@ -160,7 +157,6 @@ const AssetFormModal: React.FC<AssetFormModalProps> = ({
     building_id: defaultBuildingId || '',
     floor_id: defaultFloorId || '',
     workarea_id: '',
-    section_id: '',
     coordinates_x: (defaultCoordinates?.x ?? 0).toString(),
     coordinates_y: (defaultCoordinates?.y ?? 0).toString(),
     location_description: '',
@@ -261,7 +257,6 @@ const AssetFormModal: React.FC<AssetFormModalProps> = ({
         building_id: asset.hierarchy.building_id || '',
         floor_id: asset.hierarchy.floor_id || defaultFloorId || '',
         workarea_id: asset.hierarchy.workarea_id || '',
-        section_id: asset.hierarchy.section_id || '',
         coordinates_x: asset.location.coordinates.x.toString(),
         coordinates_y: asset.location.coordinates.y.toString(),
         location_description: asset.location.description || '',
@@ -320,7 +315,6 @@ const AssetFormModal: React.FC<AssetFormModalProps> = ({
         building_id: defaultBuildingId || '',
         floor_id: defaultFloorId || '',
         workarea_id: '',
-        section_id: '',
         coordinates_x: (defaultCoordinates?.x ?? 0).toString(),
         coordinates_y: (defaultCoordinates?.y ?? 0).toString(),
         location_description: '',
@@ -370,16 +364,14 @@ const AssetFormModal: React.FC<AssetFormModalProps> = ({
 
   const loadHierarchy = async () => {
     try {
-      const [buildingData, floorData, workareaData, sectionData] = await Promise.all([
+      const [buildingData, floorData, workareaData] = await Promise.all([
         hierarchyService.getBuildings(),
         floorService.getFloors(),
         workareaService.getWorkAreas(),
-        sectionService.getSections(),
       ]);
       setBuildings(buildingData);
       setFloors(floorData);
       setWorkareas(workareaData);
-      setSections(sectionData);
     } catch (error) {
       console.error('Error loading hierarchy:', error);
     }
@@ -470,14 +462,16 @@ const AssetFormModal: React.FC<AssetFormModalProps> = ({
         hierarchy: {
           building_id: formData.building_id || null,
           floor_id: newFloorId,
-          // Work area / section are now explicit pickers, and the cascade
-          // below already clears them whenever their parent changes — so
-          // whatever is in formData is valid for the selected floor and can
-          // be sent as-is. Workstation still has no picker, so it can only
-          // carry an existing value forward, and must be dropped when the
-          // floor changes (it belongs to a different floor entirely).
+          // Work area is an explicit picker, and the cascade below clears it
+          // whenever the floor changes — so whatever is in formData is valid
+          // for the selected floor and can be sent as-is.
           workarea_id: formData.workarea_id || null,
-          section_id: formData.section_id || null,
+          // Section and workstation are retired levels: the hierarchy is
+          // Building > Floor > Zone > WorkArea, and nothing sets these any
+          // more. Any legacy value is carried forward untouched rather than
+          // wiped, but is dropped when the floor changes — it belonged to a
+          // different floor entirely.
+          section_id: floorChanged ? null : (asset?.hierarchy?.section_id || null),
           workstation_id: floorChanged ? null : (asset?.hierarchy?.workstation_id || null),
         },
         location: {
@@ -600,7 +594,7 @@ const AssetFormModal: React.FC<AssetFormModalProps> = ({
 
   // Cascading option lists — each filtered by the selection above it. Memoised
   // on their own inputs so typing in any of this form's ~30 other fields
-  // doesn't re-filter all four hierarchy lists.
+  // doesn't re-filter all three hierarchy lists.
   const buildingOptions = useMemo(
     () => buildings.map((b) => ({ value: b._id, label: b.name })),
     [buildings],
@@ -620,11 +614,10 @@ const AssetFormModal: React.FC<AssetFormModalProps> = ({
     [workareas, formData.floor_id],
   );
 
-  const sectionOptions = useMemo(
-    () => sections
-      .filter((s) => s.workarea_id === formData.workarea_id)
-      .map((s) => ({ value: s._id, label: s.name })),
-    [sections, formData.workarea_id],
+  // The zone of the selected work area, shown read-only under the picker.
+  const selectedWorkareaZone = useMemo(
+    () => workareas.find((w) => w._id === formData.workarea_id)?.zone?.name ?? '',
+    [workareas, formData.workarea_id],
   );
 
   const statusOptions: Array<{ value: AssetStatus; label: string }> = [
@@ -833,9 +826,9 @@ const AssetFormModal: React.FC<AssetFormModalProps> = ({
           <Select
             value={formData.building_id}
             onChange={(value) => {
-              // Each level clears everything below it — a floor/area/section
+              // Each level clears everything below it — a floor/work area
               // from the old parent would be invalid under the new one.
-              setField({ building_id: value, floor_id: '', workarea_id: '', section_id: '' });
+              setField({ building_id: value, floor_id: '', workarea_id: '' });
               if (errors.building_id) setErrors({ ...errors, building_id: '' });
             }}
             options={buildingOptions}
@@ -847,7 +840,7 @@ const AssetFormModal: React.FC<AssetFormModalProps> = ({
 
           <Select
             value={formData.floor_id}
-            onChange={(value) => setField({ floor_id: value, workarea_id: '', section_id: '' })}
+            onChange={(value) => setField({ floor_id: value, workarea_id: '' })}
             options={floorOptions}
             placeholder={formData.building_id ? 'Select floor (optional)' : 'Select a building first'}
             disabled={!formData.building_id}
@@ -855,19 +848,16 @@ const AssetFormModal: React.FC<AssetFormModalProps> = ({
 
           <Select
             value={formData.workarea_id}
-            onChange={(value) => setField({ workarea_id: value, section_id: '' })}
+            onChange={(value) => setField({ workarea_id: value })}
             options={workareaOptions}
             placeholder={formData.floor_id ? 'Select work area (optional)' : 'Select a floor first'}
             disabled={!formData.floor_id}
           />
-
-          <Select
-            value={formData.section_id}
-            onChange={(value) => setField({ section_id: value })}
-            options={sectionOptions}
-            placeholder={formData.workarea_id ? 'Select section (optional)' : 'Select a work area first'}
-            disabled={!formData.workarea_id}
-          />
+          {/* The zone isn't picked here — it's a property of the work area, so
+              showing it read-only keeps the two from disagreeing. */}
+          {selectedWorkareaZone && (
+            <p className={styles.helperText}>Zone: <strong>{selectedWorkareaZone}</strong></p>
+          )}
           <p className={styles.helperText}>
             Assigning a floor/area here does not place the asset on the map —
             set coordinates below, or drag it from the floor map&apos;s unplaced tray.

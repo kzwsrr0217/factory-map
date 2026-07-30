@@ -223,23 +223,43 @@ This lets you trace the full cable path from the device to the distribution room
 
 ---
 
-## Work Areas & Sections
+## Zones & Work Areas
 
-Work areas are zones within a floor (e.g., "Assembly Line 1", "Server Room"). Sections are subdivisions within work areas. Workstations are individual positions within sections.
+The hierarchy is **Building > Floor > Zone > Work Area**.
+
+- A **work area** is one room — "HR Office", "Reception", "Assembly Line 1". It is
+  the rectangle you draw on the floor map, and assets are placed inside it.
+- A **zone** is the bigger named area those rooms belong to — "HR", "Cummins",
+  "Maintenance". A zone has no rectangle of its own: the map outlines it from its
+  rooms, so a zone made of two adjacent rooms plus one down the corridor shows as
+  one L-shaped blob plus a separate one, which is what the floor actually looks like.
+- Every room in a zone shares one colour, so you can see at a glance that four
+  offices are all HR. The colour belongs to the zone, so it cannot disagree
+  between two rooms of the same zone.
+
+This matches the physical inventory survey exactly: `épület` = building,
+`emelet` = floor, `helyszín` = zone, `work area` = work area.
 
 ### Viewing work areas
-Work areas appear as coloured rectangles on the floor map. Click one to see its details.
+Work areas appear as coloured rectangles on the floor map, with their zone's name
+above the group. Click one to see its details.
 
 ### Creating a work area (operator/admin)
-1. Open a floor map
-2. Click **Add Work Area**
-3. Enter a name and optional type
+1. Open a floor map and turn on edit mode
+2. Draw a rectangle on the plan (or click **Add Work Area**)
+3. Enter the room's name, then pick its **Zone** — or choose **+ New zone…** and
+   name it, without leaving the dialog
 4. The work area appears on the map and can be repositioned by dragging
 
-### Adding sections to a work area
-1. Click on a work area on the map
-2. In the details panel, click **Add Section**
-3. Enter the section name and capacity
+### Changing a zone's colour
+Open any of its rooms, then pick a swatch under **Zone Colour**. It applies to the
+whole zone — every room in it changes, not just the one you opened. On **Auto**
+the map picks a free colour for the floor.
+
+> **Sections and Workstations are retired.** Earlier versions had two more levels
+> below the work area. They are no longer created; assets sit directly in a work
+> area. Existing rows stay visible in a work area's details so they can be
+> deleted.
 
 ---
 

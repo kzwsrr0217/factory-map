@@ -10,12 +10,13 @@
  *   /api/auth  — login, refresh, capabilities
  *
  * Protected (JWT required):
- *   /api/buildings, /api/floors, /api/workareas, /api/sections, /api/workstations
+ *   /api/buildings, /api/floors, /api/zones, /api/workareas, /api/sections, /api/workstations
  *   /api/assets, /api/itsm, /api/users, /api/audit
  */
 import { Router } from 'express';
 import buildingsRoutes from './buildings.routes';
 import floorsRoutes from './floors.routes';
+import zonesRoutes from './zones.routes';
 import workareasRoutes from './workareas.routes';
 import sectionsRoutes from './sections.routes';
 import workstationsRoutes from './workstations.routes';
@@ -42,6 +43,7 @@ router.use(authenticate);
 
 router.use('/buildings', buildingsRoutes);
 router.use('/floors', floorsRoutes);
+router.use('/zones', zonesRoutes);
 router.use('/workareas', workareasRoutes);
 router.use('/sections', sectionsRoutes);
 router.use('/workstations', workstationsRoutes);

@@ -2,7 +2,7 @@
  * GlobalSearch.tsx — Full-screen search overlay (Ctrl+K).
  *
  * Provides instant prefix-search across all six entity types: buildings,
- * floors, workareas, sections, workstations, and assets.
+ * floors, zones, workareas, and assets.
  *
  * Architecture:
  *   Module-level cache (`cachedIndex`, `cachedResults`, `indexBuilding`) —
@@ -32,7 +32,7 @@ import styles from '../../styles/components/GlobalSearch.module.css';
 
 interface SearchResult {
   id: string;
-  type: 'building' | 'floor' | 'workarea' | 'section' | 'workstation' | 'asset';
+  type: 'building' | 'floor' | 'zone' | 'workarea' | 'asset';
   title: string;
   subtitle?: string;
   icon: string;
@@ -50,8 +50,7 @@ let cachedResults: SearchResult[] = [];
 let indexBuilding = false;
 
 function buildRecords(
-  buildings: any[], floors: any[], workareas: any[],
-  sections: any[], workstations: any[], assets: any[]
+  buildings: any[], floors: any[], zones: any[], workareas: any[], assets: any[]
 ): { records: IndexRecord[]; results: SearchResult[] } {
   const results: SearchResult[] = [];
   const records: IndexRecord[] = [];
@@ -77,13 +76,10 @@ function buildRecords(
     add(f._id, 'floor', f.name, `Level ${f.floor_number}`, '📐', `/floors/${f._id}`, `floor ${f.floor_number}`)
   );
   workareas.forEach((wa: any) =>
-    add(wa._id, 'workarea', wa.name, wa.type, '🏭', `/floors/${wa.floor_id}`, wa.type ?? '')
+    add(wa._id, 'workarea', wa.name, wa.zone?.name, '🏭', `/floors/${wa.floor_id}`, wa.zone?.name ?? '')
   );
-  sections.forEach((s: any) =>
-    add(s._id, 'section', s.name, s.shift_schedule, '🔧', `/floors/${s.workarea_id}`, '')
-  );
-  workstations.forEach((ws: any) =>
-    add(ws._id, 'workstation', ws.name, ws.type, '⚙️', `/floors/${ws.section_id}`, ws.type ?? '')
+  zones.forEach((z: any) =>
+    add(z._id, 'zone', z.name, z.description, '🗺️', `/floors/${z.floor_id}`, '')
   );
   assets.forEach((a: any) => {
     const name = a.basic_info?.display_name ?? '';
@@ -104,15 +100,14 @@ async function ensureIndex(): Promise<void> {
   if (cachedIndex || indexBuilding) return;
   indexBuilding = true;
   try {
-    const [b, f, wa, s, ws, a] = await Promise.all([
+    const [b, f, z, wa, a] = await Promise.all([
       api.get('/buildings').then(r => r.data.data ?? []),
       api.get('/floors').then(r => r.data.data ?? []),
+      api.get('/zones').then(r => r.data.data ?? []),
       api.get('/workareas').then(r => r.data.data ?? []),
-      api.get('/sections').then(r => r.data.data ?? []),
-      api.get('/workstations').then(r => r.data.data ?? []),
       api.get('/assets').then(r => r.data.data ?? []),
     ]);
-    const { records, results } = buildRecords(b, f, wa, s, ws, a);
+    const { records, results } = buildRecords(b, f, z, wa, a);
     cachedResults = results;
     cachedIndex = buildSearchIndex(records);
   } finally {

@@ -35,6 +35,7 @@ import { floorService, Floor } from '../services/floor.service';
 import { workareaService, WorkArea } from '../services/workarea.service';
 import { assetService, Asset } from '../services/asset.service';
 import { sectionService, Section } from '../services/section.service';
+import { useZones } from '../hooks/queries/useZones';
 import { workstationService, Workstation } from '../services/workstation.service';
 import { useToast } from '../contexts/ToastContext';
 import { useDebouncedCallback } from '../hooks/useDebouncedCallback';
@@ -50,6 +51,9 @@ const FloorDetails: React.FC = () => {
 
   const [floor, setFloor] = useState<Floor | null>(null);
   const [workareas, setWorkareas] = useState<WorkArea[]>([]);
+  // Only for the "Zones" count tile — the work areas themselves already carry
+  // their zone's name and colour, so nothing else on this page needs the list.
+  const { data: zonesOnFloor = [] } = useZones(id);
   const [sections, setSections] = useState<Section[]>([]);
   const [workstations, setWorkstations] = useState<Workstation[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
@@ -553,16 +557,12 @@ const FloorDetails: React.FC = () => {
               </div>
             )}
             <div className={styles.metadataItem}>
+              <span className={styles.metadataLabel}>Zones</span>
+              <span className={styles.metadataValue}>{zonesOnFloor.length}</span>
+            </div>
+            <div className={styles.metadataItem}>
               <span className={styles.metadataLabel}>Work Areas</span>
               <span className={styles.metadataValue}>{workareas.length}</span>
-            </div>
-            <div className={styles.metadataItem}>
-              <span className={styles.metadataLabel}>Sections</span>
-              <span className={styles.metadataValue}>{sections.length}</span>
-            </div>
-            <div className={styles.metadataItem}>
-              <span className={styles.metadataLabel}>Workstations</span>
-              <span className={styles.metadataValue}>{workstations.length}</span>
             </div>
             <div className={styles.metadataItem}>
               <span className={styles.metadataLabel}>Assets</span>
@@ -667,8 +667,6 @@ const FloorDetails: React.FC = () => {
           <div className={styles.workareasList}>
             {workareas.map((workarea) => {
               const assetsInArea = getAssetsInWorkarea(workarea);
-              const sectionsInArea = getSectionsInWorkarea(workarea);
-              const workstationsInArea = getWorkstationsInWorkarea(workarea);
               
               return (
                 <div
@@ -689,9 +687,7 @@ const FloorDetails: React.FC = () => {
                       )}
                     </h4>
                     <p className={styles.workareaDetails}>
-                      {workarea.type && `Type: ${workarea.type}`}
-                      {sectionsInArea.length > 0 && ` • ${sectionsInArea.length} sections`}
-                      {workstationsInArea.length > 0 && ` • ${workstationsInArea.length} workstations`}
+                      {workarea.zone?.name && `Zone: ${workarea.zone.name}`}
                     </p>
                   </div>
                   <div className={styles.workareaActions}>

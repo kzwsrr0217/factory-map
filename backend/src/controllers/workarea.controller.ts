@@ -18,11 +18,30 @@
  * deletion already do.
  */
 import { Request, Response, NextFunction } from 'express';
+import { In } from 'typeorm';
 import { AppDataSource } from '../config/database';
 import { WorkArea } from '../entities/WorkArea.entity';
+import { Zone } from '../entities/Zone.entity';
 import { Asset } from '../entities/Asset.entity';
 
 const repo = () => AppDataSource.getRepository(WorkArea);
+
+/**
+ * Attaches each area's zone. `zone_id` is a soft join with no TypeORM relation
+ * (see WorkArea.entity.ts — a real FK would give `floors` two cascade paths to
+ * `work_areas`), so it's resolved here in one extra query rather than per row.
+ */
+async function withZones(areas: WorkArea[]): Promise<WorkArea[]> {
+  const ids = [...new Set(areas.map((a) => a.zone_id).filter((id): id is string => !!id))];
+  if (ids.length === 0) return areas;
+  const zones = await AppDataSource.getRepository(Zone).find({ where: { id: In(ids) } });
+  const byId = new Map(zones.map((z) => [z.id, z]));
+  for (const area of areas) {
+    const z = area.zone_id ? byId.get(area.zone_id) : undefined;
+    area.zone = z ? { id: z.id, name: z.name, color: z.color } : null;
+  }
+  return areas;
+}
 
 // The map's drag-to-move handler recomputes an asset's workarea_id from its
 // new position (see frontend/src/utils/workareaGeometry.ts), but that only
@@ -53,7 +72,7 @@ export const getAllWorkAreas = async (req: Request, res: Response, next: NextFun
   try {
     const { floor_id } = req.query as { floor_id?: string };
     const where = floor_id ? { floor_id } : {};
-    const areas = await repo().find({ where, order: { name: 'ASC' } });
+    const areas = await withZones(await repo().find({ where, order: { name: 'ASC' } }));
     res.json({ success: true, data: areas.map((a) => a.toApiResponse()) });
   } catch (error) { next(error); }
 };
@@ -62,6 +81,7 @@ export const getWorkAreaById = async (req: Request, res: Response, next: NextFun
   try {
     const area = await repo().findOne({ where: { id: req.params.id } });
     if (!area) { res.status(404).json({ success: false, error: 'Work area not found' }); return; }
+    await withZones([area]);
     res.json({ success: true, data: area.toApiResponse() });
   } catch (error) { next(error); }
 };
@@ -69,7 +89,7 @@ export const getWorkAreaById = async (req: Request, res: Response, next: NextFun
 export const createWorkArea = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const body = req.body as {
-      floor_id: string; name: string; type?: string;
+      floor_id: string; name: string; type?: string; zone_id?: string | null;
       coordinates?: { x: number; y: number };
       dimensions?: { width: number; height: number };
       production_line_code?: string;
@@ -85,6 +105,7 @@ export const createWorkArea = async (req: Request, res: Response, next: NextFunc
     const area = repo().create({
       floor_id: body.floor_id,
       name: body.name,
+      zone_id: body.zone_id ?? null,
       type: body.type ?? null,
       coord_x: body.coordinates?.x ?? 0,
       coord_y: body.coordinates?.y ?? 0,
@@ -94,6 +115,7 @@ export const createWorkArea = async (req: Request, res: Response, next: NextFunc
       metadata: body.metadata ?? null,
     });
     await repo().save(area);
+    await withZones([area]);
     res.status(201).json({ success: true, data: area.toApiResponse() });
   } catch (error) { next(error); }
 };
@@ -103,7 +125,7 @@ export const updateWorkArea = async (req: Request, res: Response, next: NextFunc
     const area = await repo().findOne({ where: { id: req.params.id } });
     if (!area) { res.status(404).json({ success: false, error: 'Work area not found' }); return; }
     const body = req.body as Partial<{
-      name: string; type: string;
+      name: string; type: string; zone_id: string | null;
       coordinates: { x: number; y: number };
       dimensions: { width: number; height: number };
       production_line_code: string;
@@ -119,6 +141,7 @@ export const updateWorkArea = async (req: Request, res: Response, next: NextFunc
       }
       area.name = body.name;
     }
+    if (body.zone_id !== undefined) area.zone_id = body.zone_id ?? null;
     if (body.type !== undefined) area.type = body.type ?? null;
     if (body.coordinates !== undefined) { area.coord_x = body.coordinates.x; area.coord_y = body.coordinates.y; }
     if (body.dimensions !== undefined) { area.dim_width = body.dimensions.width; area.dim_height = body.dimensions.height; }
@@ -128,6 +151,7 @@ export const updateWorkArea = async (req: Request, res: Response, next: NextFunc
 
     if (geometryChanging) await recomputeAssetWorkareaMembership(area.floor_id);
 
+    await withZones([area]);
     res.json({ success: true, data: area.toApiResponse() });
   } catch (error) { next(error); }
 };

@@ -38,7 +38,11 @@ import { getAssetIcon } from '../utils/assetTypes';
 import { useDebouncedCallback } from '../hooks/useDebouncedCallback';
 import { useUndoRedo } from '../hooks/useUndoRedo';
 import { findContainingWorkareaId } from '../utils/workareaGeometry';
+import { useZones, useCreateZone } from '../hooks/queries/useZones';
 import styles from '../styles/pages/MapView.module.css';
+
+/** Sentinel value of the zone `<select>` that reveals the inline new-zone field. */
+const NEW_ZONE = '__new__';
 
 const MapView: React.FC = () => {
   const navigate = useNavigate();
@@ -79,8 +83,11 @@ const MapView: React.FC = () => {
   const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null);
   const [activeConnectionTypes, setActiveConnectionTypes] = useState<Set<string>>(new Set());
   const [pendingZone, setPendingZone] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
-  const [zoneName, setZoneName] = useState('');
-  const [zoneType, setZoneType] = useState('');
+  // Fields of the "create work area" dialog that opens after drawing a rectangle.
+  const [pendingAreaName, setPendingAreaName] = useState('');
+  // '' = ungrouped, NEW_ZONE = create one inline, otherwise an existing zone id.
+  const [pendingZoneChoice, setPendingZoneChoice] = useState('');
+  const [pendingNewZoneName, setPendingNewZoneName] = useState('');
   const [layers, setLayers] = useState({
     workareas: true,
     assets: true,
@@ -89,6 +96,15 @@ const MapView: React.FC = () => {
     wallports: false,
   });
   const [tracingAsset, setTracingAsset] = useState<Asset | null>(null);
+
+  // Zones of the selected floor, for the create-work-area dialog. Sorted by name
+  // because it's a picker; the map's colours don't depend on this order.
+  const { data: zonesOnFloor = [] } = useZones(selectedFloorId || undefined);
+  const createZone = useCreateZone();
+  const floorZones = useMemo(
+    () => [...zonesOnFloor].sort((a, b) => a.name.localeCompare(b.name)),
+    [zonesOnFloor]
+  );
 
   const buildingOptions = useMemo(
     () => buildings.map((building) => ({ value: building._id, label: building.name })),
@@ -548,18 +564,31 @@ const MapView: React.FC = () => {
   };
 
   const handleWorkareaCreate = useCallback((x: number, y: number, width: number, height: number) => {
-    setZoneName('');
-    setZoneType('');
+    setPendingAreaName('');
+    setPendingZoneChoice('');
+    setPendingNewZoneName('');
     setPendingZone({ x, y, w: width, h: height });
   }, []);
 
   const handleZoneFormSubmit = useCallback(async () => {
     if (!pendingZone || !selectedFloorId) return;
     try {
+      // Creating the zone first, so the work area can be saved already grouped —
+      // one round trip more, but no window where the room exists ungrouped.
+      let zoneId: string | null = pendingZoneChoice || null;
+      if (pendingZoneChoice === NEW_ZONE) {
+        if (!pendingNewZoneName.trim()) return;
+        const zone = await createZone.mutateAsync({
+          floor_id: selectedFloorId,
+          name: pendingNewZoneName.trim(),
+        });
+        zoneId = zone._id;
+      }
+
       const created = await workareaService.createWorkArea({
         floor_id: selectedFloorId,
-        name: zoneName.trim() || 'New Zone',
-        type: zoneType.trim() || undefined,
+        name: pendingAreaName.trim() || 'New Work Area',
+        zone_id: zoneId,
         coordinates: { x: pendingZone.x, y: pendingZone.y },
         dimensions: { width: pendingZone.w, height: pendingZone.h },
       });
@@ -568,7 +597,7 @@ const MapView: React.FC = () => {
       console.error('Error creating work area:', error);
     }
     setPendingZone(null);
-  }, [pendingZone, selectedFloorId, zoneName, zoneType]);
+  }, [pendingZone, selectedFloorId, pendingAreaName, pendingZoneChoice, pendingNewZoneName, createZone]);
 
   const handleWorkareaDelete = useCallback(async (workareaId: string) => {
     try {
@@ -1235,7 +1264,7 @@ const MapView: React.FC = () => {
                       <div className={styles.sidePanelHeader}>
                         <div>
                           <h4>🏭 {zone?.name}</h4>
-                          {zone?.type && <span style={{ fontSize: 11, color: 'var(--color-text-secondary)' }}>{zone.type}</span>}
+                          {zone?.zone?.name && <span style={{ fontSize: 11, color: 'var(--color-text-secondary)' }}>{zone.zone.name}</span>}
                         </div>
                         <button className={styles.sidePanelClose} onClick={() => setSelectedZoneId(null)}>✕</button>
                       </div>
@@ -1394,42 +1423,54 @@ const MapView: React.FC = () => {
         defaultFloorId={selectedFloorId}
       />
 
-      {/* Zone creation dialog */}
+      {/* Work-area creation dialog, opened by drawing a rectangle in edit mode.
+          The zone is chosen from this floor's real zones — this used to be a
+          free "Zone Type" dropdown whose first option, "workspace", ended up
+          stamped on nearly every area and told the user nothing. */}
       {pendingZone && (
         <div className={styles.zoneDialogOverlay} onClick={() => setPendingZone(null)}>
           <div className={styles.zoneDialog} onClick={e => e.stopPropagation()}>
-            <h3 className={styles.zoneDialogTitle}>Create Zone</h3>
+            <h3 className={styles.zoneDialogTitle}>Create Work Area</h3>
             <div className={styles.zoneDialogField}>
-              <label>Zone Name</label>
+              <label>Work Area Name</label>
               <input
                 className={styles.zoneDialogInput}
                 autoFocus
-                placeholder="e.g. Server Room A"
-                value={zoneName}
-                onChange={e => setZoneName(e.target.value)}
+                placeholder="e.g. HR Office, Server Room A"
+                value={pendingAreaName}
+                onChange={e => setPendingAreaName(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter') handleZoneFormSubmit(); if (e.key === 'Escape') setPendingZone(null); }}
               />
             </div>
             <div className={styles.zoneDialogField}>
-              <label>Zone Type</label>
+              <label>Zone</label>
               <select
                 className={styles.zoneDialogInput}
-                value={zoneType}
-                onChange={e => setZoneType(e.target.value)}
+                value={pendingZoneChoice}
+                onChange={e => setPendingZoneChoice(e.target.value)}
               >
-                <option value="">— Select type —</option>
-                <option value="workspace">Workspace</option>
-                <option value="server room">Server Room</option>
-                <option value="storage">Storage</option>
-                <option value="lab">Lab</option>
-                <option value="reception">Reception</option>
-                <option value="production">Production</option>
-                <option value="other">Other</option>
+                <option value="">— No zone —</option>
+                {floorZones.map(zone => (
+                  <option key={zone._id} value={zone._id}>{zone.name}</option>
+                ))}
+                <option value={NEW_ZONE}>+ New zone…</option>
               </select>
             </div>
+            {pendingZoneChoice === NEW_ZONE && (
+              <div className={styles.zoneDialogField}>
+                <label>New Zone Name</label>
+                <input
+                  className={styles.zoneDialogInput}
+                  placeholder="e.g. HR, Cummins, Maintenance"
+                  value={pendingNewZoneName}
+                  onChange={e => setPendingNewZoneName(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') handleZoneFormSubmit(); if (e.key === 'Escape') setPendingZone(null); }}
+                />
+              </div>
+            )}
             <div className={styles.zoneDialogActions}>
               <button className={styles.zoneDialogCancel} onClick={() => setPendingZone(null)}>Cancel</button>
-              <button className={styles.zoneDialogCreate} onClick={handleZoneFormSubmit}>Create Zone</button>
+              <button className={styles.zoneDialogCreate} onClick={handleZoneFormSubmit}>Create Work Area</button>
             </div>
           </div>
         </div>

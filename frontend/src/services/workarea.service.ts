@@ -1,10 +1,10 @@
 /**
  * workarea.service.ts — API calls for the WorkArea entity.
  *
- * Work areas are rectangular zones on a floor map. Their `coordinates` (position)
- * and `dimensions` (width/height) are updated when the user drags or resizes
- * them on the floor plan canvas. The `type` field describes the zone's function
- * (e.g., "assembly", "server room", "office").
+ * A work area is one room on a floor map — the leaf of
+ * Building > Floor > Zone > WorkArea. Its `coordinates` (position) and
+ * `dimensions` (width/height) are updated when the user drags or resizes it on
+ * the floor plan canvas; the zone it belongs to is `zone_id`.
  */
 import api from './api';
 
@@ -12,7 +12,6 @@ export interface WorkArea {
   _id: string;
   floor_id: string;
   name: string;
-  type?: string;
   coordinates?: {
     x: number;
     y: number;
@@ -27,16 +26,19 @@ export interface WorkArea {
   metadata?: {
     supervisor?: string;
     capacity?: number;
-    /**
-     * Map fill colour, as one of WORKAREA_COLORS' hex values. Stored in
-     * metadata rather than its own column to match how supervisor/capacity
-     * are already handled (no migration needed). When unset, the map derives
-     * a stable colour from the work area's id so neighbouring areas are
-     * still distinguishable — see workareaColors.ts.
-     */
-    color?: string;
     [key: string]: any;
   };
+  /**
+   * The zone (bigger named area) this room belongs to — see zone.service.ts.
+   * Null when the room isn't grouped yet.
+   */
+  zone_id?: string | null;
+  /**
+   * Denormalised copy of the zone, attached by the API so the map can draw the
+   * zone halo and label without a second request. Colour lives on the ZONE, not
+   * here, so every room in one zone matches by construction.
+   */
+  zone?: { _id: string; name: string; color: string | null } | null;
   created_at?: string;
   updated_at?: string;
 }

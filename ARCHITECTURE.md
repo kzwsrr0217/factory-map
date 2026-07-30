@@ -63,9 +63,29 @@
 ```
 Building (1)
   └── Floor (N)
-        └── WorkArea (N)
-              └── Section (N)
-                    └── Workstation (N)
+        └── Zone (N)            — named group of rooms ("HR"), NO geometry
+              └── WorkArea (N)  — the room; carries coordinates + size
+        └── Section (N)         — RETIRED level, see below
+              └── Workstation (N) — RETIRED level, see below
+
+The spatial hierarchy is **Building > Floor > Zone > WorkArea**.
+
+`WorkArea.zone_id` is a **soft join with no FK** — a real FK would give `floors`
+two cascade paths to `work_areas` (directly, and via `zones`), which SQL Server
+rejects outright. The zone is resolved in workarea.controller.ts's `withZones()`
+in one extra query, and zone deletion clears the column explicitly.
+
+A Zone deliberately has no coordinates or size: the map derives its shape from
+the rooms in it (one inflated rounded rect per room, merged by group opacity), so
+an L-shaped zone renders as an L instead of a bounding box that would swallow a
+neighbouring zone's room.
+
+**Section and Workstation are retired.** They predate Zone and never worked as
+spatial levels — a Section has no width/height, so it could not be drawn on the
+floor map at all. The tables, entities and endpoints remain (no data loss, and
+the map still renders leftover workstations if any exist), but nothing in the UI
+creates them any more; WorkAreaDetailsModal surfaces them only where rows still
+exist, offering deletion only.
 
 Asset (N) — FK columns reference any level of the hierarchy
   ├── AssetSoftware (N)    — CASCADE DELETE

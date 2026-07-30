@@ -39,7 +39,15 @@ import { Workstation } from '../../services/workstation.service';
 import Tooltip from '../common/Tooltip';
 import ConfirmDialog from '../common/ConfirmDialog';
 import { getAssetIcon, ASSET_TYPE_MAP } from '../../utils/assetTypes';
-import { resolveWorkareaColor, buildZoneColorMap, zoneLabelFits, assetBadgeWidth } from '../../utils/workareaColors';
+import {
+  resolveWorkareaColor,
+  buildZoneColorMap,
+  zonesFromWorkareas,
+  zoneLabelFits,
+  assetBadgeWidth,
+  ZONE_HALO_PAD,
+  WorkareaColor,
+} from '../../utils/workareaColors';
 import UnplacedTray from './UnplacedTray';
 import { entityKindService, EntityKind } from '../../services/entityKind.service';
 import { workCenterService, WorkCenter } from '../../services/workCenter.service';
@@ -315,6 +323,27 @@ const AssetMarker = React.memo(function AssetMarker({
   );
 });
 
+interface WorkareaRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * A work area's rectangle on the canvas, with the fallbacks for areas that were
+ * never positioned or sized. Shared by the zone halos and the areas themselves
+ * so the two can't drift apart.
+ */
+function workareaRect(workarea: WorkArea): WorkareaRect {
+  return {
+    x: workarea.coordinates?.x || 100,
+    y: workarea.coordinates?.y || 100,
+    width: workarea.dimensions?.width || 150,
+    height: workarea.dimensions?.height || 100,
+  };
+}
+
 interface FloorMapProps {
   workareas: WorkArea[];
   assets: Asset[];
@@ -478,7 +507,48 @@ const FloorMap: React.FC<FloorMapProps> = ({
 
   // One colour per zone across this floor, so rooms in the same zone match and
   // different zones stay visually distinct (see workareaColors.ts).
-  const zoneColors = useMemo(() => buildZoneColorMap(workareas), [workareas]);
+  const zoneColors = useMemo(() => buildZoneColorMap(zonesFromWorkareas(workareas)), [workareas]);
+
+  // Zone halos — how the map shows "these four rooms are all HR".
+  //
+  // Each zone gets its rooms' rectangles inflated by ZONE_HALO_PAD and painted
+  // behind them in the zone colour. Adjacent rooms' halos merge, so an L- or
+  // U-shaped zone reads as that shape; a single bounding box would instead have
+  // swallowed whatever different-zone room sits in the notch of the L. Rooms of
+  // one zone that aren't adjacent stay separate blobs of the same colour, which
+  // is honest about there being a gap.
+  const zoneHalos = useMemo(() => {
+    const groups = new Map<string, { name: string; color: WorkareaColor; rects: WorkareaRect[] }>();
+    for (const workarea of workareas) {
+      if (!workarea.zone_id) continue;
+      const color = zoneColors.get(workarea.zone_id);
+      if (!color) continue;
+      const group =
+        groups.get(workarea.zone_id) ??
+        { name: workarea.zone?.name ?? '', color, rects: [] as WorkareaRect[] };
+      const { x, y, width, height } = workareaRect(workarea);
+      group.rects.push({
+        x: x - ZONE_HALO_PAD,
+        y: y - ZONE_HALO_PAD,
+        width: width + ZONE_HALO_PAD * 2,
+        height: height + ZONE_HALO_PAD * 2,
+      });
+      groups.set(workarea.zone_id, group);
+    }
+    return [...groups.entries()].map(([id, group]) => {
+      // Label the zone once, above its top-left-most room.
+      const anchor = group.rects.reduce((best, r) =>
+        r.y < best.y || (r.y === best.y && r.x < best.x) ? r : best,
+      );
+      return {
+        id,
+        ...group,
+        labelX: anchor.x + 4,
+        // Clamped so a zone flush against the top edge still shows its name.
+        labelY: Math.max(anchor.y - 5, 11),
+      };
+    });
+  }, [workareas, zoneColors]);
 
   const hasTrayContent = unplacedAssets.length > 0 || searchableUnplacedAssets.length > 0;
 
@@ -1576,12 +1646,46 @@ const FloorMap: React.FC<FloorMapProps> = ({
           />
         )}
 
+        {/* Zone halos — drawn before the work areas so they sit behind them.
+            One <g> per zone with the opacity on the GROUP, not the rects: group
+            opacity flattens the shapes before compositing, so overlapping rooms
+            of one zone read as a single merged silhouette instead of showing a
+            darker seam wherever two of them touch. */}
+        {layers.workareas && zoneHalos.map((zone) => (
+          <g key={`zone-${zone.id}`} pointerEvents="none">
+            <g opacity="0.35">
+              {zone.rects.map((r, i) => (
+                <rect
+                  key={i}
+                  x={r.x}
+                  y={r.y}
+                  width={r.width}
+                  height={r.height}
+                  rx="14"
+                  fill={zone.color.stroke}
+                />
+              ))}
+            </g>
+            {zone.name && (
+              <text
+                x={zone.labelX}
+                y={zone.labelY}
+                textAnchor="start"
+                className={styles.zoneLabel}
+                fill={zone.color.stroke}
+                stroke="white"
+                strokeWidth="3"
+                paintOrder="stroke"
+              >
+                {zone.name.toUpperCase()}
+              </text>
+            )}
+          </g>
+        ))}
+
         {/* Work Areas */}
         {layers.workareas && workareasByPaintOrder.map((workarea) => {
-          const x = workarea.coordinates?.x || 100;
-          const y = workarea.coordinates?.y || 100;
-          const width = workarea.dimensions?.width || 150;
-          const height = workarea.dimensions?.height || 100;
+          const { x, y, width, height } = workareaRect(workarea);
           const isDragging = dragging?.type === 'workarea' && dragging.id === workarea._id;
           const isResizing = dragging?.type === 'resize' && dragging.id === workarea._id;
           const assetsInArea = getAssetsInWorkarea(workarea);
@@ -1596,11 +1700,10 @@ const FloorMap: React.FC<FloorMapProps> = ({
           // the type when it demonstrably fits alongside the name — and account
           // for the asset-count badge, which occupies the same right corner.
           const displayName = workarea.name.length > 22 ? workarea.name.slice(0, 20) + '…' : workarea.name;
-          // `type` doubles as the zone/group name (e.g. several rooms under
-          // "HR"), which is also what drives the shared colour — so it's worth
-          // showing when it fits. Areas in the same zone therefore read as one
-          // group both by colour and by this label.
-          const typeText = [workarea.type, workarea.production_line_code ? `PL ${workarea.production_line_code}` : null]
+          // The zone name repeats here even though the halo above already carries
+          // it, because when the user is zoomed into one room the halo's single
+          // label is usually off-screen.
+          const typeText = [workarea.zone?.name, workarea.production_line_code ? `PL ${workarea.production_line_code}` : null]
             .filter(Boolean)
             .join(' · ');
           const hasAssetBadge = assetsInArea.length > 0;
@@ -1627,7 +1730,7 @@ const FloorMap: React.FC<FloorMapProps> = ({
                     e as any,
                     <div>
                       <h4>🏭 {workarea.name}</h4>
-                      {workarea.type && <p><span className={styles.label}>Type:</span> {workarea.type}</p>}
+                      {workarea.zone?.name && <p><span className={styles.label}>Zone:</span> {workarea.zone.name}</p>}
                       {workarea.production_line_code && (
                         <p><span className={styles.label}>Production Line:</span> {workarea.production_line_code}</p>
                       )}
