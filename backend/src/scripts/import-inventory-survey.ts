@@ -52,13 +52,13 @@
 import 'reflect-metadata';
 import * as fs from 'fs';
 import * as path from 'path';
-import { In } from 'typeorm';
 import { AppDataSource } from '../config/database';
 import { Asset } from '../entities/Asset.entity';
 import { Building } from '../entities/Building.entity';
 import { Floor } from '../entities/Floor.entity';
 import { WorkArea } from '../entities/WorkArea.entity';
 import { ItsmHardwareSnapshot } from '../entities/ItsmHardwareSnapshot.entity';
+import { chunkForEntity, findByIn } from '../utils/mssqlBatch';
 
 interface SurveyRow {
   terulet?: string;
@@ -228,12 +228,16 @@ function matchWorkArea(
   corrections: Corrections,
 ): WorkArea | null {
   const room = correct(corrections.work_area, (workAreaField ?? '').trim());
-  const zone = correct(corrections.helyszin, (helyszin ?? '').trim());
   if (!room) return null;
-  const byName = workAreas.filter((w) => w.floor_id === floorId && fold(w.name) === fold(room));
+  const zone = correct(corrections.helyszin, (helyszin ?? '').trim());
+  // Folded once, not per candidate — fold() does an NFD normalise plus a
+  // per-codepoint loop, and this runs for every survey row.
+  const foldedRoom = fold(room);
+  const foldedZone = fold(zone);
+  const byName = workAreas.filter((w) => w.floor_id === floorId && fold(w.name) === foldedRoom);
   if (byName.length === 0) return null;
   if (byName.length === 1 || !zone) return byName[0];
-  return byName.find((w) => fold(w.type) === fold(zone)) ?? byName[0];
+  return byName.find((w) => fold(w.type) === foldedZone) ?? byName[0];
 }
 
 interface PlannedUpdate {
@@ -268,7 +272,7 @@ async function planImport(rows: SurveyRow[], corrections: Corrections): Promise<
     // hardware_asset_id casing may not match the survey's own casing exactly
     // (e.g. "hwa26255" vs "HWA26255") — fetch broadly and fold-key it rather
     // than relying on In() doing a case-sensitive exact match.
-    const candidates = await assetRepo.find({ where: { hardware_asset_id: In([...new Set(hwaValues)]) } });
+    const candidates = await findByIn(assetRepo, 'hardware_asset_id', [...new Set(hwaValues)]);
     const stillMissing = hwaValues.filter((v) => !candidates.some((a) => fold(a.hardware_asset_id) === fold(v)));
     const extra = stillMissing.length > 0
       ? await assetRepo.createQueryBuilder('a').where('a.hardware_asset_id IS NOT NULL').getMany()
@@ -281,7 +285,7 @@ async function planImport(rows: SurveyRow[], corrections: Corrections): Promise<
   const serialValues = rows.filter((r) => fold(r.azonosito_mod) !== 'hwa' && r.sorozatszam).map((r) => r.sorozatszam!.trim());
   const existingBySerial = new Map<string, Asset>();
   if (serialValues.length > 0) {
-    const existing = await assetRepo.find({ where: { serial_number: In([...new Set(serialValues)]) } });
+    const existing = await findByIn(assetRepo, 'serial_number', [...new Set(serialValues)]);
     for (const a of existing) if (a.serial_number) existingBySerial.set(fold(a.serial_number), a);
   }
 
@@ -393,13 +397,21 @@ function printReport(plan: ImportPlan): void {
 }
 
 async function applyPlan(plan: ImportPlan): Promise<void> {
-  const assetRepo = AppDataSource.getRepository(Asset);
-  for (const u of plan.toUpdate) {
-    await assetRepo.update(u.assetId, u.fields);
-  }
-  if (plan.toCreate.length > 0) {
-    await assetRepo.save(plan.toCreate.map((c) => assetRepo.create(c.fields)));
-  }
+  // One transaction so a failure part-way can't leave half the survey applied —
+  // the operator would otherwise have no way to tell which rows landed.
+  await AppDataSource.transaction(async (manager) => {
+    const assetRepo = manager.getRepository(Asset);
+    for (const u of plan.toUpdate) {
+      await assetRepo.update(u.assetId, u.fields);
+    }
+    if (plan.toCreate.length > 0) {
+      // Chunked for MSSQL's parameter cap — see utils/mssqlBatch.ts.
+      await assetRepo.save(
+        plan.toCreate.map((c) => assetRepo.create(c.fields)),
+        { chunk: chunkForEntity(Asset) },
+      );
+    }
+  });
   console.log(`\n✅ Applied: ${plan.toUpdate.length} asset(s) updated, ${plan.toCreate.length} new local asset(s) created.`);
 }
 

@@ -40,6 +40,7 @@ import { useToast } from '../contexts/ToastContext';
 import { useDebouncedCallback } from '../hooks/useDebouncedCallback';
 import { useUndoRedo } from '../hooks/useUndoRedo';
 import { findContainingWorkareaId } from '../utils/workareaGeometry';
+import { isAwaitingPlacement, isAwaitingFloorAssignment } from '../utils/assetPlacement';
 import { getApiErrorMessage } from '../utils/apiError';
 import styles from '../styles/pages/FloorDetails.module.css';
 
@@ -134,12 +135,7 @@ const FloorDetails: React.FC = () => {
         (asset) => asset.hierarchy.floor_id === floorId
       );
       setAssets(floorAssets);
-      // Excludes replaced assets (successor_id) for the same reason the
-      // Unplaced Assets page does — a decommissioned device is unplaced on
-      // purpose and should never be offered for placement.
-      setFloorlessAssets(allAssets.filter(
-        (asset) => !asset.is_placed && !asset.successor_id && !asset.hierarchy.floor_id
-      ));
+      setFloorlessAssets(allAssets.filter(isAwaitingFloorAssignment));
     } catch (err) {
       console.error('Error loading floor details:', err);
       setError('Failed to load floor details. Please try again.');
@@ -245,13 +241,10 @@ const FloorDetails: React.FC = () => {
     const asset = fromFloor ?? fromFloorless;
     if (!asset || !floor) return;
 
-    const snappedWorkarea = workareas.find(wa => {
-      const waX = wa.coordinates?.x ?? 0;
-      const waY = wa.coordinates?.y ?? 0;
-      const waW = wa.dimensions?.width ?? 150;
-      const waH = wa.dimensions?.height ?? 100;
-      return x >= waX && x <= waX + waW && y >= waY && y <= waY + waH;
-    }) ?? null;
+    // Same hit-test the drag path uses (handleAssetMove) — shared so placing
+    // and dragging can never resolve different work areas for one point.
+    const snappedId = findContainingWorkareaId(x, y, workareas);
+    const snappedWorkarea = snappedId ? workareas.find(wa => wa._id === snappedId) ?? null : null;
 
     const newHierarchy = {
       ...asset.hierarchy,
@@ -507,7 +500,7 @@ const FloorDetails: React.FC = () => {
   }
 
   const placedAssets = assets.filter(a => a.is_placed);
-  const unplacedAssets = assets.filter(a => !a.is_placed);
+  const unplacedAssets = assets.filter(isAwaitingPlacement);
 
   return (
     <div className={styles.floorDetails}>
@@ -793,6 +786,7 @@ const FloorDetails: React.FC = () => {
         onSuccess={handleWorkareaFormSuccess}
         floorId={id || ''}
         workarea={editingWorkarea}
+        existingWorkareas={workareas}
       />
 
       {/* WorkArea Details Modal */}

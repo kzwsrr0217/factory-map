@@ -39,7 +39,8 @@ import { Workstation } from '../../services/workstation.service';
 import Tooltip from '../common/Tooltip';
 import ConfirmDialog from '../common/ConfirmDialog';
 import { getAssetIcon, ASSET_TYPE_MAP } from '../../utils/assetTypes';
-import { resolveWorkareaColor, buildZoneColorMap } from '../../utils/workareaColors';
+import { resolveWorkareaColor, buildZoneColorMap, zoneLabelFits, assetBadgeWidth } from '../../utils/workareaColors';
+import UnplacedTray from './UnplacedTray';
 import { entityKindService, EntityKind } from '../../services/entityKind.service';
 import { workCenterService, WorkCenter } from '../../services/workCenter.service';
 import { productionLineService, ProductionLine } from '../../services/productionLine.service';
@@ -479,6 +480,8 @@ const FloorMap: React.FC<FloorMapProps> = ({
   // different zones stay visually distinct (see workareaColors.ts).
   const zoneColors = useMemo(() => buildZoneColorMap(workareas), [workareas]);
 
+  const hasTrayContent = unplacedAssets.length > 0 || searchableUnplacedAssets.length > 0;
+
   // Same reasoning as workareasByPaintOrder above, for assets — the `assets`
   // prop is fetched display_name-ASC (see asset.controller.ts getAllAssets),
   // which has nothing to do with map position and would otherwise leave a
@@ -554,7 +557,6 @@ const FloorMap: React.FC<FloorMapProps> = ({
   const [renameValue, setRenameValue] = useState('');
   const [placingAsset, setPlacingAsset] = useState<Asset | null>(null);
   const [unplacedTrayOpen, setUnplacedTrayOpen] = useState(true);
-  const [unplacedSearch, setUnplacedSearch] = useState('');
 
   // Tooltip state
   const [tooltip, setTooltip] = useState<{
@@ -1601,11 +1603,9 @@ const FloorMap: React.FC<FloorMapProps> = ({
           const typeText = [workarea.type, workarea.production_line_code ? `PL ${workarea.production_line_code}` : null]
             .filter(Boolean)
             .join(' · ');
-          const badgeSpace = assetsInArea.length > 0 ? 28 : 0;
-          // Rough advance widths for the 12px bold name / 11px type labels —
-          // an estimate is fine here, it only gates whether to draw at all.
-          const estimatedNeed = 8 + displayName.length * 6.7 + 10 + typeText.length * 5.6 + badgeSpace + 8;
-          const showTypeLabel = typeText !== '' && width >= estimatedNeed;
+          const hasAssetBadge = assetsInArea.length > 0;
+          const badgeSpace = assetBadgeWidth(hasAssetBadge);
+          const showTypeLabel = zoneLabelFits(width, displayName, typeText, hasAssetBadge);
 
           return (
             <g key={workarea._id}>
@@ -2437,7 +2437,7 @@ const FloorMap: React.FC<FloorMapProps> = ({
         document.body
       )}
       {/* Unplaced Assets Tray */}
-      {(unplacedAssets.length > 0 || searchableUnplacedAssets.length > 0) && !unplacedTrayOpen && (
+      {hasTrayContent && !unplacedTrayOpen && (
         <button
           className={styles.unplacedToggle}
           onClick={() => setUnplacedTrayOpen(true)}
@@ -2446,71 +2446,15 @@ const FloorMap: React.FC<FloorMapProps> = ({
           📦 {unplacedAssets.length > 0 ? `${unplacedAssets.length} unplaced` : 'Place assets…'}
         </button>
       )}
-      {(unplacedAssets.length > 0 || searchableUnplacedAssets.length > 0) && unplacedTrayOpen && (() => {
-        const q = unplacedSearch.trim().toLowerCase();
-        const matches = (a: Asset) =>
-          !q ||
-          a.basic_info.display_name.toLowerCase().includes(q) ||
-          (a.basic_info.serial_number ?? '').toLowerCase().includes(q) ||
-          (a.custom_fields?.object_id ?? '').toLowerCase().includes(q) ||
-          (a.itsm?.hardware_asset_id ?? '').toLowerCase().includes(q);
-        const floorMatches = unplacedAssets.filter(matches);
-        // The floor-less pool can be 1000+ rows — only surface it when the
-        // user actually searches, and cap the result list.
-        const globalMatches = q ? searchableUnplacedAssets.filter(matches).slice(0, 30) : [];
-        const renderItem = (asset: Asset) => {
-          const isPlacing = placingAsset?._id === asset._id;
-          return (
-            <button
-              key={asset._id}
-              className={`${styles.unplacedItem} ${isPlacing ? styles.unplacedItemPlacing : ''}`}
-              onClick={() => setPlacingAsset(isPlacing ? null : asset)}
-              title={isPlacing ? 'Click on the map to place this asset (Esc to cancel)' : 'Click to select for placement'}
-            >
-              <span className={styles.unplacedItemIcon}>{getAssetIcon(asset.basic_info.type)}</span>
-              <span className={styles.unplacedItemInfo}>
-                <span className={styles.unplacedItemName}>
-                  {asset.basic_info.display_name.length > 20
-                    ? asset.basic_info.display_name.slice(0, 18) + '…'
-                    : asset.basic_info.display_name}
-                </span>
-                {asset.custom_fields?.object_id && (
-                  <span className={styles.unplacedItemId}>{asset.custom_fields.object_id}</span>
-                )}
-              </span>
-              {isPlacing && <span className={styles.unplacedItemPlacingBadge}>📍</span>}
-            </button>
-          );
-        };
-        return (
-          <div className={styles.unplacedTray}>
-            <div className={styles.unplacedTrayHeader}>
-              📦 Unplaced ({unplacedAssets.length})
-              <button className={styles.popoverClose} onClick={() => setUnplacedTrayOpen(false)}>✕</button>
-            </div>
-            {searchableUnplacedAssets.length > 0 && (
-              <input
-                className={styles.unplacedTraySearch}
-                value={unplacedSearch}
-                onChange={(e) => setUnplacedSearch(e.target.value)}
-                placeholder={`Search ${searchableUnplacedAssets.length} unassigned assets…`}
-              />
-            )}
-            <div className={styles.unplacedTrayList}>
-              {floorMatches.map(renderItem)}
-              {globalMatches.length > 0 && (
-                <div className={styles.unplacedTrayDivider}>
-                  Not on this floor yet — placing assigns them here
-                </div>
-              )}
-              {globalMatches.map(renderItem)}
-              {q && floorMatches.length === 0 && globalMatches.length === 0 && (
-                <div className={styles.unplacedTrayDivider}>No matches</div>
-              )}
-            </div>
-          </div>
-        );
-      })()}
+      {hasTrayContent && unplacedTrayOpen && (
+        <UnplacedTray
+          unplacedAssets={unplacedAssets}
+          searchableUnplacedAssets={searchableUnplacedAssets}
+          placingAssetId={placingAsset?._id ?? null}
+          onSelect={setPlacingAsset}
+          onClose={() => setUnplacedTrayOpen(false)}
+        />
+      )}
 
       {/* Placing mode banner */}
       {placingAsset && (

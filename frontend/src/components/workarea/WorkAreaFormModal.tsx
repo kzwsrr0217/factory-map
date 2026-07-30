@@ -5,12 +5,12 @@
  * "Storage"). Position and size are managed on the FloorMap canvas, not here.
  * Requires `floorId` to associate the work area with its parent floor.
  */
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import Modal from '../common/Modal';
 import Button from '../common/Button';
 import Input from '../common/Input';
 import { workareaService, WorkArea } from '../../services/workarea.service';
-import { WORKAREA_COLORS, resolveWorkareaColor } from '../../utils/workareaColors';
+import { WORKAREA_COLORS, distinctZones } from '../../utils/workareaColors';
 import { useToast } from '../../contexts/ToastContext';
 import styles from '../../styles/components/WorkAreaFormModal.module.css';
 
@@ -20,6 +20,12 @@ interface WorkAreaFormModalProps {
   onSuccess: () => void;
   floorId: string;
   workarea?: WorkArea | null;
+  /**
+   * Work areas already loaded by the parent, used only to suggest existing
+   * zone names. Passed in rather than refetched here so opening the form
+   * doesn't re-download the whole table every time.
+   */
+  existingWorkareas?: WorkArea[];
 }
 
 const WorkAreaFormModal: React.FC<WorkAreaFormModalProps> = ({
@@ -28,6 +34,7 @@ const WorkAreaFormModal: React.FC<WorkAreaFormModalProps> = ({
   onSuccess,
   floorId,
   workarea,
+  existingWorkareas = [],
 }) => {
   const [formData, setFormData] = useState({
     name: '',
@@ -38,25 +45,11 @@ const WorkAreaFormModal: React.FC<WorkAreaFormModalProps> = ({
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
-  // Existing zone names across all work areas, so a new room can be typed into
-  // an existing zone instead of accidentally creating "hr" next to "HR".
-  const [zoneSuggestions, setZoneSuggestions] = useState<string[]>([]);
   const toast = useToast();
 
-  useEffect(() => {
-    if (!isOpen) return;
-    workareaService
-      .getWorkAreas()
-      .then((areas) => {
-        const seen = new Map<string, string>();
-        for (const a of areas) {
-          const z = (a.type ?? '').trim();
-          if (z && !seen.has(z.toLowerCase())) seen.set(z.toLowerCase(), z);
-        }
-        setZoneSuggestions([...seen.values()].sort((a, b) => a.localeCompare(b)));
-      })
-      .catch(() => {});
-  }, [isOpen]);
+  // Existing zone names, so a new room joins an existing zone instead of
+  // accidentally creating "hr" beside "HR".
+  const zoneSuggestions = useMemo(() => distinctZones(existingWorkareas), [existingWorkareas]);
 
   useEffect(() => {
     if (workarea) {
@@ -65,9 +58,10 @@ const WorkAreaFormModal: React.FC<WorkAreaFormModalProps> = ({
         type: workarea.type || '',
         supervisor: workarea.metadata?.supervisor || '',
         capacity: workarea.metadata?.capacity?.toString() || '',
-        // Show the colour it currently renders with (auto-derived when unset),
-        // so opening the form doesn't look like "no colour chosen".
-        color: workarea.metadata?.color || resolveWorkareaColor(workarea).fill,
+        // '' means "auto" (derive from the zone) — deliberately NOT pre-filled
+        // with the currently-rendered colour, or simply reopening and saving
+        // would silently pin that colour forever.
+        color: workarea.metadata?.color || '',
       });
     } else {
       setFormData({
@@ -194,6 +188,16 @@ const WorkAreaFormModal: React.FC<WorkAreaFormModalProps> = ({
         <div className={styles.colorField}>
           <span className={styles.colorLabel}>Map Colour</span>
           <div className={styles.colorSwatches}>
+            <button
+              type="button"
+              title="Automatic — derived from the zone"
+              aria-label="Automatic colour"
+              aria-pressed={formData.color === ''}
+              className={`${styles.colorSwatchAuto} ${formData.color === '' ? styles.colorSwatchActive : ''}`}
+              onClick={() => setFormData({ ...formData, color: '' })}
+            >
+              Auto
+            </button>
             {WORKAREA_COLORS.map((c) => (
               <button
                 key={c.fill}
@@ -208,8 +212,9 @@ const WorkAreaFormModal: React.FC<WorkAreaFormModalProps> = ({
             ))}
           </div>
           <p className={styles.colorHelper}>
-            Distinguishes neighbouring areas on the floor plan. Leave unset and a
-            colour is assigned automatically.
+            On <strong>Auto</strong> the colour comes from the Zone / Group above,
+            so every room in one zone matches. Pick a swatch to override it for
+            this area only.
           </p>
         </div>
 

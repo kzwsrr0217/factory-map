@@ -16,8 +16,8 @@
  * (which fields matter, how they compare, how they are written back) are all in
  * one place. Status and MAC comparisons route through `statusMapping.ts`.
  */
-import { In } from 'typeorm';
 import { AppDataSource } from '../../config/database';
+import { chunkForEntity, findByIn } from '../../utils/mssqlBatch';
 import { Asset } from '../../entities/Asset.entity';
 import { ItsmHardwareSnapshot } from '../../entities/ItsmHardwareSnapshot.entity';
 import itsmService from './ITSMService';
@@ -60,35 +60,6 @@ function textEquals(local: string | null, itsm: string | null): boolean {
   return (local ?? '').trim().toLowerCase() === (itsm ?? '').trim().toLowerCase();
 }
 
-// MSSQL rejects any single statement with more than 2100 parameters (error
-// 8003). Both bulk shapes in this file blow past that on a full-snapshot run:
-// an `In([...])` lookup spends one parameter per value (~1000+ guids), and a
-// bulk insert spends one per column per row — Asset has ~80 columns, so ~1000
-// rows is ~80,000 parameters. Everything bulk here has to be chunked; see
-// import-itsm-snapshot.ts for the same guard on the snapshot table.
-const MSSQL_PARAM_BUDGET = 1900; // 2100 minus headroom
-const ASSET_COLUMN_COUNT = 81;
-const ASSET_SAVE_CHUNK = Math.max(1, Math.floor(MSSQL_PARAM_BUDGET / ASSET_COLUMN_COUNT));
-
-function chunked<T>(items: T[], size: number): T[][] {
-  const out: T[][] = [];
-  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
-  return out;
-}
-
-/** `repo.find({ where: { [field]: In(values) } })`, chunked to respect the parameter cap. */
-async function findByIn<T extends import('typeorm').ObjectLiteral>(
-  repo: import('typeorm').Repository<T>,
-  field: keyof T & string,
-  values: string[],
-): Promise<T[]> {
-  const out: T[] = [];
-  for (const part of chunked(values, MSSQL_PARAM_BUDGET)) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    out.push(...(await repo.find({ where: { [field]: In(part) } as any })));
-  }
-  return out;
-}
 
 /**
  * The comparable-field table. Add a row here to make a new field participate in
@@ -553,7 +524,9 @@ export async function createAssetsFromUnlinkedMmh(itsmGuids: string[]): Promise<
     }));
   }
 
-  if (toCreate.length > 0) await assetRepo.save(toCreate, { chunk: ASSET_SAVE_CHUNK });
+  // Chunked because a bulk INSERT of ~1000 Assets would blow MSSQL's
+  // 2100-parameter cap — see utils/mssqlBatch.ts.
+  if (toCreate.length > 0) await assetRepo.save(toCreate, { chunk: chunkForEntity(Asset) });
   result.created.push(...toCreate);
 
   return result;
@@ -619,7 +592,10 @@ export async function backfillAssetsFromSnapshot(): Promise<IBackfillResult> {
   }
 
   if (toSave.length > 0) {
-    await assetRepo.save(toSave, { chunk: ASSET_SAVE_CHUNK });
+    // These all carry ids, so TypeORM issues per-row UPDATEs and the parameter
+    // cap isn't actually in play — the chunk is a safety net in case this ever
+    // saves a mix that includes new rows (where it would be INSERTs).
+    await assetRepo.save(toSave, { chunk: chunkForEntity(Asset) });
     result.updated = toSave.length;
   }
 

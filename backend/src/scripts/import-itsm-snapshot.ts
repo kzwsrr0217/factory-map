@@ -54,6 +54,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { AppDataSource } from '../config/database';
 import { ItsmHardwareSnapshot } from '../entities/ItsmHardwareSnapshot.entity';
+import { chunkForEntity } from '../utils/mssqlBatch';
 
 type Row = Record<string, unknown>;
 
@@ -272,9 +273,9 @@ async function importSnapshot(dir: string): Promise<void> {
   await AppDataSource.transaction(async (manager) => {
     await manager.clear(ItsmHardwareSnapshot);
     const repo = manager.getRepository(ItsmHardwareSnapshot);
-    // MSSQL caps a statement at 2100 parameters; chunk to stay well under it.
-    const columnCount = 19;
-    const chunk = Math.max(1, Math.floor(1900 / columnCount));
+    // MSSQL caps a statement at 2100 parameters — see utils/mssqlBatch.ts.
+    // Derived from entity metadata so adding a column can't silently overflow.
+    const chunk = chunkForEntity(ItsmHardwareSnapshot);
     for (let i = 0; i < rows.length; i += chunk) {
       await repo.insert(rows.slice(i, i + chunk) as ItsmHardwareSnapshot[]);
     }

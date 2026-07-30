@@ -38,7 +38,75 @@ export const WORKAREA_COLORS: WorkareaColor[] = [
   { fill: '#fed7aa', stroke: '#ea580c', label: 'Orange' },
 ];
 
-export const DEFAULT_WORKAREA_COLOR = WORKAREA_COLORS[0];
+const DEFAULT_WORKAREA_COLOR = WORKAREA_COLORS[0];
+
+/** The bits of a WorkArea that determine its colour. */
+export interface WorkareaColorInput {
+  _id: string;
+  type?: string | null;
+  metadata?: { color?: string } | null;
+}
+
+/**
+ * Canonical form of a zone name, so "HR" / "hr" / " Hr " are one zone rather
+ * than three. Single definition because this is the join key for both the
+ * colour grouping and the form's zone suggestions.
+ */
+export function normalizeZone(type: string | null | undefined): string {
+  return (type ?? '').trim().toLowerCase();
+}
+
+/** Distinct zone names present in a set of work areas, original casing kept. */
+export function distinctZones(workareas: Array<{ type?: string | null }>): string[] {
+  const byNormalized = new Map<string, string>();
+  for (const area of workareas) {
+    const raw = (area.type ?? '').trim();
+    const key = normalizeZone(raw);
+    if (key && !byNormalized.has(key)) byNormalized.set(key, raw);
+  }
+  return [...byNormalized.values()].sort((a, b) => a.localeCompare(b));
+}
+
+/**
+ * Whether a work area's rectangle is wide enough to show its zone label to the
+ * right of its name without the two colliding.
+ *
+ * Both labels sit on the same baseline — the name left-aligned, the zone
+ * right-aligned — so on a narrow area they used to overlap into unreadable mush
+ * ("Aworkspacenbert office"). The asset-count badge occupies the same right
+ * corner, so it has to be accounted for too.
+ *
+ * The character widths are estimates for the two font sizes used (12px bold
+ * name, 11px zone, both set in FloorMap.module.css) — good enough because the
+ * result only gates whether to draw at all, and erring toward hiding is safe.
+ */
+const LABEL_EDGE_PAD = 8;
+const LABEL_GAP = 10;
+const NAME_CHAR_WIDTH = 6.7; // 12px bold
+const ZONE_CHAR_WIDTH = 5.6; // 11px regular
+const ASSET_BADGE_WIDTH = 28; // circle at r=11 plus breathing room
+
+export function zoneLabelFits(
+  areaWidth: number,
+  displayName: string,
+  zoneText: string,
+  hasAssetBadge: boolean,
+): boolean {
+  if (zoneText === '') return false;
+  const needed =
+    LABEL_EDGE_PAD +
+    displayName.length * NAME_CHAR_WIDTH +
+    LABEL_GAP +
+    zoneText.length * ZONE_CHAR_WIDTH +
+    (hasAssetBadge ? ASSET_BADGE_WIDTH : 0) +
+    LABEL_EDGE_PAD;
+  return areaWidth >= needed;
+}
+
+/** Horizontal space the asset-count badge reserves in the top-right corner. */
+export function assetBadgeWidth(hasAssetBadge: boolean): number {
+  return hasAssetBadge ? ASSET_BADGE_WIDTH : 0;
+}
 
 /** Stable non-cryptographic hash so the same id always maps to the same hue. */
 function hashString(s: string): number {
@@ -55,14 +123,14 @@ function hashString(s: string): number {
  * that matches a known palette entry, otherwise one derived from its id.
  */
 export function resolveWorkareaColor(
-  workarea: { _id?: string; type?: string | null; metadata?: { color?: string } | null },
+  workarea: WorkareaColorInput,
   /**
-   * Optional zone→colour assignment from `buildZoneColorMap`. Pass it when
-   * rendering a whole floor so distinct zones are guaranteed distinct colours;
-   * omit it for single-area contexts (e.g. the form's swatch preview), which
-   * fall back to hashing.
+   * Zone→colour assignment from `buildZoneColorMap`, built over all work areas
+   * on the floor. Required, so every caller shows the same colour for the same
+   * area — an earlier optional version let the form fall back to hashing and
+   * therefore preview a different colour than the map rendered.
    */
-  zoneColors?: Map<string, WorkareaColor>,
+  zoneColors: Map<string, WorkareaColor>,
 ): WorkareaColor {
   const explicit = workarea.metadata?.color;
   if (explicit) {
@@ -73,13 +141,10 @@ export function resolveWorkareaColor(
     // silently falling back to violet.
     return { fill: explicit, stroke: explicit, label: 'Custom' };
   }
-  // Zone/group first, so every room in the same zone matches. Normalised so
-  // "HR" / "hr" / " Hr " don't split one zone across three colours.
-  const zone = (workarea.type ?? '').trim().toLowerCase();
-  if (zone) {
-    return zoneColors?.get(zone) ?? WORKAREA_COLORS[hashString(zone) % WORKAREA_COLORS.length];
-  }
-  if (!workarea._id) return DEFAULT_WORKAREA_COLOR;
+  const zone = normalizeZone(workarea.type);
+  if (zone) return zoneColors.get(zone) ?? DEFAULT_WORKAREA_COLOR;
+  // No zone to group by — spread these out by id so at least they don't all
+  // look identical.
   return WORKAREA_COLORS[hashString(workarea._id) % WORKAREA_COLORS.length];
 }
 
@@ -100,12 +165,9 @@ export function resolveWorkareaColor(
 export function buildZoneColorMap(
   workareas: Array<{ type?: string | null }>,
 ): Map<string, WorkareaColor> {
-  const zones = [...new Set(
-    workareas
-      .map((w) => (w.type ?? '').trim().toLowerCase())
-      .filter((z) => z !== ''),
-  )].sort();
   const map = new Map<string, WorkareaColor>();
-  zones.forEach((zone, i) => map.set(zone, WORKAREA_COLORS[i % WORKAREA_COLORS.length]));
+  distinctZones(workareas).forEach((zone, i) => {
+    map.set(normalizeZone(zone), WORKAREA_COLORS[i % WORKAREA_COLORS.length]);
+  });
   return map;
 }

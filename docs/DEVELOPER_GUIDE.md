@@ -1068,6 +1068,7 @@ backend, MSSQL never published to the host) and `.env.prod.example`.
 - **Error handling**: pass to `next(error)` for the global handler; never swallow errors silently except in audit log writes
 - **`asyncHandler`**: wrap every async controller function with `asyncHandler(fn)` from `utils/asyncHandler.ts` instead of try/catch boilerplate — rejections automatically call `next(error)`
 - **Zod validation**: use the `validate(schema)` middleware from `utils/validate.ts` on every POST/PATCH route that accepts a body; schemas live in `validate.ts`, not inline in controllers
+- **Bulk writes/reads must be chunked** via `utils/mssqlBatch.ts` — SQL Server rejects any statement over 2100 parameters (error 8003), and a bulk insert spends one parameter *per column per row* (`Asset` has 84 columns, so ~25 rows is the ceiling). Use `chunkForEntity(Entity)` for `save(rows, { chunk })` and `findByIn(repo, field, values)` instead of a raw `In([...])`. Never hand-count columns — a literal silently goes stale when someone adds one, and the failure only shows up on the large-batch path nobody exercises in dev (this took down the 1057-row MMH bulk-create in production).
 
 ### Frontend
 - **CSS Modules** — all styles in `src/styles/components/` or `src/styles/pages/`
@@ -1075,6 +1076,8 @@ backend, MSSQL never published to the host) and `.env.prod.example`.
 - **Service objects** — plain objects with async methods, not classes
 - **Context pattern** — global state lives in `src/contexts/`, never in top-level singletons
 - **`useAssetLookups`** — use this hook for any autocomplete field; never fetch lookups per-field
+- **Shared predicates over re-derived filters** — `utils/assetPlacement.ts` (`isAwaitingPlacement`, `isAwaitingFloorAssignment`) and `utils/workareaGeometry.ts` (`findContainingWorkareaId`) exist because these rules were previously written inline in several places and drifted apart: one unplaced-list variant offered decommissioned assets that its sibling excluded, and the map's point-in-rect test disagreed with the drag path's. Reuse them rather than re-writing the condition.
+- **Keep expensive derivation out of hot render paths** — `FloorMap` re-renders on every pan frame, wheel zoom and tooltip change, so anything O(assets) belongs in `useMemo` or in a child component that owns its own state (see `components/map/UnplacedTray.tsx`, extracted for exactly this reason).
 
 ### Both
 - **Flat SQL columns + `toApiResponse()`** — entities store flat columns, the method reconstructs the nested JSON. Add new fields to both the entity column AND `toApiResponse()`.

@@ -40,6 +40,7 @@ import { MasterAsset } from '../entities/MasterAsset.entity';
 import { ProductionLine } from '../entities/ProductionLine.entity';
 import { WorkCenter } from '../entities/WorkCenter.entity';
 import { EntityKind } from '../entities/EntityKind.entity';
+import { chunkFor } from '../utils/mssqlBatch';
 
 type Row = Record<string, unknown>;
 
@@ -57,10 +58,6 @@ function readRows(dir: string, file: string, arrayKey = 'assets'): Row[] {
   const rows = (parsed[arrayKey] ?? parsed.assets ?? parsed.entityKinds ?? []) as Row[];
   return Array.isArray(rows) ? rows : [];
 }
-
-// MSSQL caps a statement at 2100 parameters; a chunked upsert of N rows with
-// C columns sends N*C. Size each chunk to stay well under that limit.
-const chunkFor = (columnCount: number): number => Math.max(1, Math.floor(1900 / columnCount));
 
 const str = (v: unknown): string | null => (v == null || v === '' ? null : String(v));
 const num = (v: unknown): number | null => (v == null || v === '' ? null : Number(v));

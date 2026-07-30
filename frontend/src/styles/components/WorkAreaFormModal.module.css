@@ -42,6 +42,23 @@
   transform: scale(1.1);
 }
 
+.colorSwatchAuto {
+  height: 32px;
+  padding: 0 var(--spacing-sm);
+  border-radius: var(--radius-md);
+  border: 2px dashed var(--color-border);
+  background: none;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+  transition: transform var(--transition-base), box-shadow var(--transition-base);
+}
+
+.colorSwatchAuto:hover {
+  transform: scale(1.05);
+}
+
 .colorSwatchActive {
   box-shadow: 0 0 0 2px var(--color-text-primary);
 }

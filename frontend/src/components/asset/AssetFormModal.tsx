@@ -29,7 +29,7 @@
  *   defaultBuildingId / defaultFloorId / defaultCoordinates — pre-select
  *     location context when opened from the Floor Map.
  */
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import Modal from '../common/Modal';
 import Button from '../common/Button';
 import Input from '../common/Input';
@@ -225,7 +225,7 @@ const AssetFormModal: React.FC<AssetFormModalProps> = ({
 
   useEffect(() => {
     if (isOpen) {
-      loadBuildings();
+      loadHierarchy();
       assetService.getAssets().then(assets => {
         setAllAssets(
           assets
@@ -368,7 +368,7 @@ const AssetFormModal: React.FC<AssetFormModalProps> = ({
     setIsDirty(false);
   }, [asset, isOpen, defaultBuildingId, defaultFloorId, defaultCoordinates]);
 
-  const loadBuildings = async () => {
+  const loadHierarchy = async () => {
     try {
       const [buildingData, floorData, workareaData, sectionData] = await Promise.all([
         hierarchyService.getBuildings(),
@@ -434,7 +434,10 @@ const AssetFormModal: React.FC<AssetFormModalProps> = ({
     setItsmConfirming(false);
     setSubmitting(true);
     try {
-      const newFloorId = formData.floor_id || defaultFloorId || null;
+      // No `|| defaultFloorId` fallback: floor_id is a real picker now and is
+      // already seeded from defaultFloorId, so an empty value means the user
+      // deliberately cleared it (e.g. after switching building).
+      const newFloorId = formData.floor_id || null;
       const floorChanged = !!asset && (asset.hierarchy.floor_id || null) !== newFloorId;
       const payload: Partial<Asset> = {
         basic_info: {
@@ -583,23 +586,34 @@ const AssetFormModal: React.FC<AssetFormModalProps> = ({
     </>
   );
 
-  const buildingOptions = buildings.map((building) => ({
-    value: building._id,
-    label: building.name,
-  }));
+  // Cascading option lists — each filtered by the selection above it. Memoised
+  // on their own inputs so typing in any of this form's ~30 other fields
+  // doesn't re-filter all four hierarchy lists.
+  const buildingOptions = useMemo(
+    () => buildings.map((b) => ({ value: b._id, label: b.name })),
+    [buildings],
+  );
 
-  // Cascading option lists — each filtered by the selection above it.
-  const floorOptions = floors
-    .filter((f) => f.building_id === formData.building_id)
-    .map((f) => ({ value: f._id, label: `${f.name} (level ${f.floor_number})` }));
+  const floorOptions = useMemo(
+    () => floors
+      .filter((f) => f.building_id === formData.building_id)
+      .map((f) => ({ value: f._id, label: `${f.name} (level ${f.floor_number})` })),
+    [floors, formData.building_id],
+  );
 
-  const workareaOptions = workareas
-    .filter((w) => w.floor_id === formData.floor_id)
-    .map((w) => ({ value: w._id, label: w.name }));
+  const workareaOptions = useMemo(
+    () => workareas
+      .filter((w) => w.floor_id === formData.floor_id)
+      .map((w) => ({ value: w._id, label: w.name })),
+    [workareas, formData.floor_id],
+  );
 
-  const sectionOptions = sections
-    .filter((s) => s.workarea_id === formData.workarea_id)
-    .map((s) => ({ value: s._id, label: s.name }));
+  const sectionOptions = useMemo(
+    () => sections
+      .filter((s) => s.workarea_id === formData.workarea_id)
+      .map((s) => ({ value: s._id, label: s.name })),
+    [sections, formData.workarea_id],
+  );
 
   const statusOptions: Array<{ value: AssetStatus; label: string }> = [
     { value: 'active', label: 'Active' },
