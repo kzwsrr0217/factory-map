@@ -421,12 +421,73 @@ export async function listLinked(): Promise<IReconcileLinkedAsset[]> {
   }));
 }
 
+// ── Serial-number matching for the "surveyed locally, registered in ITSM
+// later" case ──────────────────────────────────────────────────────────────
+//
+// The physical inventory survey creates local-only assets for devices ITSM
+// doesn't track yet (mostly monitors — see import-inventory-survey.ts). Once
+// somebody registers one in Alemba it appears in the next snapshot, and since
+// no local asset carries its brand-new hardware_asset_id, the unlinked-MMH
+// list would offer to CREATE it — producing a second row for one physical
+// device, with the duplicate lacking all the placement work from the survey.
+// Serial number is the only identifier both sides record, so it's the join
+// key that closes that loop.
+
+function normalizeSerial(serial: string | null | undefined): string {
+  return (serial ?? '').trim().toLowerCase();
+}
+
+/**
+ * Whether a serial is trustworthy enough to auto-link two records on.
+ *
+ * Real survey data contains hand-typed placeholders — "..." and "...2" both
+ * appear in the first Werk1 export — and matching on those would link
+ * unrelated devices, which is far worse than leaving a duplicate for a human
+ * to spot. Requires some real length and enough alphanumeric content that a
+ * punctuation placeholder can't qualify. Genuine serials in that same export
+ * ("111207", "6wxsrm3", "cn-00ffxd-74261-44l-59ws") all pass comfortably.
+ */
+function isUsableSerial(serial: string | null | undefined): boolean {
+  const s = normalizeSerial(serial);
+  if (s.length < 5) return false;
+  return (s.match(/[a-z0-9]/g) ?? []).length >= 3;
+}
+
+/**
+ * Indexes local assets that have NO ITSM link by usable serial number.
+ *
+ * A serial appearing on more than one such asset is dropped rather than
+ * guessed at — an ambiguous match must never silently pick one.
+ */
+async function buildUnlinkedSerialIndex(): Promise<Map<string, Asset>> {
+  const candidates = await AppDataSource.getRepository(Asset)
+    .createQueryBuilder('a')
+    .where('a.hardware_asset_id IS NULL')
+    .andWhere('a.serial_number IS NOT NULL')
+    .andWhere('a.successor_id IS NULL')
+    .getMany();
+
+  const bySerial = new Map<string, Asset>();
+  const ambiguous = new Set<string>();
+  for (const asset of candidates) {
+    if (!isUsableSerial(asset.serial_number)) continue;
+    const key = normalizeSerial(asset.serial_number);
+    if (bySerial.has(key)) { ambiguous.add(key); continue; }
+    bySerial.set(key, asset);
+  }
+  for (const key of ambiguous) bySerial.delete(key);
+  return bySerial;
+}
+
 /**
  * MMH-scoped ITSM hardware (from the imported itsm_hardware_snapshot table)
  * that no local asset links to via hardware_asset_id — the reverse of the
  * usual reconcile direction. Pure local-DB + snapshot-table read; never calls
  * ITSM (the snapshot itself was populated out-of-band — see
  * SnapshotITSMAdapter / import-itsm-snapshot.ts).
+ *
+ * Each row carries a `serial_match` when an existing unlinked local asset has
+ * the same serial, so the caller can link instead of duplicating.
  */
 export async function findUnlinkedMmhAssets(): Promise<IUnlinkedMmhAsset[]> {
   const snapshotRows = await AppDataSource.getRepository(ItsmHardwareSnapshot).find();
@@ -438,23 +499,36 @@ export async function findUnlinkedMmhAssets(): Promise<IUnlinkedMmhAsset[]> {
     .where('a.hardware_asset_id IS NOT NULL')
     .getRawMany<{ hardware_asset_id: string }>();
   const linkedIds = new Set(linked.map((r) => r.hardware_asset_id.toUpperCase()));
+  const bySerial = await buildUnlinkedSerialIndex();
 
   return snapshotRows
     .filter((row) => !linkedIds.has(row.itsm_id.toUpperCase()))
-    .map((row) => ({
-      itsm_guid: row.itsm_guid,
-      itsm_id: row.itsm_id,
-      display_name: row.display_name ?? row.itsm_id,
-      catalog_item_name: row.catalog_item_name,
-      status: row.status,
-      location_name: row.location_name,
-      itsm_url: config.itsm.webUrl ? `${config.itsm.webUrl}/Analyst/Forms/Open/${row.itsm_guid}` : null,
-    }))
+    .map((row) => {
+      const match = isUsableSerial(row.serial_number)
+        ? bySerial.get(normalizeSerial(row.serial_number))
+        : undefined;
+      return {
+        itsm_guid: row.itsm_guid,
+        itsm_id: row.itsm_id,
+        display_name: row.display_name ?? row.itsm_id,
+        catalog_item_name: row.catalog_item_name,
+        status: row.status,
+        location_name: row.location_name,
+        serial_match: match ? { asset_id: match.id, display_name: match.display_name } : null,
+        itsm_url: config.itsm.webUrl ? `${config.itsm.webUrl}/Analyst/Forms/Open/${row.itsm_guid}` : null,
+      };
+    })
     .sort((a, b) => a.display_name.localeCompare(b.display_name));
 }
 
 export interface ICreateAssetsFromMmhResult {
   created: Asset[];
+  /**
+   * Existing local assets matched to an ITSM record by serial number and
+   * linked, rather than duplicated — the survey-first-then-registered-in-ITSM
+   * case. See buildUnlinkedSerialIndex.
+   */
+  linked: Asset[];
   skipped: Array<{ itsm_guid: string; error: string }>;
 }
 
@@ -467,11 +541,16 @@ export interface ICreateAssetsFromMmhResult {
  * Idempotent per call: a row whose hardware_asset_id already has a local
  * asset (created by a previous call, or linked some other way since the
  * snapshot was last read) is skipped rather than duplicated.
+ *
+ * A row whose SERIAL matches an existing unlinked local asset is **linked** to
+ * that asset instead of creating a second one — the device was surveyed
+ * locally before it existed in ITSM, and the local row holds the placement
+ * work. See buildUnlinkedSerialIndex for the safety rules on that match.
  */
 export async function createAssetsFromUnlinkedMmh(itsmGuids: string[]): Promise<ICreateAssetsFromMmhResult> {
   const snapshotRepo = AppDataSource.getRepository(ItsmHardwareSnapshot);
   const assetRepo = AppDataSource.getRepository(Asset);
-  const result: ICreateAssetsFromMmhResult = { created: [], skipped: [] };
+  const result: ICreateAssetsFromMmhResult = { created: [], linked: [], skipped: [] };
 
   // Batch both lookups up front instead of one round-trip per guid — this can
   // be called with the entire unlinked-MMH list at once (1000+ rows).
@@ -485,8 +564,13 @@ export async function createAssetsFromUnlinkedMmh(itsmGuids: string[]): Promise<
   // Also guards against two rows in the SAME batch resolving to the same
   // hardware_asset_id, since existingAssets alone can't catch that.
   const claimedHardwareIds = new Set(existingIdByHardwareId.keys());
+  const bySerial = await buildUnlinkedSerialIndex();
+  // A serial can only be claimed once per batch, in case two ITSM records
+  // carry the same one.
+  const claimedSerials = new Set<string>();
 
   const toCreate: Asset[] = [];
+  const toLink: Asset[] = [];
   for (const guid of itsmGuids) {
     const row = rowByGuid.get(guid);
     if (!row) { result.skipped.push({ itsm_guid: guid, error: 'Not found in the imported snapshot' }); continue; }
@@ -497,6 +581,43 @@ export async function createAssetsFromUnlinkedMmh(itsmGuids: string[]): Promise<
     claimedHardwareIds.add(row.itsm_id);
 
     const modifiedAt = row.itsm_modified_at ? new Date(row.itsm_modified_at) : null;
+
+    // Same physical device already here from the survey — adopt the ITSM
+    // identity onto it rather than creating a twin. Only fills fields the
+    // local row is missing, so surveyed placement/person data is never
+    // clobbered by the snapshot (same rule as backfillAssetsFromSnapshot).
+    const serialKey = normalizeSerial(row.serial_number);
+    const localMatch = isUsableSerial(row.serial_number) && !claimedSerials.has(serialKey)
+      ? bySerial.get(serialKey)
+      : undefined;
+    if (localMatch) {
+      claimedSerials.add(serialKey);
+      localMatch.hardware_asset_id = row.itsm_id;
+      localMatch.itsm_guid = row.itsm_guid;
+      localMatch.source_of_truth = 'itsm';
+      localMatch.is_managed = true;
+      localMatch.sync_status = 'success';
+      localMatch.last_synced = new Date();
+      localMatch.itsm_modified_at = modifiedAt && !isNaN(modifiedAt.getTime()) ? modifiedAt : localMatch.itsm_modified_at;
+      const fillIfEmpty = <K extends keyof Asset>(field: K, value: Asset[K] | null | undefined) => {
+        if (value == null || value === '') return;
+        if (localMatch[field] != null && localMatch[field] !== '') return;
+        localMatch[field] = value;
+      };
+      fillIfEmpty('asset_tag', row.asset_tag);
+      fillIfEmpty('model', row.model);
+      fillIfEmpty('manufacturer', row.manufacturer);
+      fillIfEmpty('asset_type', row.asset_type);
+      fillIfEmpty('mac_address', row.mac_address);
+      fillIfEmpty('catalog_display_name', row.catalog_item_name);
+      fillIfEmpty('catalog_itsm_id', row.catalog_itsm_id);
+      fillIfEmpty('person_full_name', row.assigned_person_name);
+      fillIfEmpty('person_itsm_id', row.person_itsm_id);
+      fillIfEmpty('person_id', row.person_id);
+      toLink.push(localMatch);
+      continue;
+    }
+
     toCreate.push(assetRepo.create({
       display_name: row.display_name ?? row.itsm_id,
       hardware_asset_id: row.itsm_id,
@@ -528,6 +649,9 @@ export async function createAssetsFromUnlinkedMmh(itsmGuids: string[]): Promise<
   // 2100-parameter cap — see utils/mssqlBatch.ts.
   if (toCreate.length > 0) await assetRepo.save(toCreate, { chunk: chunkForEntity(Asset) });
   result.created.push(...toCreate);
+
+  if (toLink.length > 0) await assetRepo.save(toLink, { chunk: chunkForEntity(Asset) });
+  result.linked.push(...toLink);
 
   return result;
 }

@@ -158,6 +158,16 @@
   border-radius: var(--radius-sm);
 }
 
+/* Flags a row that will LINK to an existing surveyed asset rather than create
+   a duplicate — see UnlinkedMmhAsset.serial_match. */
+.serialMatchHint {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--font-size-xs);
+  color: var(--color-success, #059669);
+  cursor: help;
+}
+
 .assetActions {
   display: flex;
   align-items: center;

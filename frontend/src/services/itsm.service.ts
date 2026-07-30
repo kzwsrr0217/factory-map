@@ -61,6 +61,13 @@ export interface UnlinkedMmhAsset {
   status: string | null;
   location_name: string | null;
   itsm_url: string | null;
+  /**
+   * An existing local asset with no ITSM link whose serial number matches this
+   * ITSM record — the same physical device, surveyed before it was registered
+   * in ITSM. Acting on the row LINKS that asset instead of creating a second
+   * one, so its placement/person data survives.
+   */
+  serial_match: { asset_id: string; display_name: string } | null;
 }
 
 export const itsmService = {
@@ -77,7 +84,7 @@ export const itsmService = {
     const res = await api.get('/itsm/reconcile/unlinked-mmh');
     return res.data.data;
   },
-  createFromUnlinkedMmh: async (itsmGuids: string[]): Promise<{ created: unknown[]; skipped: { itsm_guid: string; error: string }[] }> => {
+  createFromUnlinkedMmh: async (itsmGuids: string[]): Promise<{ created: unknown[]; linked: unknown[]; skipped: { itsm_guid: string; error: string }[] }> => {
     const res = await api.post('/itsm/reconcile/unlinked-mmh/create', { itsm_guids: itsmGuids });
     return res.data.data;
   },

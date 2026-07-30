@@ -809,6 +809,33 @@ call. `POST /api/itsm/reconcile/unlinked-mmh/create` (+ UI buttons) materialises
 selected rows into real, **unplaced** local assets — ITSM has no floor-plan
 geometry, so placement on the map is always a manual follow-up step.
 
+##### Serial-number linking — closing the "surveyed first, registered in ITSM later" loop
+The physical survey (below) creates **local-only** assets for devices ITSM
+doesn't track yet, mostly monitors. Once somebody registers one in Alemba it
+turns up in the next snapshot with a brand-new `hardware_asset_id` that no
+local asset carries — so a naive unlinked-MMH create would produce a **second
+row for one physical device**, and the duplicate would be the one *without* the
+survey's placement/person data.
+
+Serial number is the only identifier both sides record, so it's the join key.
+`findUnlinkedMmhAssets` therefore returns a `serial_match` per row (the UI
+shows "↔ links to X" and the button reads **Link** instead of **Create**), and
+`createAssetsFromUnlinkedMmh` **adopts the ITSM identity onto the existing
+asset** rather than creating a twin, returning it under `linked` rather than
+`created`. Adopting only fills fields the local row left empty, so surveyed
+placement, notes and person survive (same never-overwrite rule as
+`backfillAssetsFromSnapshot`).
+
+Two safety rules, both driven by what the real Werk1 export actually contains:
+- **Placeholder serials are rejected.** That export has hand-typed `...` and
+  `...2` values; matching on those would link unrelated devices, which is much
+  worse than leaving a duplicate for a human to notice. A serial must be ≥5
+  characters with ≥3 alphanumerics — every genuine serial in that export
+  (`111207`, `6wxsrm3`, `cn-00ffxd-74261-44l-59ws`) passes easily.
+- **Ambiguous serials are rejected.** If a serial appears on more than one
+  unlinked local asset it is dropped from the index entirely rather than
+  guessing which one to link.
+
 #### Field mapping — what's queryable in this ITSM instance and what isn't
 Confirmed by inspecting a raw `GetViewData` payload and the ITSM web UI
 directly (not guessed):

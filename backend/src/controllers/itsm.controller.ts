@@ -202,7 +202,12 @@ export const createUnlinkedMmhAssets = async (req: AuthRequest, res: Response, n
     }
     const result = await createAssetsFromUnlinkedMmh(guids.map(String));
     const created = result.created.map((a) => a.toApiResponse());
+    // Serial-matched rows adopted an ITSM identity onto an asset that already
+    // existed (see createAssetsFromUnlinkedMmh) — an update, not a create, so
+    // clients refresh the existing row rather than adding a second one.
+    const linked = result.linked.map((a) => a.toApiResponse());
     for (const c of created) io.emit('asset:created', c);
+    for (const l of linked) io.emit('asset:updated', l);
 
     // Written manually rather than via the auditLog middleware — that
     // middleware expects a single created entity (or an array of them), not
@@ -211,21 +216,31 @@ export const createUnlinkedMmhAssets = async (req: AuthRequest, res: Response, n
     const user = req.user;
     if (user) {
       const logRepo = AppDataSource.getRepository(AuditLog);
-      await Promise.all(created.map((c) => logRepo.save(logRepo.create({
-        user_id: user.id, username: user.username, action: 'create',
-        entity_type: 'asset', document_id: c._id,
+      const write = (
+        action: 'create' | 'update',
+        rows: ReturnType<Asset['toApiResponse']>[],
+        note: string,
+      ) => rows.map((r) => logRepo.save(logRepo.create({
+        user_id: user.id, username: user.username, action,
+        entity_type: 'asset', document_id: r._id,
         diff: {
-          display_name: c.basic_info?.display_name,
-          type: c.basic_info?.type,
-          status: c.basic_info?.status,
-          manufacturer: c.basic_info?.manufacturer,
-          serial_number: c.basic_info?.serial_number,
-          note: 'Created from an unlinked MMH ITSM snapshot row',
+          display_name: r.basic_info?.display_name,
+          type: r.basic_info?.type,
+          status: r.basic_info?.status,
+          manufacturer: r.basic_info?.manufacturer,
+          serial_number: r.basic_info?.serial_number,
+          hardware_asset_id: r.itsm?.hardware_asset_id,
+          note,
         },
-      })).catch(() => { /* audit failure must never fail the request */ })));
+      })).catch(() => { /* audit failure must never fail the request */ }));
+
+      await Promise.all([
+        ...write('create', created, 'Created from an unlinked MMH ITSM snapshot row'),
+        ...write('update', linked, 'Linked to an ITSM record by matching serial number — existing local asset adopted the ITSM identity instead of being duplicated'),
+      ]);
     }
 
-    res.json({ success: true, data: { created, skipped: result.skipped } });
+    res.json({ success: true, data: { created, linked, skipped: result.skipped } });
   } catch (error) { next(error); }
 };
 

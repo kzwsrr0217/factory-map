@@ -93,9 +93,13 @@ const ItsmReconcile: React.FC = () => {
     const key = itsmGuids.join(',');
     toggle(setCreating, key, true);
     try {
-      const { created, skipped } = await itsmService.createFromUnlinkedMmh(itsmGuids);
+      const { created, linked, skipped } = await itsmService.createFromUnlinkedMmh(itsmGuids);
       setUnlinkedMmh((prev) => prev.filter((u) => !itsmGuids.includes(u.itsm_guid) || skipped.some((s) => s.itsm_guid === u.itsm_guid)));
       if (created.length > 0) toast.success(created.length === 1 ? 'Unplaced asset created — see Unplaced Assets to place it.' : `${created.length} unplaced assets created — see Unplaced Assets to place them.`);
+      // Serial-matched rows adopted the ITSM identity onto an asset that was
+      // already here from the physical survey — worth calling out separately,
+      // since nothing new appears in Unplaced Assets for those.
+      if (linked.length > 0) toast.success(linked.length === 1 ? 'Matched by serial number and linked to the existing asset — its placement was kept.' : `${linked.length} matched by serial number and linked to existing assets — their placement was kept.`);
       if (skipped.length > 0) toast.error(`${skipped.length} skipped: ${skipped.map((s) => s.error).join('; ')}`);
       await loadList();
     } catch {
@@ -280,7 +284,14 @@ const ItsmReconcile: React.FC = () => {
                 {unlinkedMmh.map((u) => (
                   <tr key={u.itsm_guid}>
                     <td className={styles.hwid}>{u.itsm_id}</td>
-                    <td>{u.display_name}</td>
+                    <td>
+                      {u.display_name}
+                      {u.serial_match && (
+                        <span className={styles.serialMatchHint} title={`Serial matches the existing local asset "${u.serial_match.display_name}" — linking keeps its placement instead of creating a duplicate.`}>
+                          ↔ links to {u.serial_match.display_name}
+                        </span>
+                      )}
+                    </td>
                     <td>{emptyValue(u.catalog_item_name)}</td>
                     <td>{emptyValue(u.status)}</td>
                     <td>{emptyValue(u.location_name)}</td>
@@ -296,9 +307,11 @@ const ItsmReconcile: React.FC = () => {
                             className={styles.ignoreBtn}
                             onClick={() => createFromMmh([u.itsm_guid])}
                             disabled={creating.has(u.itsm_guid)}
-                            title="Create as an unplaced local asset"
+                            title={u.serial_match
+                              ? `Serial matches "${u.serial_match.display_name}" — links to that existing asset instead of creating a duplicate`
+                              : 'Create as an unplaced local asset'}
                           >
-                            <PlusCircle size={14} /> Create
+                            <PlusCircle size={14} /> {u.serial_match ? 'Link' : 'Create'}
                           </button>
                         )}
                       </div>

@@ -140,6 +140,13 @@ export interface IUnlinkedMmhAsset {
   status: string | null;
   location_name: string | null;
   itsm_url: string | null;
+  /**
+   * An existing local asset with no ITSM link whose serial number matches this
+   * ITSM record — i.e. the same physical device, surveyed locally before it was
+   * registered in ITSM. Acting on this row will LINK that asset rather than
+   * create a second one. Null when there's no such match.
+   */
+  serial_match: { asset_id: string; display_name: string } | null;
 }
 
 /** Drift overview aggregated from stored per-asset results — never calls ITSM. */
