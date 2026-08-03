@@ -314,6 +314,21 @@ Shows the whole chain: socket → patch panel and port → rack → IDF/MDF → 
 An empty switch side means "not surveyed yet", not "not connected" — see
 [CONNECTIONS_WORKFLOW.md](CONNECTIONS_WORKFLOW.md) for the full process.
 
+### Before a switch maintenance window
+Open the switch's asset page → **Maintenance Impact** → *Show what depends on this
+switch*. It lists every socket on that switch with the device, person and room
+behind it.
+
+If it says no sockets are recorded, that means either nothing is patched to the
+switch **or** its switch ports have not been surveyed yet — the two look identical
+from here, so check the rack before assuming a window is safe.
+
+### How far along is the survey?
+On the server, `npm run report:network` prints what is still missing: unpatched
+sockets, sockets with no switch port, panel ports with no socket, labels that
+disagree with their panel's rack, and wired devices with no socket. Add
+`-- --csv=/path/out.csv` for the full list. It is read-only and touches nothing.
+
 ---
 
 ## Assets

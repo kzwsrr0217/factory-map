@@ -979,6 +979,18 @@ differing counts plus every field-level diff, and separately lists every
 still-local-only asset (grouped by type) as the backlog of devices someone
 still needs to register in Alemba.
 
+**For the cabling survey**, `network-gaps-report.ts`
+(`npm run report:network -- [--csv=<path>]`) is the equivalent view — kept as its
+own script rather than folded into the reconcile report, because it shares no
+inputs with it and answers a different question ("how far along is the survey"
+rather than "does our data match ITSM"). Five sections, each a list that shrinks
+as the survey proceeds: sockets not patched to a panel, sockets patched with no
+switch port, panel ports with no socket, socket labels that disagree with their
+panel's rack, and wired devices placed on a floor with no socket. Devices not yet
+placed anywhere are counted rather than listed — nothing can be done about them
+until they are placed — and the console output states how many rows it elided
+instead of truncating silently. See docs/CONNECTIONS_WORKFLOW.md.
+
 ## IFS/CMDB Master-Data Import
 
 Separate from ITSM (Alemba) reconcile above: the **read-only IFS/CMDB master

@@ -267,16 +267,25 @@ thousands, and each one only where somebody would actually ask.
    re-checked against the port-collision guard on apply, because the list may
    have been on screen while someone else patched the same port.
 
+9. ✅ **Gap report** — `npm run report:network` (`network-gaps-report.ts`), its
+   own script rather than an addition to `reconcile-report.ts`: that one answers
+   "does our data match ITSM", this one answers "how far along is the survey", and
+   they are run by different people at different times. Five sections, each a
+   shrinking to-do list: unpatched sockets, sockets with no switch port, panel
+   ports with no socket, labels that disagree with their panel's rack, and wired
+   devices on a floor with no socket. Read-only, `--csv` for the full list, and it
+   prints what it left out rather than truncating silently.
+10. ✅ **Impact view for U2** — `GET /network/switches/:id/impact`, shown on a
+    switch's asset page: every socket hanging off it with the device, person and
+    room behind each. Loaded on demand, since it only matters for switches.
+
 **Still to do:**
 
-9. **Reports** (extend `reconcile-report.ts`): unpatched sockets; wired devices
-   with no socket; sockets whose label disagrees with their panel's rack.
-10. **Impact view for U2** — given a switch, list its sockets and the devices,
-    people and rooms behind them. This is what makes a maintenance window safe.
 11. **MAC-address joiner** for the Phase C switch side, with the same dry-run
     discipline as the survey importer: ambiguous MACs skipped, not guessed. The
     label derivation covers the panel side; the switch side still needs the
-    switches' own MAC address tables.
+    switches' own MAC address tables. Worth doing right after the switch
+    replacement, when every switch port has to be re-recorded anyway.
 
 ---
 

@@ -98,6 +98,26 @@ export interface PatchSuggestionResult {
   problems: Array<{ wall_port_id: string; label: string; reason: PatchDerivationFailure }>;
 }
 
+/** One socket behind a switch, with whatever is plugged into it. */
+export interface SwitchImpactSocket {
+  wall_port_id: string;
+  label: string;
+  switch_port: string | null;
+  patch_panel_name: string | null;
+  patch_port: number | null;
+  room_name: string | null;
+  device: { _id: string; display_name: string; asset_type: string | null; person_full_name: string | null } | null;
+}
+
+export interface SwitchImpact {
+  switch: { _id: string; display_name: string };
+  socket_count: number;
+  device_count: number;
+  rooms: string[];
+  people: string[];
+  sockets: SwitchImpactSocket[];
+}
+
 export const networkService = {
   // Rooms
   getRooms: async (params?: { building_id?: string; floor_id?: string; type?: string }): Promise<NetworkRoom[]> => {
@@ -210,6 +230,11 @@ export const networkService = {
     assignments: Array<{ wall_port_id: string; patch_panel_id: string; patch_port: number }>,
   ): Promise<{ applied: string[]; rejected: Array<{ wall_port_id: string; reason: string }> }> => {
     const res = await api.post('/network/wall-ports/apply-patch-suggestions', { assignments });
+    return res.data.data;
+  },
+  /** What goes dark if this switch is taken out of service. Read-only. */
+  getSwitchImpact: async (switchAssetId: string): Promise<SwitchImpact> => {
+    const res = await api.get(`/network/switches/${switchAssetId}/impact`);
     return res.data.data;
   },
   deleteWallPort: async (id: string): Promise<void> => {

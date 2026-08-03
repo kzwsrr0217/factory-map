@@ -4,6 +4,7 @@ import QRCode from 'qrcode';
 import { RefreshCw, QrCode, Tag, AlertTriangle, MoreVertical, CheckCircle, MapPin, History, UserRoundCog } from 'lucide-react';
 import Card from '../components/common/Card';
 import PhysicalPathTrace from '../components/network/PhysicalPathTrace';
+import SwitchImpactPanel from '../components/network/SwitchImpactPanel';
 import Button from '../components/common/Button';
 import Badge from '../components/common/Badge';
 import Breadcrumb from '../components/common/Breadcrumb';
@@ -910,6 +911,16 @@ const AssetDetails: React.FC = () => {
               </div>
             </div>
           </Card>
+
+          {/* Only for switches: everything hanging off this one, for planning a
+              maintenance window. Loaded on demand — one extra query, and only
+              interesting for a handful of assets. */}
+          {(asset.basic_info.type === 'switch' || asset.basic_info.type === 'router') && (
+            <Card padding="lg">
+              <h3 className={styles.sectionTitle}>Maintenance Impact</h3>
+              <SwitchImpactPanel assetId={asset._id} />
+            </Card>
+          )}
 
           {/* Move History */}
           {asset.location.history && asset.location.history.length > 0 && (

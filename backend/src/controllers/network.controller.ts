@@ -641,6 +641,80 @@ export const applyWallPortPatchSuggestions = async (req: Request, res: Response,
   } catch (e) { next(e); }
 };
 
+/**
+ * Everything that goes dark if a switch is taken out of service.
+ *
+ * The question behind a Saturday maintenance window: which sockets hang off this
+ * switch, which devices are in them, whose devices are they, and which rooms are
+ * affected. The socket chain is the only thing that can answer it — an
+ * asset-to-asset connection row records that two things are connected but not
+ * which switch port, so it cannot produce this list at all
+ * (docs/CONNECTIONS_WORKFLOW.md §4).
+ *
+ * Read-only.
+ */
+export const getSwitchImpact = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const switchId = req.params.id;
+    const switchAsset = await assetRepo().findOneBy({ id: switchId });
+    if (!switchAsset) { notFound(res); return; }
+
+    const ports = await wpRepo().find({
+      where: { switch_asset_id: switchId },
+      relations: ['patch_panel', 'patch_panel.rack', 'patch_panel.rack.room'],
+    });
+    await withWorkAreas(ports);
+    const occupants = await occupantsOf(ports);
+
+    // The people and rooms behind those sockets — the part that decides whether
+    // a window is safe, and who to tell.
+    const occupiedIds = [...occupants.values()].map((o) => o._id);
+    const devices = occupiedIds.length === 0 ? [] : await findByIn(assetRepo(), 'id', occupiedIds);
+    const deviceById = new Map(devices.map((d) => [d.id, d]));
+
+    const affected = ports.map((port) => {
+      const occupant = occupants.get(port.id);
+      const device = occupant ? deviceById.get(occupant._id) : undefined;
+      return {
+        wall_port_id: port.id,
+        label: port.label,
+        switch_port: port.switch_port,
+        patch_panel_name: port.patch_panel?.name ?? null,
+        patch_port: port.patch_port,
+        room_name: port.workarea?.name ?? null,
+        device: device
+          ? {
+              _id: device.id,
+              display_name: device.display_name,
+              asset_type: device.asset_type,
+              person_full_name: device.person_full_name,
+            }
+          : null,
+      };
+    });
+    affected.sort((a, b) => a.label.localeCompare(b.label));
+
+    const rooms = [...new Set(affected.map((a) => a.room_name).filter((n): n is string => !!n))].sort();
+    const people = [...new Set(
+      affected.map((a) => a.device?.person_full_name).filter((n): n is string => !!n),
+    )].sort();
+
+    res.json({
+      success: true,
+      data: {
+        switch: { _id: switchAsset.id, display_name: switchAsset.display_name },
+        socket_count: affected.length,
+        // Sockets with nothing plugged in are still listed — they are capacity
+        // that goes away during the window, and someone may be about to use one.
+        device_count: affected.filter((a) => a.device).length,
+        rooms,
+        people,
+        sockets: affected,
+      },
+    });
+  } catch (e) { next(e); }
+};
+
 export const updateWallPort = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const port = await wpRepo().findOneBy({ id: req.params.id });

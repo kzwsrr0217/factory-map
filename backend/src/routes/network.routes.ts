@@ -361,6 +361,27 @@
  *       200:
  *         description: "{ applied: string[], rejected: [{ wall_port_id, reason }] }"
  *
+ * /network/switches/{id}/impact:
+ *   get:
+ *     tags: [Network]
+ *     summary: What goes dark if this switch is taken out of service
+ *     description: |
+ *       Lists the sockets hanging off the switch with the device, person and room
+ *       behind each — the question a maintenance window turns on. Only the socket
+ *       chain can answer it: an asset-to-asset connection records that two things
+ *       are connected but not which switch port.
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *         description: Asset id of the switch
+ *     responses:
+ *       200:
+ *         description: "{ switch, socket_count, device_count, rooms, people, sockets[] }"
+ *       404:
+ *         description: No such asset
+ *
  * /network/wall-ports/{id}:
  *   get:
  *     tags: [Network]
@@ -408,7 +429,7 @@ import {
   listRacks, getRack, createRack, updateRack, deleteRack, replaceRack,
   listPatchPanels, getPatchPanel, createPatchPanel, updatePatchPanel, deletePatchPanel, replacePatchPanel,
   listWallPorts, getWallPort, createWallPort, createWallPortRange,
-  suggestWallPortPatches, applyWallPortPatchSuggestions,
+  suggestWallPortPatches, applyWallPortPatchSuggestions, getSwitchImpact,
   updateWallPort, deleteWallPort,
 } from '../controllers/network.controller';
 import { validate, RoomCreateSchema, RoomUpdateSchema, RackCreateSchema, RackUpdateSchema } from '../utils/validate';
@@ -442,6 +463,7 @@ router.get('/wall-ports',         listWallPorts);
 router.post('/wall-ports/range',  requireOperator, createWallPortRange);
 // Both before '/wall-ports/:id' so the literal paths win over the parameter.
 router.get('/wall-ports/patch-suggestions', suggestWallPortPatches);
+router.get('/switches/:id/impact', getSwitchImpact);
 router.post('/wall-ports/apply-patch-suggestions', requireOperator, applyWallPortPatchSuggestions);
 router.get('/wall-ports/:id',     getWallPort);
 router.post('/wall-ports',        requireOperator, createWallPort);
