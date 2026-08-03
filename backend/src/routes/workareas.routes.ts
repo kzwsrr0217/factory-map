@@ -85,6 +85,33 @@
  *     responses:
  *       200:
  *         description: Deleted
+ *
+ * /workareas/{id}/auto-place:
+ *   post:
+ *     tags: [WorkAreas]
+ *     summary: Arrange this work area's unplaced assets on a grid inside it
+ *     description: |
+ *       The inventory survey assigns a work area but no coordinates, so imported
+ *       assets sit in the map's unplaced tray. Since the exact spot inside a room
+ *       carries no information, arranging them on a grid is the answer rather than
+ *       a compromise — and anything needing an exact spot can still be dragged.
+ *
+ *       Only touches assets already assigned to this work area that are not
+ *       placed, not rack-mounted and not superseded. Nothing already on the map
+ *       moves, and cells occupied by placed assets are skipped.
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         description: |
+ *           `{ placed: [{_id, display_name, x, y}], skipped: [{_id, display_name, reason}],
+ *           crowded: boolean }` — `crowded` warns that the cells are small enough
+ *           that icons will overlap.
+ *       404:
+ *         description: No such work area
  */
 import { Router } from 'express';
 import {
@@ -92,6 +119,7 @@ import {
   getWorkAreaById,
   createWorkArea,
   updateWorkArea,
+  autoPlaceWorkAreaAssets,
   deleteWorkArea,
 } from '../controllers/workarea.controller';
 import { requireOperator } from '../middleware/auth.middleware';
@@ -102,6 +130,7 @@ router.get('/', getAllWorkAreas);
 router.get('/:id', getWorkAreaById);
 router.post('/', requireOperator, createWorkArea);
 router.patch('/:id', requireOperator, updateWorkArea);
+router.post('/:id/auto-place', requireOperator, autoPlaceWorkAreaAssets);
 router.delete('/:id', requireOperator, deleteWorkArea);
 
 export default router;

@@ -80,6 +80,13 @@ the rooms in it (one inflated rounded rect per room, merged by group opacity), s
 an L-shaped zone renders as an L instead of a bounding box that would swallow a
 neighbouring zone's room.
 
+`POST /workareas/:id/auto-place` lays a work area's unplaced assets out on a grid
+inside its rectangle. The inventory survey assigns a room but no coordinates, and
+the exact spot inside a room carries no information, so this is the normal
+placement path rather than a bulk shortcut — it only ever touches assets already
+assigned to that work area that are unplaced, not rack-mounted and not superseded,
+and it skips cells occupied by assets already on the map.
+
 **Section and Workstation are retired.** They predate Zone and never worked as
 spatial levels — a Section has no width/height, so it could not be drawn on the
 floor map at all. The tables, entities and endpoints remain (no data loss, and

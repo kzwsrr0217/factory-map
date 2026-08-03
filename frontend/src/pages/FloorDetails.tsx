@@ -451,6 +451,35 @@ const FloorDetails: React.FC = () => {
   };
 
   // Get assets in selected workarea
+  /**
+   * Assets the survey assigned to this work area that are still waiting for a
+   * position. These are what the arrange action places — counted by `workarea_id`
+   * rather than by geometry, because they have no geometry yet.
+   */
+  const unplacedInWorkarea = useCallback((workareaId: string): Asset[] => (
+    assets.filter((a) => a.hierarchy?.workarea_id === workareaId && !a.is_placed && !a.hierarchy?.rack_id && !a.successor_id)
+  ), [assets]);
+
+  const [arrangingId, setArrangingId] = useState<string | null>(null);
+  const handleAutoPlace = useCallback(async (workarea: WorkArea, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setArrangingId(workarea._id);
+    try {
+      const res = await workareaService.autoPlaceAssets(workarea._id);
+      // The server's message already spells out the counts and the crowded
+      // warning; repeating it here would only risk the two disagreeing.
+      if (res.skipped.length > 0 || res.crowded) toast.warning(res.message ?? 'Arranged with warnings');
+      else toast.success(res.message ?? `${res.placed.length} asset(s) arranged`);
+      if (id) await loadFloorDetails(id);
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, 'Failed to arrange the assets. Please try again.'));
+    } finally {
+      setArrangingId(null);
+    }
+    // loadFloorDetails is stable for a given id
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, toast]);
+
   const getAssetsInWorkarea = (workarea: WorkArea): Asset[] => {
     const waX = workarea.coordinates?.x || 0;
     const waY = workarea.coordinates?.y || 0;
@@ -700,6 +729,17 @@ const FloorDetails: React.FC = () => {
                     </p>
                   </div>
                   <div className={styles.workareaActions}>
+                    {unplacedInWorkarea(workarea._id).length > 0 && (
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        loading={arrangingId === workarea._id}
+                        onClick={(e) => handleAutoPlace(workarea, e)}
+                        title="Lay this room's unplaced assets out on a grid inside it. They can still be dragged afterwards."
+                      >
+                        Arrange {unplacedInWorkarea(workarea._id).length} unplaced
+                      </Button>
+                    )}
                     <Button
                       variant="outline"
                       size="sm"

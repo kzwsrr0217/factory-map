@@ -251,6 +251,21 @@ above the group. Click one to see its details.
    name it, without leaving the dialog
 4. The work area appears on the map and can be repositioned by dragging
 
+### Placing many assets at once
+After importing the inventory survey, every asset has a building, floor and work
+area — but no position, so they all sit in the map's unplaced tray. On the floor
+page, each work area with waiting assets shows an **Arrange N unplaced** button: it
+lays them out on a grid inside that room's rectangle in one go.
+
+The exact spot inside a room carries no information — what matters is which room
+the device is in, which the survey already told us — so this is the normal way to
+place surveyed assets, not a shortcut. Anything that does need an exact spot can
+still be dragged afterwards, and arranging never moves an asset that is already on
+the map.
+
+If a room holds more devices than fit as separate icons, it says so and the icons
+overlap; that is honest, they really are all in that room.
+
 ### Changing a zone's colour
 Open any of its rooms, then pick a swatch under **Zone Colour**. It applies to the
 whole zone — every room in it changes, not just the one you opened. On **Auto**

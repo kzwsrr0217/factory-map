@@ -69,6 +69,22 @@ export const workareaService = {
     return response.data.data;
   },
 
+  /**
+   * Arranges this work area's unplaced assets on a grid inside its rectangle.
+   * The survey gives assets a room but no coordinates, and the exact spot inside
+   * a room carries no information — so this is the answer, not a shortcut.
+   * Anything needing an exact spot can still be dragged afterwards.
+   */
+  autoPlaceAssets: async (id: string): Promise<{
+    placed: Array<{ _id: string; display_name: string; x: number; y: number }>;
+    skipped: Array<{ _id: string; display_name: string; reason: string }>;
+    crowded: boolean;
+    message?: string;
+  }> => {
+    const response = await api.post(`/workareas/${id}/auto-place`);
+    return { ...response.data.data, message: response.data.message };
+  },
+
   // Delete work area
   deleteWorkArea: async (id: string): Promise<void> => {
     await api.delete(`/workareas/${id}`);
