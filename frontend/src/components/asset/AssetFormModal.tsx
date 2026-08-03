@@ -620,6 +620,40 @@ const AssetFormModal: React.FC<AssetFormModalProps> = ({
     [workareas, formData.workarea_id],
   );
 
+  const selectedWallPort = useMemo(
+    () => wallPorts.find((wp) => wp._id === wallPortId) ?? null,
+    [wallPorts, wallPortId],
+  );
+
+  /**
+   * Sockets, annotated with the two things that decide whether picking one is
+   * sensible: whether another device already holds it, and how far along the
+   * patching chain it is. A socket that is free but unpatched has no network at
+   * all, so labelling it plain "free" would make assigning a device to it look
+   * like the job was done (docs/CONNECTIONS_WORKFLOW.md).
+   *
+   * Occupied sockets are listed but disabled rather than hidden, so it's visible
+   * that the socket exists and who has it — except the one this asset already
+   * holds, which has to stay selectable.
+   */
+  const wallPortOptions = useMemo(() => {
+    const room = (wp: typeof wallPorts[number]) => (wp.workarea ? ` · ${wp.workarea.name}` : '');
+    const path = (wp: typeof wallPorts[number]) => {
+      if (wp.patch_status === 'live') return ` · live${wp.switch_port ? ` (${wp.switch_port})` : ''}`;
+      if (wp.patch_status === 'patched') return ' · patched, no switch';
+      return ' · not patched';
+    };
+    return wallPorts.map((wp) => {
+      const takenByOther = !!wp.occupied_by && wp.occupied_by._id !== asset?._id;
+      const taken = takenByOther ? ` — in use by ${wp.occupied_by!.display_name}` : '';
+      return {
+        value: wp._id,
+        label: `${wp.label}${room(wp)}${path(wp)}${taken}`,
+        disabled: takenByOther,
+      };
+    });
+  }, [wallPorts, asset]);
+
   const statusOptions: Array<{ value: AssetStatus; label: string }> = [
     { value: 'active', label: 'Active' },
     { value: 'inactive', label: 'Inactive' },
@@ -1067,23 +1101,30 @@ const AssetFormModal: React.FC<AssetFormModalProps> = ({
               onChange={(e) => { setWallPortId(e.target.value); setIsDirty(true); }}
             >
               <option value="">— No wall port assigned —</option>
-              {wallPorts.map(wp => (
-                <option key={wp._id} value={wp._id}>
-                  {wp.label}
-                  {wp.patch_panel_name ? ` → ${wp.patch_panel_name}` : ''}
-                  {wp.patch_port != null ? ` port ${wp.patch_port}` : ''}
-                  {wp.switch_port ? ` (${wp.switch_port})` : ''}
-                </option>
+              {wallPortOptions.map(o => (
+                <option key={o.value} value={o.value} disabled={o.disabled}>{o.label}</option>
               ))}
             </select>
+            {selectedWallPort?.patch_status === 'unpatched' && (
+              <span className={styles.wallPortWarning}>
+                ⚠ {selectedWallPort.label} is not patched to a panel yet — the device
+                will have no network until it is patched at the rack.
+              </span>
+            )}
+            {selectedWallPort?.patch_status === 'patched' && (
+              <span className={styles.wallPortWarning}>
+                ⚠ {selectedWallPort.label} is patched to a panel but no switch port is
+                recorded, so it may not be live.
+              </span>
+            )}
             {wallPortId && wallPorts.length === 0 && (
-              <span style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)' }}>
+              <span className={styles.wallPortHint}>
                 Select a floor first to see available wall ports
               </span>
             )}
             {!wallPortId && formData.floor_id && wallPorts.length === 0 && (
-              <span style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)' }}>
-                No wall ports on this floor
+              <span className={styles.wallPortHint}>
+                No wall ports recorded on this floor — add them from the floor page.
               </span>
             )}
           </div>

@@ -1,12 +1,11 @@
 # Connections — use cases and the surveying process
 
-Status: **design, agreed before implementation.** Connection surveying is
-deliberately deferred until after the imminent rack / server / switch
-replacement (see [Phase C](#phase-c--switch-ports-after-the-replacement)).
+Status: **agreed design.** Connection surveying starts with the sockets; the
+switch side waits until after the imminent rack / server / switch replacement.
 
 This document works backwards from the questions the app has to answer on a
-normal working day, decides which of the two connection layers answers each
-one, and only then describes the process for filling them.
+normal working day, decides which of the two connection layers answers each one,
+and only then describes the process for filling them.
 
 ---
 
@@ -17,7 +16,7 @@ one, and only then describes the process for filling them.
 | U1 | "My PC has no network." | Which socket is this device in → which panel port → which switch port → which switch → which IDF? | Service desk, in a call |
 | U2 | "We're swapping switch SW-IDF2-01 on Saturday." | Which sockets hang off it, and which devices, people and rooms go dark? | Network / IT infra |
 | U3 | "HR is moving to the east wing." | How many sockets does the target room have, how many are patched and live, how many are free? | IT + facility |
-| U4 | "New machine arriving in production next week." | Where is the nearest free socket, and is its panel port patched to a switch that has a free port? | IT infra |
+| U4 | "New machine arriving in production next week." | Where is the nearest free socket, and is its panel port patched to a switch? | IT infra |
 | U5 | "This UPS is being replaced." | Which devices are fed from it? | IT infra / facility |
 | U6 | "Which server does this application depend on?" | Non-physical relations between assets. | IT ops |
 | U7 | Audit / handover | Printable "what is plugged where" per floor and per IDF. | IT management |
@@ -27,38 +26,62 @@ network sockets at all. That split is what decides the model.
 
 ---
 
-## 2. What the model already provides
+## 2. Two design principles
 
-**Layer A — the socket chain (physical network path).** Already fully modelled,
-and it needs *no* connection rows:
+**The socket label is the identity.** Sockets are labelled `R1/001` — rack 1,
+port 001. The label is what is physically printed on the faceplate and on the
+patch panel, and it is what a technician reads out during a U1 call. It is
+therefore the key, not a generated id, and not a map position.
+
+Because the label encodes the rack, **it already answers "where does this socket
+go" before any patching is recorded.** Two consequences worth exploiting:
+
+- Sockets can be created in bulk from the label pattern (`R1/001`…`R1/048`) instead
+  of typed one at a time, which is what makes "what sockets exist on this floor"
+  cheap to fill in.
+- The label is checkable against reality: a socket labelled `R1/…` whose patch
+  panel sits in rack R2 is a data-entry error, and a report can find it.
+
+**The map shows what people navigate by, not an inventory of wall fixtures.**
+Rooms, zones and devices go on the floor plan; sockets do not. A socket's exact
+x/y on a top-down plan is never accurate (it is on a wall, not on the floor),
+maintaining a few hundred of them by dragging costs real time, and the payoff is
+a dot the label already describes better. So **wall ports are not drawn on the
+map** — they are a per-floor list, grouped by room.
+
+---
+
+## 3. What the model already provides
+
+**Layer A — the socket chain (physical network path).** Already modelled, and it
+needs *no* connection rows:
 
 ```
 Asset.wall_port_id
-  └── WallPort              label = what is printed on the faceplate, pos_x/pos_y on the floor map
+  └── WallPort              label ("R1/001"), floor_id, workarea_id (which room)
         ├── patch_panel_id + patch_port   → PatchPanel
         │                                     └── rack_id → NetworkRack → network_room_id → NetworkRoom (IDF/MDF)
         └── switch_asset_id + switch_port → the switch Asset
 ```
 
-Rack-mounted devices skip the wall port: `Asset.rack_id` + `Asset.u_position`
-place them directly in a rack.
+Every one of `patch_panel_id`, `patch_port`, `switch_asset_id` and `switch_port`
+is nullable, so "this socket exists but is not patched yet" is a first-class
+state — no schema change needed for it. The API already rejects two sockets
+claiming the same panel port or the same switch port
+(`findWallPortCollision` in `backend/src/controllers/network.controller.ts`).
 
-The Map View side panel already renders this whole chain as a trace
-(`frontend/src/pages/MapView.tsx`, "Physical path"), and
-`frontend/src/pages/NetworkInfrastructure.tsx` is where rooms, racks, panels and
-wall ports are created — a wall port is created *from* the panel port that feeds
-it, which is the right direction (see §4).
+Rack-mounted devices skip the socket entirely: `Asset.rack_id` + `Asset.u_position`
+place them directly in a rack.
 
 **Layer B — `AssetConnection` (asset ↔ asset).** A directed row, mirrored into a
 second row for `bidirectional` links and tied together by `pair_id`. Carries
 `connection_type` (ethernet, fiber, wifi, power, usb, serial, bluetooth,
 dependency, peer, parent-child, other), `source_port` / `target_port`, `label`,
-`description`, `strength`, and a free `patch_panel` JSON blob. Created in
-wire-mode on the map (`AddConnectionModal`).
+`description`, `strength`. Created in wire-mode on the map (`AddConnectionModal`).
 
 ---
 
-## 3. The rule: which layer for what
+## 4. The rule: which layer for what
 
 > **Ethernet to a wall socket is Layer A. Never Layer B.**
 
@@ -68,151 +91,182 @@ Reasons, in order of importance:
    things are connected". It does not say *which switch port*, so it cannot
    produce the list of what goes dark when a switch is replaced, nor find a free
    port. The socket chain carries the port at every hop.
-2. **Switch replacement invalidates Layer B wholesale.** If the socket chain
-   holds the truth, replacing a switch means re-pointing `WallPort.switch_asset_id`
-   for the affected ports — the device side is untouched, because a PC's
-   relationship is to the *socket*, which did not move. With PC→switch rows, every
-   single row has to be rewritten.
-3. **A device moves far more often than a socket.** Moving a PC to another desk
-   is one field (`wall_port_id`); the panel and switch side stays as it was.
-4. **It is a) N rows instead of 2N, and b) not derivable twice.** Two
-   representations of one fact drift apart. The socket chain is the one that maps
-   onto what a technician can physically see and read off a faceplate.
+2. **Switch replacement invalidates Layer B wholesale.** If the socket chain holds
+   the truth, replacing a switch means re-pointing `WallPort.switch_asset_id` for
+   the affected ports — the device side is untouched, because a PC's relationship
+   is to the *socket*, which did not move. With PC→switch rows, every row has to
+   be rewritten.
+3. **A device moves far more often than a socket.** Moving a PC to another desk is
+   one field (`wall_port_id`); the panel and switch side stays as it was.
 
 **Use Layer B only for what the socket chain cannot express:**
 
 | Connection type | Example | Why Layer B |
 |---|---|---|
 | `power` | UPS → server, PDU → device | Answers U5; no socket chain for power |
-| `usb`, `serial` | Machine control PC ↔ CNC / scale / label printer | Direct cable, no panel involved |
+| `usb` | **Laptop → docking station** (see below) | The laptop's cable goes to the dock, not to the wall |
+| `serial`, `usb` | Machine control PC ↔ CNC / scale / label printer | Direct cable, no panel involved |
 | `fiber` | IDF ↔ MDF uplink, or two racks | Both ends are infrastructure, not a faceplate |
 | `dependency` | App server → DB server | Answers U6; purely logical |
 | `peer`, `parent-child` | Cluster nodes, blade ↔ chassis | Logical grouping |
-| `ethernet` **only** when there is genuinely no faceplate — a device patched straight into a switch in the same rack | Server → ToR switch | Record `source_port` / `target_port` |
+| `ethernet` **only** where there is genuinely no faceplate — a device patched straight into a switch in the same rack | Server → ToR switch | Record `source_port` / `target_port` |
 
 Everything else that looks like "PC has network" is Layer A.
 
+### Docking stations
+
+A dock is a permanent desk fixture with a fixed cable to the wall socket; the
+laptop is the mobile part. So:
+
+- the **dock** carries `wall_port_id` — it is what is actually plugged into `R1/001`;
+- the **laptop** gets a `usb` Layer B connection to the dock, and no `wall_port_id`.
+
+Putting the socket on the laptop would be wrong in the way that matters: the
+laptop leaves the building every evening while the socket does not, so the
+"which device is in R1/001" answer would go stale daily, and a U2 impact list
+would name a laptop that is at home.
+
+Desk mini-switches / chained hubs do not occur — they are prohibited here — so
+one socket means one directly-attached device (or one dock).
+
 ---
 
-## 4. Volatility — what to survey by hand and what not to
+## 5. Volatility — what to survey by hand and what not to
 
-The order of the phases below follows from how often each fact changes. Surveying
-a volatile fact by hand, before the thing that changes it happens, is wasted work.
+The phase order below follows from how often each fact changes. Surveying a
+volatile fact by hand, before the thing that changes it happens, is wasted work.
 
 | Fact | Changes | How to capture |
 |---|---|---|
-| Socket exists, its label, where it is on the floor | Almost never (building works only) | Manual survey — **do first** |
-| Socket → panel + panel port | Almost never (it is the fixed cable in the wall) | Manual survey, or existing IDF documentation |
+| Socket exists, its label, which room it is in | Almost never (building works only) | Bulk-create from the label pattern, assign rooms — **do first** |
+| Socket → panel + panel port | Almost never (it is the fixed cable in the wall) | At the rack, together with the switch side |
 | Panel → rack → IDF | Almost never | Already in the app via Network Infrastructure |
-| Which device is in which socket | Weekly (moves, replacements) | Manual at first; keep it current via the normal asset edit |
-| **Panel port → switch port** | **Now: everything. Normally: monthly** | **Do last, and prefer reading it from the switch** |
-| Switch itself (`switch_asset_id`) | The imminent replacement, then rarely | Re-point the affected wall ports |
+| Which device is in which socket | Weekly (moves, replacements) | Manual; then kept current through normal asset editing |
+| **Panel port → switch port** | **Now: everything. Normally: monthly** | **Last, and preferably read out of the switch** |
+| The switch itself (`switch_asset_id`) | The imminent replacement, then rarely | Re-point the affected sockets |
 
-The bottom two rows are exactly what the rack/server/switch replacement will
-change, which is why connections were deferred — and why the phases are ordered
-as they are rather than "survey everything at once".
+The bottom two rows are exactly what the rack / server / switch replacement will
+change, which is why the switch side waits.
 
 ---
 
-## 5. The process
+## 6. The process
 
-### Phase A — sockets and the fixed cabling (can start now)
+### Phase A — what sockets exist (can start now)
 
-Independent of the switch replacement: nothing here changes when switches are
-swapped.
+Unaffected by the switch replacement.
 
 1. **Per IDF, enter the infrastructure** in *Network Infrastructure*: room
-   (IDF/MDF) → rack → patch panels with their real port counts. Mostly done
-   already for the rooms that exist.
-2. **Walk each floor and record the faceplates.** One row per socket:
-   the label physically printed on it, the room (work area) it is in, and —
-   read off the panel or the existing documentation — which panel and which
-   panel port it terminates on.
-3. **Enter them** by clicking the panel port in *Network Infrastructure* and
-   filling in the wall port. This direction is deliberate: it is impossible to
-   create a socket that is patched to a port that does not exist.
-4. **Position them on the map**: Map View → edit mode → wall-ports layer → drag
-   each socket to where it physically is. Positions are what make U3 and U4
-   answerable at a glance.
+   (IDF/MDF) → rack → patch panels with their real port counts.
+2. **Create the sockets from their labels.** A rack's sockets are a contiguous
+   range (`R1/001`…`R1/048`), so they are generated, not typed. At this point a
+   socket has a label, a floor and nothing else.
+3. **Assign each socket to a room** (work area). This is the step that makes "find
+   a free socket in this room" possible, and it replaces what dragging dots on the
+   map used to do — more cheaply and more precisely.
 
-Leave `switch_asset_id` / `switch_port` **empty** in this phase. An empty switch
-side reads honestly as "not yet surveyed"; a guessed one reads as fact.
+`patch_panel_id`, `patch_port`, `switch_asset_id` and `switch_port` stay **empty**
+in this phase. An empty switch side reads honestly as "not surveyed yet"; a
+guessed one is indistinguishable from a verified one.
 
-### Phase B — devices into sockets (with, or right after, the asset survey)
+### Phase B — devices into sockets
 
-For each device already placed in a work area, set which socket it is plugged
-into. Two ways in:
+For each device placed in a work area, record which socket it is plugged into,
+from the asset form's *Physical Wall Port* field. The picker must show each
+socket's state, because "free" alone is not enough:
 
-- *Asset edit form* → the wall port field, when working from a list;
-- from the map, when working room by room.
+| State | Meaning |
+|---|---|
+| not patched | no panel port → **it will not work** |
+| patched, no switch | physically terminated, but no live port |
+| live | panel port and switch port both known |
+| occupied | another asset already holds it |
 
-A device with no `wall_port_id` is not an error — printers on Wi-Fi, monitors and
-docking stations have none. Only the "should be on the wire but isn't recorded"
-set matters, and that set is exactly what a report can list (see §6).
+Without this, a device gets assigned to a dead socket and the job looks done.
 
-### Phase C — switch ports (after the replacement)
+A device with no socket is not an error — Wi-Fi printers, monitors and laptops
+(see docking stations) have none. The set that matters is "should be on the wire
+but has no socket recorded", and that is a report, not a UI rule.
 
-Once the new switches are in and their names exist as assets in the app:
+### Phase C — patching, at the rack
 
-1. Set `WallPort.switch_asset_id` + `switch_port` for the ports that are live.
-2. **Prefer not doing this by hand.** The switch already knows: its MAC address
-   table maps a port to the MAC of whatever is plugged into it, and the app
-   already stores `Asset.mac_address`. A one-off export from the switches (or
-   from the network monitoring system) joined on MAC address fills the switch
-   side of hundreds of ports without a single manual entry, and can be re-run
-   after every change. This is the single highest-value automation in the whole
-   connection story.
-3. Whatever the join cannot match is a short manual list, not a full survey.
+This is one visit, not two. Standing at the rack you can read which panel port a
+socket lands on and plug its patch cord, so both facts are recorded together:
+
+1. In *Network Infrastructure*, open the rack's patch panel.
+2. On a panel port, attach the existing socket (`R1/001`) — this sets
+   `patch_panel_id` + `patch_port`.
+3. Record the switch and switch port the patch cord goes to.
+
+For the mass fill after the switch replacement, **prefer not doing step 3 by
+hand.** The switch already knows: its MAC address table maps a port to the MAC of
+whatever is plugged in, and the app already stores `Asset.mac_address`. A one-off
+export from the switches, joined on MAC address, fills the switch side of hundreds
+of ports and can be re-run after every change. This is the highest-value
+automation in the whole connection story. Whatever the join cannot match is a
+short manual list, not a full survey.
 
 ### Phase D — the non-network cables (opportunistic, ongoing)
 
-Layer B rows, recorded when someone is at the rack anyway rather than as a
-campaign: UPS/PDU feeds (U5), machine ↔ control-PC serial/USB cables, IDF↔MDF
-fibre uplinks, and application dependencies (U6). These are dozens of rows, not
-thousands, and each one is only worth recording where somebody would actually ask.
+Layer B rows, recorded when someone is at the rack or the desk anyway rather than
+as a campaign: UPS/PDU feeds (U5), laptop→dock, machine ↔ control-PC serial/USB,
+IDF↔MDF fibre uplinks, application dependencies (U6). Dozens of rows, not
+thousands, and each one only where somebody would actually ask.
 
 ---
 
-## 6. What has to be built before Phase B/C can be efficient
+## 7. What has to be built
 
-Not blocking Phase A — that works with today's UI.
+**Done:**
 
-1. **`import-network-survey.ts`** — a wall-port importer built exactly like
-   `import-inventory-survey.ts`: **dry run by default**, matches building / floor /
-   zone / work area by folded name, reports what did not match, accepts a
-   corrections file, and only writes with `--apply`. Columns:
-   `epulet, emelet, helyszin, work_area, socket_label, panel_name, panel_port,
-   switch_name, switch_port, megjegyzes` — the last two optional and normally
-   empty until Phase C.
-2. **A MAC-address joiner** for Phase C step 2, taking a switch port/MAC export
-   and setting the switch side of the matching wall ports. Same dry-run
-   discipline; ambiguous MACs skipped rather than guessed, the way
-   `ReconcileService`'s serial matching drops ambiguous serials.
-3. **Two reports** (extend `reconcile-report.ts`):
-   - *unpatched sockets* — wall ports with no panel port, and panel ports with no
-     socket (both directions of the same gap);
-   - *wired devices with no socket* — desktops/servers/printers that are placed in
-     a work area, are not decommissioned, and have no `wall_port_id`. This is the
-     Phase B to-do list, and it shrinks visibly as work proceeds.
-4. **Impact view for U2** — given a switch asset, list its wall ports and the
-   devices, people and work areas behind them. The data is all present; this is a
-   query and a panel, and it is what makes a Saturday maintenance window safe.
-5. **Free-port view for U4** — per work area: sockets, patched, occupied, free.
+1. ✅ **`WallPort.workarea_id`** — nullable soft join, same pattern as
+   `WorkArea.zone_id`. Without it a socket is only located to a floor, and "find a
+   free socket in this room" is unanswerable. Replaces `pos_x` / `pos_y`, which are
+   no longer maintained. Migration `1732900000000-AddWallPortWorkArea` assigns the
+   room where the old position falls inside exactly one work-area rectangle, and
+   leaves it null where two overlap rather than guessing.
+2. ✅ **Socket list per floor**, grouped by room, with each socket's state —
+   `FloorWallPortList`, on the floor page. This *is* the "what sockets exist on
+   this floor" answer.
+3. ✅ **Create sockets without a panel**, single and by label range
+   (`R1/001`–`R1/048`) — `WallPortFormModal` and `POST /network/wall-ports/range`.
+   Labels already used in the building are skipped and reported.
+4. ✅ **Attach-an-existing-socket** on a panel port, for Phase C step 2 — the
+   Network Infrastructure port dialog now offers this building's unpatched sockets
+   before offering to create one.
+5. ✅ **State-aware socket picker** in the asset form: each socket shows its room,
+   how far it is patched, and who holds it; occupied ones are disabled, and picking
+   an unpatched one warns that the device will have no network.
+6. ✅ **Physical-path panel on the asset page** — `PhysicalPathTrace`, shared by
+   the map's side panel and the asset page.
+7. ✅ **Sockets removed from the floor map**, along with the layer toggle, drag
+   and popover. Connections whose far end is a socket are no longer drawn as lines
+   either — without a maintained position they would point at (0,0).
 
-Suggested order: 3 → 1 → 4 → 2 → 5. The reports come first because they make the
-survey's progress measurable, and item 1 turns the survey from typing into a file
-drop.
+**Still to do:**
+
+8. **Reports** (extend `reconcile-report.ts`): unpatched sockets; wired devices
+   with no socket; sockets whose label disagrees with their panel's rack.
+9. **Impact view for U2** — given a switch, list its sockets and the devices,
+   people and rooms behind them. This is what makes a maintenance window safe.
+10. **MAC-address joiner** for the Phase C mass fill, with the same dry-run
+    discipline as the survey importer: ambiguous MACs skipped, not guessed.
+
+**Open question:** does the port number map deterministically onto a panel and its
+port — e.g. `R1/001`–`R1/024` = the rack's first 24-port panel, ports 1–24? If so,
+Phase C step 2 can be pre-filled from the label and only needs confirming. If
+panels are not numbered contiguously, it stays manual as it is now.
 
 ---
 
-## 7. Constraints that hold throughout
+## 8. Constraints that hold throughout
 
-- **ITSM is read-only.** Nothing in this workflow writes to Alemba/Operaio, and
-  nothing queries it in a loop. The socket chain is factorymap's own data — ITSM
-  has no concept of it.
+- **ITSM is read-only.** Nothing here writes to Alemba/Operaio, and nothing
+  queries it in a loop. The socket chain is factorymap's own data — ITSM has no
+  concept of it.
 - **Never invent a link.** An empty switch side, an unpatched panel port and a
-  device with no socket are all legitimate states that a report can find. A
-  guessed one is indistinguishable from a surveyed one and quietly poisons U2,
-  which is the use case where being wrong costs a production outage.
-- **The faceplate label is the key**, not a generated id. It is what the
-  technician on the phone can read out during U1.
+  device with no socket are all legitimate states a report can find. A guessed one
+  is indistinguishable from a surveyed one and quietly poisons U2 — the use case
+  where being wrong costs a production outage.
+- **Don't clutter the map.** Every new thing drawn on the floor plan competes with
+  the rooms and devices people actually navigate by.

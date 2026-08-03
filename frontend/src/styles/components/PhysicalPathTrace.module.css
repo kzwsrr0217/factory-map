@@ -1,0 +1,63 @@
+/* Lifted from MapView.module.css when the trace was extracted so it could also
+   be shown on the asset page. MapView keeps its own copies for the logical
+   connections list, which was not extracted. */
+
+.connection {
+  padding: var(--spacing-sm) var(--spacing-md);
+}
+
+.endpoint {
+  padding-left: 16px;
+  border-left: 2px solid var(--color-gray-200);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.endpointName {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.endpointSub {
+  font-weight: var(--font-weight-normal);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+.step {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  padding-left: 4px;
+}
+
+.stepBadge {
+  display: inline-block;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: var(--color-gray-100);
+  color: var(--color-gray-600);
+  font-size: 10px;
+  font-weight: var(--font-weight-medium);
+}
+
+.stepMono {
+  font-family: monospace;
+  color: var(--color-text-primary);
+}
+
+.unpatched {
+  font-size: var(--font-size-xs);
+  color: #9ca3af;
+  font-style: italic;
+  padding-left: 4px;
+}

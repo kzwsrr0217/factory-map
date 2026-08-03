@@ -3,6 +3,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import QRCode from 'qrcode';
 import { RefreshCw, QrCode, Tag, AlertTriangle, MoreVertical, CheckCircle, MapPin, History, UserRoundCog } from 'lucide-react';
 import Card from '../components/common/Card';
+import PhysicalPathTrace from '../components/network/PhysicalPathTrace';
 import Button from '../components/common/Button';
 import Badge from '../components/common/Badge';
 import Breadcrumb from '../components/common/Breadcrumb';
@@ -900,31 +901,13 @@ const AssetDetails: React.FC = () => {
                   <p>{asset.location.description}</p>
                 </div>
               )}
-              {/* Wall port connection */}
-              {asset.wall_port && (
-                <>
-                  <div className={styles.field}>
-                    <label>Wall Port</label>
-                    <p style={{ fontFamily: 'monospace', fontSize: '0.85rem' }}>
-                      {asset.wall_port.label}
-                      {asset.wall_port.patch_panel_name && ` → ${asset.wall_port.patch_panel_name} port ${asset.wall_port.patch_port}`}
-                      {asset.wall_port.room_name && ` → ${asset.wall_port.room_name}`}
-                    </p>
-                  </div>
-                  {asset.wall_port.rack_name && (
-                    <div className={styles.field}><label>Wall Port Rack</label><p>{asset.wall_port.rack_name}</p></div>
-                  )}
-                  {asset.wall_port.room_type && (
-                    <div className={styles.field}><label>Room Type</label><p>{asset.wall_port.room_type}</p></div>
-                  )}
-                  {asset.wall_port.switch_port && (
-                    <div className={styles.field}><label>Switch Port</label><p style={{ fontFamily: 'monospace', fontSize: '0.85rem' }}>{asset.wall_port.switch_port}</p></div>
-                  )}
-                  {asset.wall_port.description && (
-                    <div className={styles.field}><label>Wall Port Notes</label><p>{asset.wall_port.description}</p></div>
-                  )}
-                </>
-              )}
+              {/* The socket chain, as one path rather than five flat fields —
+                  "which switch is this on" is the question people arrive with.
+                  Same component the map's side panel uses. */}
+              <div className={styles.field} style={{ gridColumn: '1 / -1' }}>
+                <label>Network Path</label>
+                <PhysicalPathTrace asset={asset} />
+              </div>
             </div>
           </Card>
 

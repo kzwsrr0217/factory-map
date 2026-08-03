@@ -20,12 +20,17 @@ import { NetworkRoom } from '../entities/NetworkRoom.entity';
 import { NetworkRack } from '../entities/NetworkRack.entity';
 import { PatchPanel } from '../entities/PatchPanel.entity';
 import { WallPort } from '../entities/WallPort.entity';
+import { WorkArea } from '../entities/WorkArea.entity';
+import { Floor } from '../entities/Floor.entity';
 import { Asset } from '../entities/Asset.entity';
+import { In } from 'typeorm';
+import { chunkForEntity, findByIn } from '../utils/mssqlBatch';
 
 const roomRepo  = () => AppDataSource.getRepository(NetworkRoom);
 const rackRepo  = () => AppDataSource.getRepository(NetworkRack);
 const ppRepo    = () => AppDataSource.getRepository(PatchPanel);
 const wpRepo    = () => AppDataSource.getRepository(WallPort);
+const waRepo    = () => AppDataSource.getRepository(WorkArea);
 const assetRepo = () => AppDataSource.getRepository(Asset);
 
 const notFound = (res: Response) => { res.status(404).json({ success: false, error: 'Not found' }); };
@@ -283,22 +288,71 @@ export const deletePatchPanel = async (req: Request, res: Response, next: NextFu
 
 // ── Wall Ports ────────────────────────────────────────────────────────────────
 
+/**
+ * How far along the patching chain a socket is. Deliberately separate from
+ * occupancy (`occupied_by`) — they are two independent axes, and a picker has to
+ * show both: assigning a device to a *free but unpatched* socket looks like the
+ * job is done while the device has no network. See docs/CONNECTIONS_WORKFLOW.md.
+ */
+export type WallPortPatchStatus = 'unpatched' | 'patched' | 'live';
+
+function patchStatusOf(port: WallPort): WallPortPatchStatus {
+  if (port.switch_asset_id && port.switch_port) return 'live';
+  if (port.patch_panel_id && port.patch_port != null) return 'patched';
+  return 'unpatched';
+}
+
+/**
+ * Attaches each socket's room. `workarea_id` is a soft join with no TypeORM
+ * relation (see WallPort.entity.ts), so it's resolved in one extra query rather
+ * than per row — same shape as workarea.controller.ts's withZones().
+ */
+async function withWorkAreas(ports: WallPort[]): Promise<void> {
+  const ids = [...new Set(ports.map((p) => p.workarea_id).filter((id): id is string => !!id))];
+  if (ids.length === 0) return;
+  const areas = await waRepo().find({ where: { id: In(ids) } });
+  const byId = new Map(areas.map((a) => [a.id, a]));
+  for (const port of ports) {
+    const area = port.workarea_id ? byId.get(port.workarea_id) : undefined;
+    port.workarea = area ? { id: area.id, name: area.name } : null;
+  }
+}
+
+/** Which asset currently holds each socket, keyed by wall-port id. */
+async function occupantsOf(ports: WallPort[]): Promise<Map<string, { _id: string; display_name: string }>> {
+  const byPort = new Map<string, { _id: string; display_name: string }>();
+  if (ports.length === 0) return byPort;
+  const assets = await findByIn(assetRepo(), 'wall_port_id', ports.map((p) => p.id));
+  for (const asset of assets) {
+    if (asset.wall_port_id) byPort.set(asset.wall_port_id, { _id: asset.id, display_name: asset.display_name });
+  }
+  return byPort;
+}
+
 export const listWallPorts = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const { floor_id, patch_panel_id } = req.query as Record<string, string | undefined>;
+    const { floor_id, patch_panel_id, workarea_id } = req.query as Record<string, string | undefined>;
     const qb = wpRepo().createQueryBuilder('w')
       .leftJoinAndSelect('w.patch_panel', 'pp')
       .leftJoinAndSelect('pp.rack', 'rack')
-      .leftJoinAndSelect('rack.room', 'room');
+      .leftJoinAndSelect('rack.room', 'room')
+      // Label-ordered because labels are the identity ("R1/001") and are what
+      // every list and picker is read by.
+      .orderBy('w.label', 'ASC');
     if (floor_id)       qb.andWhere('w.floor_id = :floor_id', { floor_id });
     if (patch_panel_id) qb.andWhere('w.patch_panel_id = :patch_panel_id', { patch_panel_id });
+    if (workarea_id)    qb.andWhere('w.workarea_id = :workarea_id', { workarea_id });
     const ports = await qb.getMany();
+    await withWorkAreas(ports);
+    const occupants = await occupantsOf(ports);
     res.json({ success: true, data: ports.map(w => ({
       ...w.toApiResponse(),
       patch_panel_name: w.patch_panel?.name ?? null,
       rack_name: w.patch_panel?.rack?.name ?? null,
       room_name: w.patch_panel?.rack?.room?.name ?? null,
       room_type: w.patch_panel?.rack?.room?.type ?? null,
+      patch_status: patchStatusOf(w),
+      occupied_by: occupants.get(w.id) ?? null,
     })) });
   } catch (e) { next(e); }
 };
@@ -343,16 +397,112 @@ async function findWallPortCollision(
   return null;
 }
 
+/**
+ * Socket labels ("R1/001") are unique **per building**, not globally: rack names
+ * repeat across buildings (each has its own R1) but never inside one. Checked
+ * across the building's floors rather than just the given floor, because one
+ * rack's sockets are spread over several floors.
+ */
+async function labelsTakenInBuilding(floorId: string, labels: string[]): Promise<Set<string>> {
+  const taken = new Set<string>();
+  if (labels.length === 0) return taken;
+  const floorRepo = AppDataSource.getRepository(Floor);
+  const floor = await floorRepo.findOneBy({ id: floorId });
+  if (!floor) return taken;
+  const siblings = await floorRepo.find({ where: { building_id: floor.building_id } });
+  const existing = await wpRepo().find({ where: { floor_id: In(siblings.map((f) => f.id)) } });
+  const wanted = new Set(labels.map((l) => l.trim().toLowerCase()));
+  for (const port of existing) {
+    const folded = port.label.trim().toLowerCase();
+    if (wanted.has(folded)) taken.add(folded);
+  }
+  return taken;
+}
+
 export const createWallPort = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const { label, floor_id, pos_x, pos_y, patch_panel_id, patch_port, switch_asset_id, switch_port, description } = req.body;
+    const { label, floor_id, workarea_id, pos_x, pos_y, patch_panel_id, patch_port, switch_asset_id, switch_port, description } = req.body;
+    if (!label || !String(label).trim()) { res.status(400).json({ success: false, error: 'label is required' }); return; }
+    if (!floor_id) { res.status(400).json({ success: false, error: 'floor_id is required' }); return; }
+
+    const taken = await labelsTakenInBuilding(floor_id, [String(label)]);
+    if (taken.size > 0) {
+      res.status(409).json({ success: false, error: `A wall port labelled "${String(label).trim()}" already exists in this building` });
+      return;
+    }
 
     const collision = await findWallPortCollision(patch_panel_id, patch_port, switch_asset_id, switch_port);
     if (collision) { res.status(409).json({ success: false, error: collision }); return; }
 
-    const port = wpRepo().create({ label, floor_id, pos_x: pos_x ?? 0, pos_y: pos_y ?? 0, patch_panel_id: patch_panel_id ?? null, patch_port: patch_port ?? null, switch_asset_id: switch_asset_id ?? null, switch_port: switch_port ?? null, description: description ?? null });
+    const port = wpRepo().create({ label: String(label).trim(), floor_id, workarea_id: workarea_id ?? null, pos_x: pos_x ?? 0, pos_y: pos_y ?? 0, patch_panel_id: patch_panel_id ?? null, patch_port: patch_port ?? null, switch_asset_id: switch_asset_id ?? null, switch_port: switch_port ?? null, description: description ?? null });
     await wpRepo().save(port);
     res.status(201).json({ success: true, data: port.toApiResponse() });
+  } catch (e) { next(e); }
+};
+
+/** Hard cap on one bulk call — a rack has tens of ports, not thousands. */
+const MAX_BULK_WALL_PORTS = 512;
+
+/**
+ * Creates a contiguous range of sockets from their label pattern
+ * (`R1/001`…`R1/048`). A rack's sockets *are* a range, so generating them is
+ * what makes "which sockets exist on this floor" cheap to fill in rather than 48
+ * rows of typing — see docs/CONNECTIONS_WORKFLOW.md Phase A.
+ *
+ * Labels that already exist in the building are skipped and reported, not
+ * treated as an error: re-running a range after adding a few by hand is a normal
+ * thing to do, and failing the whole batch would punish it.
+ */
+export const createWallPortRange = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { floor_id, workarea_id, prefix, from, to, pad, description } = req.body as {
+      floor_id?: string; workarea_id?: string | null; prefix?: string;
+      from?: number; to?: number; pad?: number; description?: string | null;
+    };
+
+    if (!floor_id) { res.status(400).json({ success: false, error: 'floor_id is required' }); return; }
+    if (!prefix || !prefix.trim()) { res.status(400).json({ success: false, error: 'prefix is required, e.g. "R1/"' }); return; }
+    const start = Number(from), end = Number(to);
+    if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end < start) {
+      res.status(400).json({ success: false, error: 'from/to must be whole numbers with from <= to' });
+      return;
+    }
+    const count = end - start + 1;
+    if (count > MAX_BULK_WALL_PORTS) {
+      res.status(400).json({ success: false, error: `That range is ${count} sockets; the maximum per request is ${MAX_BULK_WALL_PORTS}` });
+      return;
+    }
+
+    const width = Number.isInteger(pad) ? Number(pad) : 3;
+    const labels: string[] = [];
+    for (let n = start; n <= end; n++) labels.push(`${prefix.trim()}${String(n).padStart(width, '0')}`);
+
+    const taken = await labelsTakenInBuilding(floor_id, labels);
+    const fresh = labels.filter((l) => !taken.has(l.trim().toLowerCase()));
+
+    const ports = fresh.map((label) => wpRepo().create({
+      label,
+      floor_id,
+      workarea_id: workarea_id ?? null,
+      pos_x: 0,
+      pos_y: 0,
+      patch_panel_id: null,
+      patch_port: null,
+      switch_asset_id: null,
+      switch_port: null,
+      description: description ?? null,
+    }));
+    // Chunked: one parameter per column per row hits MSSQL's 2100-parameter cap
+    // well before 512 rows (see utils/mssqlBatch.ts).
+    if (ports.length > 0) await wpRepo().save(ports, { chunk: chunkForEntity(WallPort) });
+
+    res.status(201).json({
+      success: true,
+      data: {
+        created: ports.map((p) => p.toApiResponse()),
+        skipped: labels.filter((l) => taken.has(l.trim().toLowerCase())),
+      },
+    });
   } catch (e) { next(e); }
 };
 
@@ -361,7 +511,12 @@ export const updateWallPort = async (req: Request, res: Response, next: NextFunc
     const port = await wpRepo().findOneBy({ id: req.params.id });
     if (!port) { notFound(res); return; }
 
-    const body = req.body as Partial<{ patch_panel_id: string | null; patch_port: number | null; switch_asset_id: string | null; switch_port: string | null }>;
+    const body = req.body as Partial<{
+      label: string; workarea_id: string | null; description: string | null;
+      pos_x: number; pos_y: number;
+      patch_panel_id: string | null; patch_port: number | null;
+      switch_asset_id: string | null; switch_port: string | null;
+    }>;
     const patch_panel_id   = body.patch_panel_id   !== undefined ? body.patch_panel_id   : port.patch_panel_id;
     const patch_port       = body.patch_port       !== undefined ? body.patch_port       : port.patch_port;
     const switch_asset_id  = body.switch_asset_id  !== undefined ? body.switch_asset_id  : port.switch_asset_id;
@@ -369,7 +524,26 @@ export const updateWallPort = async (req: Request, res: Response, next: NextFunc
     const collision = await findWallPortCollision(patch_panel_id, patch_port, switch_asset_id, switch_port, port.id);
     if (collision) { res.status(409).json({ success: false, error: collision }); return; }
 
-    Object.assign(port, req.body);
+    if (body.label !== undefined && body.label.trim() !== port.label) {
+      const taken = await labelsTakenInBuilding(port.floor_id, [body.label]);
+      if (taken.size > 0) {
+        res.status(409).json({ success: false, error: `A wall port labelled "${body.label.trim()}" already exists in this building` });
+        return;
+      }
+      port.label = body.label.trim();
+    }
+    // Explicit field list rather than Object.assign(port, req.body): the body is
+    // client-supplied, and a blanket assign would happily overwrite `id` or
+    // `floor_id` and silently move a socket to another floor.
+    if (body.workarea_id     !== undefined) port.workarea_id     = body.workarea_id ?? null;
+    if (body.description     !== undefined) port.description     = body.description ?? null;
+    if (body.pos_x           !== undefined) port.pos_x           = body.pos_x;
+    if (body.pos_y           !== undefined) port.pos_y           = body.pos_y;
+    if (body.patch_panel_id  !== undefined) port.patch_panel_id  = body.patch_panel_id ?? null;
+    if (body.patch_port      !== undefined) port.patch_port      = body.patch_port ?? null;
+    if (body.switch_asset_id !== undefined) port.switch_asset_id = body.switch_asset_id ?? null;
+    if (body.switch_port     !== undefined) port.switch_port     = body.switch_port ?? null;
+
     await wpRepo().save(port);
     res.json({ success: true, data: port.toApiResponse() });
   } catch (e) { next(e); }

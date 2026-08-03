@@ -362,7 +362,6 @@ interface FloorMapProps {
     assets: boolean;
     connections: boolean;
     grid: boolean;
-    wallports: boolean;
   };
   onLayerToggle?: (layer: keyof NonNullable<FloorMapProps['layers']>) => void;
   connectionMode?: boolean;
@@ -389,8 +388,13 @@ interface FloorMapProps {
   searchableUnplacedAssets?: Asset[];
   allAssets?: Asset[];
   onNavigateToAsset?: (assetId: string, floorId: string) => void;
+  /**
+   * Sockets on this floor. Not drawn — sockets live in the floor page's list, not
+   * on the plan (see docs/CONNECTIONS_WORKFLOW.md). Still needed here because a
+   * connection row can point at a socket id, and both the cross-floor filter and
+   * the connection renderer have to recognise those.
+   */
   wallPorts?: WallPort[];
-  onWallPortMove?: (portId: string, x: number, y: number) => void;
   onAssetTrace?: (asset: Asset) => void;
   floorName?: string;
   // Prototype SVG-layer floor plan (see docs/DATA_MODEL_MIGRATION.md phase 4)
@@ -422,7 +426,7 @@ const FloorMap: React.FC<FloorMapProps> = ({
   backgroundImage,
   deployMode = false,
   deployPosition,
-  layers = { workareas: true, assets: true, connections: false, grid: true, wallports: false },
+  layers = { workareas: true, assets: true, connections: false, grid: true },
   onLayerToggle,
   connectionMode = false,
   selectedAssetsForConnection = [],
@@ -446,7 +450,6 @@ const FloorMap: React.FC<FloorMapProps> = ({
   wallPorts = [],
   workstations = [],
   onWorkstationMove,
-  onWallPortMove,
   onAssetTrace,
   floorName,
   floorId,
@@ -458,7 +461,7 @@ const FloorMap: React.FC<FloorMapProps> = ({
   const pannedRef = useRef(false);
   
   const [dragging, setDragging] = useState<{
-    type: 'workarea' | 'asset' | 'resize' | 'pan' | 'wallport' | 'workstation';
+    type: 'workarea' | 'asset' | 'resize' | 'pan' | 'workstation';
     id: string;
     offsetX: number;
     offsetY: number;
@@ -620,7 +623,6 @@ const FloorMap: React.FC<FloorMapProps> = ({
   const [drawRect, setDrawRect] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const [popover, setPopover] = useState<{ asset: Asset; screenX: number; screenY: number } | null>(null);
   const [connPopover, setConnPopover] = useState<{ assetId: string; connectionId: string; label: string; screenX: number; screenY: number } | null>(null);
-  const [wallPortPopover, setWallPortPopover] = useState<{ port: WallPort; screenX: number; screenY: number } | null>(null);
   const [pendingDeleteWorkareaId, setPendingDeleteWorkareaId] = useState<string | null>(null);
   const [showLabels, setShowLabels] = useState(true);
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -859,10 +861,6 @@ const FloorMap: React.FC<FloorMapProps> = ({
       const newX = snapToGridHelper(svgPoint.x - dragging.offsetX);
       const newY = snapToGridHelper(svgPoint.y - dragging.offsetY);
       onAssetMove(dragging.id, Math.round(newX), Math.round(newY));
-    } else if (dragging.type === 'wallport' && onWallPortMove && editable) {
-      const newX = snapToGridHelper(svgPoint.x - dragging.offsetX);
-      const newY = snapToGridHelper(svgPoint.y - dragging.offsetY);
-      onWallPortMove(dragging.id, Math.round(newX), Math.round(newY));
     } else if (dragging.type === 'workstation' && onWorkstationMove && editable) {
       const newX = snapToGridHelper(svgPoint.x - dragging.offsetX);
       const newY = snapToGridHelper(svgPoint.y - dragging.offsetY);
@@ -1293,19 +1291,6 @@ const FloorMap: React.FC<FloorMapProps> = ({
     });
   }, [editable, hideTooltip]);
 
-  const startDraggingWallPort = (wp: WallPort, e: React.MouseEvent) => {
-    if (!editable) return;
-    e.stopPropagation();
-    hideTooltip();
-    const svg = svgRef.current;
-    if (!svg) return;
-    const point = svg.createSVGPoint();
-    point.x = e.clientX;
-    point.y = e.clientY;
-    const svgPoint = point.matrixTransform(svg.getScreenCTM()?.inverse());
-    setDragging({ type: 'wallport', id: wp._id, offsetX: svgPoint.x - wp.pos_x, offsetY: svgPoint.y - wp.pos_y });
-  };
-
   const startDraggingWorkstation = (ws: Workstation, e: React.MouseEvent) => {
     if (!editable) return;
     e.stopPropagation();
@@ -1443,13 +1428,6 @@ const FloorMap: React.FC<FloorMapProps> = ({
             title="Toggle Grid"
           >
             #️⃣
-          </button>
-          <button
-            onClick={() => onLayerToggle?.('wallports')}
-            className={`${styles.controlButton} ${layers.wallports ? styles.active : ''}`}
-            title="Toggle Wall Ports"
-          >
-            🔌
           </button>
         </div>
 
@@ -1887,19 +1865,21 @@ const FloorMap: React.FC<FloorMapProps> = ({
           asset.connections?.map((connection, index) => {
             if (activeConnectionTypes && activeConnectionTypes.size > 0 && !activeConnectionTypes.has(connection.connection_type)) return null;
             const connectedAsset = assets.find(a => a._id === connection.connected_asset_id);
-            const connectedWallPort = !connectedAsset ? wallPorts.find(wp => wp._id === connection.connected_asset_id) : null;
-            if (!connectedAsset && !connectedWallPort) return null;
+            // A connection whose far end is a socket is skipped, not drawn at
+            // (0,0): sockets have no maintained map position any more. The
+            // device→socket relationship is `Asset.wall_port_id` and is shown as
+            // the physical path on the asset, not as a line here.
+            if (!connectedAsset) return null;
 
-            const isWallPortConn = !!connectedWallPort;
             const x1 = asset.location.coordinates.x;
             const y1 = asset.location.coordinates.y;
-            const x2 = connectedAsset ? connectedAsset.location.coordinates.x : connectedWallPort!.pos_x;
-            const y2 = connectedAsset ? connectedAsset.location.coordinates.y : connectedWallPort!.pos_y;
+            const x2 = connectedAsset.location.coordinates.x;
+            const y2 = connectedAsset.location.coordinates.y;
 
             const color = getConnectionColor(connection.connection_type);
             const markerId = `arrow-${asset._id}-${connection.connected_asset_id}-${index}`;
-            const arrowSize = isWallPortConn ? 6 : 8;
-            const strokeWidth = isWallPortConn ? 1.5 : (connection.strength === 'strong' ? 3 : connection.strength === 'weak' ? 1 : 2);
+            const arrowSize = 8;
+            const strokeWidth = connection.strength === 'strong' ? 3 : connection.strength === 'weak' ? 1 : 2;
 
             return (
               <g key={`${asset._id}-${connection.connected_asset_id}-${index}`}>
@@ -1926,8 +1906,8 @@ const FloorMap: React.FC<FloorMapProps> = ({
                   y2={y2}
                   stroke={color}
                   strokeWidth={strokeWidth}
-                  strokeDasharray={isWallPortConn ? '4,5' : (connection.bidirectional ? undefined : '6,3')}
-                  opacity={isWallPortConn ? 0.5 : 0.75}
+                  strokeDasharray={connection.bidirectional ? undefined : '6,3'}
+                  opacity={0.75}
                   markerEnd={`url(#${markerId})`}
                 />
                 {/* Transparent hit area for clicking */}
@@ -1971,56 +1951,10 @@ const FloorMap: React.FC<FloorMapProps> = ({
           })
         ).flat().filter(Boolean)}
 
-        {/* Wall Ports */}
-        {layers.wallports && wallPorts.map((wp) => {
-          const wx = wp.pos_x;
-          const wy = wp.pos_y;
-          const hasPanel = !!wp.patch_panel_id;
-          const fill = hasPanel ? '#f59e0b' : '#9ca3af';
-          const stroke = hasPanel ? '#d97706' : '#6b7280';
-          const isDraggingWp = dragging?.type === 'wallport' && dragging.id === wp._id;
-          return (
-            <g
-              key={wp._id}
-              style={{ cursor: editable ? 'move' : 'pointer' }}
-              onMouseDown={editable ? (e) => startDraggingWallPort(wp, e) : undefined}
-              onClick={editable ? undefined : (e) => {
-                e.stopPropagation();
-                setWallPortPopover({ port: wp, screenX: e.clientX, screenY: e.clientY });
-              }}
-              opacity={isDraggingWp ? 0.6 : 1}
-              onMouseEnter={(e) => showTooltip(e as any,
-                <div>
-                  <h4>🔌 {wp.label}</h4>
-                  {wp.patch_panel_name && <p><span className={styles.label}>Panel:</span> {wp.patch_panel_name}</p>}
-                  {wp.patch_port != null && <p><span className={styles.label}>Port:</span> {wp.patch_port}</p>}
-                  {wp.room_name && <p><span className={styles.label}>Room:</span> {wp.room_name} ({wp.room_type?.toUpperCase()})</p>}
-                  {wp.rack_name && <p><span className={styles.label}>Rack:</span> {wp.rack_name}</p>}
-                  {wp.switch_port && <p><span className={styles.label}>Switch port:</span> {wp.switch_port}</p>}
-                  {!hasPanel && <p style={{ color: '#9ca3af', fontStyle: 'italic' }}>Not patched</p>}
-                </div>
-              )}
-              onMouseLeave={hideTooltip}
-            >
-              <rect x={wx - 7} y={wy - 5} width={14} height={10} rx={2} fill={fill} stroke={stroke} strokeWidth={1.5} />
-              <rect x={wx - 4} y={wy - 3} width={2} height={4} rx={0.5} fill={stroke} />
-              <rect x={wx - 1} y={wy - 3} width={2} height={4} rx={0.5} fill={stroke} />
-              <rect x={wx + 2} y={wy - 3} width={2} height={4} rx={0.5} fill={stroke} />
-              {showLabels && (
-                <text x={wx} y={wy + 16} textAnchor="middle" fontSize="9" fontWeight="600"
-                  fill="#374151" stroke="white" strokeWidth="2" paintOrder="stroke" pointerEvents="none">
-                  {wp.label.length > 8 ? wp.label.slice(0, 7) + '…' : wp.label}
-                </text>
-              )}
-            </g>
-          );
-        })}
-
         {/* Workstations (physical desk/machine slots — distinct from Asset,
             the IT/OT equipment placed at one). Draggable in edit mode via
-            startDraggingWorkstation, same pattern as WallPort above. A small
-            diamond marker, colored by status, distinct from the Asset circle
-            and the WallPort jack icon above. */}
+            startDraggingWorkstation. A small diamond marker, colored by status,
+            distinct from the Asset circle. */}
         {workstations.map((ws) => {
           const wx = ws.coordinates?.x ?? 0;
           const wy = ws.coordinates?.y ?? 0;
@@ -2227,12 +2161,6 @@ const FloorMap: React.FC<FloorMapProps> = ({
             <div className={styles.legendBadge} style={{ background: '#06b6d4' }}>↕</div>
             <span>Cross-floor link</span>
           </div>
-          {wallPorts.length > 0 && (
-            <div className={styles.legendItem}>
-              <div className={styles.legendIcon} style={{ background: '#f59e0b', borderRadius: 2 }}></div>
-              <span>Wall port (patched)</span>
-            </div>
-          )}
         </div>
 
         {layers.connections && (
@@ -2277,60 +2205,6 @@ const FloorMap: React.FC<FloorMapProps> = ({
         <div className={styles.instructions}>
           <p>💡 Drag to move • Drag empty area to draw zone • Corner to resize • Shift+Drag to pan</p>
         </div>
-      )}
-
-      {/* Wall port popover */}
-      {wallPortPopover && createPortal(
-        <>
-          <div style={{ position: 'fixed', inset: 0, zIndex: 199 }} onClick={() => setWallPortPopover(null)} />
-          <div
-            className={styles.popover}
-            style={{ position: 'fixed', left: wallPortPopover.screenX + 8, top: wallPortPopover.screenY - 8, zIndex: 200 }}
-          >
-            <div className={styles.popoverHeader}>
-              <span>🔌 {wallPortPopover.port.label}</span>
-              <button className={styles.popoverClose} onClick={() => setWallPortPopover(null)}>✕</button>
-            </div>
-            <div className={styles.popoverMeta}>
-              {wallPortPopover.port.patch_panel_name && (
-                <div className={styles.popoverMetaRow}>
-                  <span className={styles.popoverMetaLabel}>Panel</span>
-                  <span className={styles.popoverMetaValue}>{wallPortPopover.port.patch_panel_name}</span>
-                </div>
-              )}
-              {wallPortPopover.port.patch_port != null && (
-                <div className={styles.popoverMetaRow}>
-                  <span className={styles.popoverMetaLabel}>Port #</span>
-                  <span className={`${styles.popoverMetaValue} ${styles.popoverMetaMono}`}>{wallPortPopover.port.patch_port}</span>
-                </div>
-              )}
-              {wallPortPopover.port.room_name && (
-                <div className={styles.popoverMetaRow}>
-                  <span className={styles.popoverMetaLabel}>Room</span>
-                  <span className={styles.popoverMetaValue}>{wallPortPopover.port.room_name}{wallPortPopover.port.room_type ? ` (${wallPortPopover.port.room_type.toUpperCase()})` : ''}</span>
-                </div>
-              )}
-              {wallPortPopover.port.rack_name && (
-                <div className={styles.popoverMetaRow}>
-                  <span className={styles.popoverMetaLabel}>Rack</span>
-                  <span className={styles.popoverMetaValue}>{wallPortPopover.port.rack_name}</span>
-                </div>
-              )}
-              {wallPortPopover.port.switch_port && (
-                <div className={styles.popoverMetaRow}>
-                  <span className={styles.popoverMetaLabel}>Switch port</span>
-                  <span className={`${styles.popoverMetaValue} ${styles.popoverMetaMono}`}>{wallPortPopover.port.switch_port}</span>
-                </div>
-              )}
-              {!wallPortPopover.port.patch_panel_id && (
-                <div className={styles.popoverMetaRow}>
-                  <span className={styles.popoverMetaValue} style={{ color: '#9ca3af', fontStyle: 'italic' }}>Not patched</span>
-                </div>
-              )}
-            </div>
-          </div>
-        </>,
-        document.body
       )}
 
       {/* SVG-layer shape popover (work-center / production-line — phase 5,

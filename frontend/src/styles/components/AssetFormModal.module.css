@@ -78,6 +78,18 @@
   color: var(--color-gray-700);
 }
 
+/* Wall-port picker feedback. The warning is amber rather than red: picking an
+   unpatched socket is a legitimate thing to record, it just isn't finished. */
+.wallPortWarning {
+  font-size: var(--font-size-xs);
+  color: var(--color-warning);
+}
+
+.wallPortHint {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
 .input {
   width: 100%;
   padding: var(--spacing-sm) var(--spacing-md);

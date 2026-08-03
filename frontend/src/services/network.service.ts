@@ -36,11 +36,30 @@ export interface PatchPanel {
   updated_at: string;
 }
 
+/**
+ * How far along the patching chain a socket is. Independent of whether a device
+ * occupies it — a free socket that is `unpatched` has no network at all, which is
+ * why both have to be shown before assigning a device. See
+ * docs/CONNECTIONS_WORKFLOW.md.
+ */
+export type WallPortPatchStatus = 'unpatched' | 'patched' | 'live';
+
 export interface WallPort {
   _id: string;
+  /** The label printed on the faceplate — "R1/001" = rack 1, port 001. The identity. */
   label: string;
   floor_id: string;
+  /** The room the socket is in. Null until assigned. */
+  workarea_id: string | null;
+  /** Resolved by the list/get endpoints. */
+  workarea: { _id: string; name: string } | null;
+  /** Only on the list endpoint. */
+  patch_status?: WallPortPatchStatus;
+  /** The asset currently plugged into it, if any. Only on the list endpoint. */
+  occupied_by?: { _id: string; display_name: string } | null;
+  /** @deprecated Sockets are no longer drawn on the floor map — see the entity. */
   pos_x: number;
+  /** @deprecated See pos_x. */
   pos_y: number;
   patch_panel_id: string | null;
   patch_panel_name: string | null;
@@ -124,12 +143,29 @@ export const networkService = {
   },
 
   // Wall Ports
-  getWallPorts: async (params?: { floor_id?: string; patch_panel_id?: string }): Promise<WallPort[]> => {
+  getWallPorts: async (params?: { floor_id?: string; patch_panel_id?: string; workarea_id?: string }): Promise<WallPort[]> => {
     const res = await api.get('/network/wall-ports', { params });
     return res.data.data;
   },
   createWallPort: async (data: Partial<WallPort>): Promise<WallPort> => {
     const res = await api.post('/network/wall-ports', data);
+    return res.data.data;
+  },
+  /**
+   * Creates a whole label range at once ("R1/001".."R1/048"), because a rack's
+   * sockets *are* a range. Labels already present in the building come back in
+   * `skipped` rather than failing the batch.
+   */
+  createWallPortRange: async (data: {
+    floor_id: string;
+    workarea_id?: string | null;
+    prefix: string;
+    from: number;
+    to: number;
+    pad?: number;
+    description?: string | null;
+  }): Promise<{ created: WallPort[]; skipped: string[] }> => {
+    const res = await api.post('/network/wall-ports/range', data);
     return res.data.data;
   },
   updateWallPort: async (id: string, data: Partial<WallPort>): Promise<WallPort> => {

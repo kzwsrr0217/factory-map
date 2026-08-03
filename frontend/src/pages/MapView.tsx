@@ -34,6 +34,7 @@ import { sectionService } from '../services/section.service';
 import { workstationService, Workstation } from '../services/workstation.service';
 import { assetService, Asset } from '../services/asset.service';
 import { networkService, WallPort } from '../services/network.service';
+import PhysicalPathTrace from '../components/network/PhysicalPathTrace';
 import { getAssetIcon } from '../utils/assetTypes';
 import { useDebouncedCallback } from '../hooks/useDebouncedCallback';
 import { useUndoRedo } from '../hooks/useUndoRedo';
@@ -93,7 +94,6 @@ const MapView: React.FC = () => {
     assets: true,
     connections: true,
     grid: true,
-    wallports: false,
   });
   const [tracingAsset, setTracingAsset] = useState<Asset | null>(null);
 
@@ -304,7 +304,7 @@ const MapView: React.FC = () => {
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [editMode, undoRedo]);
 
-  // The undo stack references specific workarea/asset/wallport/workstation
+  // The undo stack references specific workarea/asset/workstation
   // ids on the currently-loaded floor — stale once the floor changes.
   useEffect(() => {
     undoRedo.clear();
@@ -646,28 +646,6 @@ const MapView: React.FC = () => {
     }
   }, [selectedFloorId, loadMapData]);
 
-  const persistWallPortMove = useDebouncedCallback(async (portId: string, x: number, y: number) => {
-    try {
-      await networkService.updateWallPort(portId, { pos_x: x, pos_y: y } as any);
-    } catch (error) {
-      console.error('Error updating wall port position:', error);
-    }
-  });
-  const applyWallPortMove = useCallback((portId: string, x: number, y: number) => {
-    setWallPorts(prev => prev.map(wp => wp._id === portId ? { ...wp, pos_x: x, pos_y: y } : wp));
-    persistWallPortMove(portId, x, y);
-  }, [persistWallPortMove]);
-  const handleWallPortMove = useCallback((portId: string, x: number, y: number) => {
-    const prev = wallPorts.find((wp) => wp._id === portId);
-    applyWallPortMove(portId, x, y);
-    if (prev) {
-      undoRedo.push({
-        undo: () => applyWallPortMove(portId, prev.pos_x, prev.pos_y),
-        redo: () => applyWallPortMove(portId, x, y),
-      });
-    }
-  }, [wallPorts, applyWallPortMove, undoRedo]);
-
   const persistWorkstationMove = useDebouncedCallback(async (workstationId: string, x: number, y: number) => {
     try {
       await workstationService.updateWorkstation(workstationId, { coordinates: { x, y } });
@@ -879,8 +857,8 @@ const MapView: React.FC = () => {
                 Floor {selectedFloor.floor_number} — {assets.length} asset{assets.length !== 1 ? 's' : ''}
                 {workareas.length > 0 && `, ${workareas.length} zone${workareas.length !== 1 ? 's' : ''}`}
                 {wallPorts.length > 0
-                  ? `, ${wallPorts.length} wall port${wallPorts.length !== 1 ? 's' : ''}`
-                  : ' · no wall ports'}
+                  ? `, ${wallPorts.length} socket${wallPorts.length !== 1 ? 's' : ''}`
+                  : ' · no sockets recorded'}
               </span>
               <div className={styles.utilizationStatuses}>
                 {(['active','maintenance','offline','retired'] as const).map(s => {
@@ -1045,8 +1023,7 @@ const MapView: React.FC = () => {
               allAssets={allAssets}
               onNavigateToAsset={handleNavigateToAsset}
               wallPorts={wallPorts}
-              onWallPortMove={editMode ? handleWallPortMove : undefined}
-              floorName={selectedFloor.name}
+                  floorName={selectedFloor.name}
             />
 
             {sidePanelOpen && (
@@ -1071,48 +1048,7 @@ const MapView: React.FC = () => {
                       <div style={{ padding: '6px 12px 4px', fontSize: 10, fontWeight: 600, color: 'var(--color-text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px', borderBottom: '1px solid var(--color-gray-100)' }}>
                         Physical Connection
                       </div>
-                      {tracingAsset.wall_port ? (
-                        <div className={styles.traceConnection}>
-                          <div className={styles.traceEndpoint}>
-                            <div className={styles.traceEndpointName}>🔌 {tracingAsset.wall_port.label}
-                              {tracingAsset.wall_port.description && (
-                                <span style={{ fontWeight: 400, color: 'var(--color-text-secondary)', fontSize: 11 }}> — {tracingAsset.wall_port.description}</span>
-                              )}
-                            </div>
-                            {tracingAsset.wall_port.patch_panel_name && (
-                              <div className={styles.traceStep}>
-                                📋 {tracingAsset.wall_port.patch_panel_name}
-                                {tracingAsset.wall_port.patch_port != null && <span className={styles.traceStepBadge}>port {tracingAsset.wall_port.patch_port}</span>}
-                              </div>
-                            )}
-                            {tracingAsset.wall_port.rack_name && (
-                              <div className={styles.traceStep}>🗄️ {tracingAsset.wall_port.rack_name}</div>
-                            )}
-                            {tracingAsset.wall_port.room_name && (
-                              <div className={styles.traceStep}>
-                                🏠 {tracingAsset.wall_port.room_name}
-                                {tracingAsset.wall_port.room_type && <span className={styles.traceStepBadge}>{tracingAsset.wall_port.room_type.toUpperCase()}</span>}
-                              </div>
-                            )}
-                            {tracingAsset.wall_port.switch_port && (
-                              <div className={styles.traceStep}>🔀 switch port <span className={styles.traceStepMono}>{tracingAsset.wall_port.switch_port}</span></div>
-                            )}
-                            {tracingAsset.wall_port.switch_asset_id && (() => {
-                              const sw = allAssets.find(a => a._id === tracingAsset.wall_port!.switch_asset_id);
-                              return sw ? (
-                                <div className={styles.traceStep}>🖧 <span className={styles.traceStepMono}>{sw.basic_info.display_name}</span> <span className={styles.traceStepBadge}>{sw.basic_info.type}</span></div>
-                              ) : null;
-                            })()}
-                            {!tracingAsset.wall_port.patch_panel_id && (
-                              <div className={styles.traceUnpatched}>Not patched to a panel</div>
-                            )}
-                          </div>
-                        </div>
-                      ) : (
-                        <div className={styles.traceUnpatched} style={{ padding: '8px 12px' }}>
-                          No wall port assigned — edit asset to set one
-                        </div>
-                      )}
+                      <PhysicalPathTrace asset={tracingAsset} allAssets={allAssets} />
 
                       {/* ── Logical connections ─────────────────────────── */}
                       <div style={{ padding: '6px 12px 4px', fontSize: 10, fontWeight: 600, color: 'var(--color-text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px', borderBottom: '1px solid var(--color-gray-100)', borderTop: '1px solid var(--color-gray-100)', marginTop: 4 }}>

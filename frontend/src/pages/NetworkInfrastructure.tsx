@@ -68,6 +68,15 @@ const NetworkInfrastructure: React.FC = () => {
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
 
+  /**
+   * Sockets in this building that aren't wired to a panel port yet, offered when
+   * assigning a panel port. This is the normal Phase C flow: the socket was
+   * created when the floor was surveyed, and standing at the rack you now record
+   * which panel port it lands on. Creating a socket from here stays available as
+   * the fallback for one that was missed. See docs/CONNECTIONS_WORKFLOW.md.
+   */
+  const [unpatchedSockets, setUnpatchedSockets] = useState<WallPort[]>([]);
+
   const [splitPct, setSplitPct] = useState<number>(() => {
     const saved = localStorage.getItem('infra-split-pct');
     return saved ? Math.max(20, Math.min(80, Number(saved))) : 55;
@@ -211,6 +220,19 @@ const NetworkInfrastructure: React.FC = () => {
       defaults.switch_asset_id  = state.existing?.switch_asset_id ?? '';
       defaults.switch_port      = state.existing?.switch_port ?? '';
       defaults.description      = state.existing?.description ?? '';
+      defaults.attach_socket_id = '';
+      if (!state.existing) {
+        // Fire-and-forget: the picker fills in when it arrives, and an empty
+        // list just means "none unpatched", which the UI says out loud.
+        const floorIds = new Set(
+          (floors as { _id: string; building_id: string }[])
+            .filter(f => f.building_id === selectedBuildingId)
+            .map(f => f._id),
+        );
+        networkService.getWallPorts()
+          .then(all => setUnpatchedSockets(all.filter(wp => !wp.patch_panel_id && floorIds.has(wp.floor_id))))
+          .catch(() => setUnpatchedSockets([]));
+      }
     } else if (state.kind === 'replaceRack' || state.kind === 'replacePanel') {
       defaults.replacement_id = '';
     }
@@ -263,6 +285,22 @@ const NetworkInfrastructure: React.FC = () => {
         toast.success(modal.panel ? 'Patch panel updated' : 'Patch panel created');
         await invalidateRooms();
       } else if (modal.kind === 'wallport') {
+        // Patching an already-surveyed socket onto this panel port — the usual
+        // case. Only the panel/switch side is touched; the socket's label, floor
+        // and room were established when the floor was walked.
+        if (!modal.existing && form.attach_socket_id) {
+          await networkService.updateWallPort(form.attach_socket_id, {
+            patch_panel_id:  modal.panel._id,
+            patch_port:      modal.portNum,
+            switch_asset_id: form.switch_asset_id || null,
+            switch_port:     form.switch_port?.trim() || null,
+          });
+          toast.success('Socket patched to this port');
+          await reloadPanelPorts(modal.panel._id);
+          closeModal();
+          return;
+        }
+
         if (!form.label?.trim()) { toast.error('Label is required'); setSaving(false); return; }
         if (!form.floor_id)      { toast.error('Floor is required'); setSaving(false); return; }
         const payload = {
@@ -273,8 +311,6 @@ const NetworkInfrastructure: React.FC = () => {
           switch_asset_id: form.switch_asset_id || null,
           switch_port:     form.switch_port?.trim() || null,
           description:     form.description?.trim() || null,
-          pos_x: modal.existing?.pos_x ?? 500,
-          pos_y: modal.existing?.pos_y ?? 400,
         };
         if (modal.existing) {
           await networkService.updateWallPort(modal.existing._id, payload);
@@ -752,24 +788,51 @@ const NetworkInfrastructure: React.FC = () => {
 
               {modal.kind === 'wallport' && (
                 <>
-                  <label className={styles.formLabel}>Label *  <span className={styles.formHint}>(identifier printed on the wall socket)</span></label>
-                  <input
-                    className={styles.formInput}
-                    value={form.label ?? ''}
-                    onChange={e => setForm(p => ({ ...p, label: e.target.value }))}
-                    placeholder="e.g. WP-F1-A01, Drop-12"
-                    autoFocus
-                  />
-                  <label className={styles.formLabel}>Floor where this socket is physically located *</label>
-                  <select className={styles.formInput} value={form.floor_id ?? ''} onChange={e => setForm(p => ({ ...p, floor_id: e.target.value }))}>
-                    <option value="">— Select floor —</option>
-                    {(floors as { _id: string; name: string; building_id: string }[]).map(f => (
-                      <option key={f._id} value={f._id}>{f.name}</option>
-                    ))}
-                  </select>
-                  <p className={styles.formHint} style={{ marginTop: '-8px' }}>
-                    The rack and patch panel can be on a different floor — that is fine.
-                  </p>
+                  {!modal.existing && (
+                    <>
+                      <label className={styles.formLabel}>Which socket lands on this port?</label>
+                      <select
+                        className={styles.formInput}
+                        value={form.attach_socket_id ?? ''}
+                        onChange={e => setForm(p => ({ ...p, attach_socket_id: e.target.value }))}
+                        autoFocus
+                      >
+                        <option value="">— Create a new socket —</option>
+                        {unpatchedSockets.map(wp => (
+                          <option key={wp._id} value={wp._id}>
+                            {wp.label}{wp.workarea ? ` · ${wp.workarea.name}` : ''}
+                          </option>
+                        ))}
+                      </select>
+                      <p className={styles.formHint} style={{ marginTop: '-8px' }}>
+                        {unpatchedSockets.length > 0
+                          ? 'Sockets already surveyed on this building’s floors that aren’t patched yet.'
+                          : 'No unpatched sockets recorded in this building — add them from the floor page, or create one here.'}
+                      </p>
+                    </>
+                  )}
+
+                  {(modal.existing || !form.attach_socket_id) && (
+                    <>
+                      <label className={styles.formLabel}>Label *  <span className={styles.formHint}>(identifier printed on the wall socket)</span></label>
+                      <input
+                        className={styles.formInput}
+                        value={form.label ?? ''}
+                        onChange={e => setForm(p => ({ ...p, label: e.target.value }))}
+                        placeholder="e.g. R1/001"
+                      />
+                      <label className={styles.formLabel}>Floor where this socket is physically located *</label>
+                      <select className={styles.formInput} value={form.floor_id ?? ''} onChange={e => setForm(p => ({ ...p, floor_id: e.target.value }))}>
+                        <option value="">— Select floor —</option>
+                        {(floors as { _id: string; name: string; building_id: string }[]).map(f => (
+                          <option key={f._id} value={f._id}>{f.name}</option>
+                        ))}
+                      </select>
+                      <p className={styles.formHint} style={{ marginTop: '-8px' }}>
+                        The rack and patch panel can be on a different floor — that is fine.
+                      </p>
+                    </>
+                  )}
                   <label className={styles.formLabel}>Switch / uplink device (optional)</label>
                   <select
                     className={styles.formInput}
@@ -795,9 +858,10 @@ const NetworkInfrastructure: React.FC = () => {
                     onChange={e => setForm(p => ({ ...p, description: e.target.value }))}
                     placeholder="e.g. Assembly line row A, station 1"
                   />
-                  {!modal.existing && (
+                  {!modal.existing && !form.attach_socket_id && (
                     <p className={styles.formHint}>
-                      The wall port will appear in the centre of the floor map. Drag it to the exact location in Map View.
+                      Sockets aren’t drawn on the floor map — assign this one to a room
+                      from the floor page so “find a free socket in this room” works.
                     </p>
                   )}
                 </>
@@ -812,14 +876,14 @@ const NetworkInfrastructure: React.FC = () => {
               <Button variant="secondary" onClick={closeModal} disabled={saving}>Cancel</Button>
               <Button variant="primary" onClick={handleSave}
                 disabled={saving || (
-                  modal.kind === 'wallport' ? !form.label?.trim() || !form.floor_id :
+                  modal.kind === 'wallport' ? (!form.attach_socket_id && (!form.label?.trim() || !form.floor_id)) :
                   modal.kind === 'replaceRack' || modal.kind === 'replacePanel' ? !form.replacement_id :
                   !form.name?.trim()
                 )}>
                 {saving ? 'Saving…' : (
                   modal.kind === 'room'         ? (modal.room     ? 'Update Room'     : 'Create Room') :
                   modal.kind === 'rack'         ? (modal.rack     ? 'Update Rack'     : 'Create Rack') :
-                  modal.kind === 'wallport'     ? (modal.existing  ? 'Update Wall Port' : 'Create Wall Port') :
+                  modal.kind === 'wallport'     ? (modal.existing ? 'Update Wall Port' : form.attach_socket_id ? 'Patch Socket' : 'Create Wall Port') :
                   modal.kind === 'replaceRack'  ? 'Replace Rack' :
                   modal.kind === 'replacePanel' ? 'Replace Panel' :
                                                   (modal.panel    ? 'Update Panel'    : 'Create Panel')

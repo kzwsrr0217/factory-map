@@ -263,6 +263,46 @@ the map picks a free colour for the floor.
 
 ---
 
+## Network Sockets
+
+Sockets are **not drawn on the floor map** — a socket is on a wall, so a dot on a
+top-down plan was never in the right place, and keeping hundreds of them positioned
+cost more than the dot was worth. Instead each floor page has a **Network Sockets**
+list, grouped by room.
+
+Labels are the identity: `R1/001` means rack 1, port 001, which is what is printed
+on the faceplate and on the patch panel, and what you read out to the service desk.
+
+### 1. Record the sockets (floor page → Network Sockets → Add Sockets)
+A rack's sockets are a contiguous range, so add them as one: prefix `R1/`, from 1
+to 48. Labels that already exist in the building are skipped, so re-running a
+range after adding a few by hand is safe. Pick the room now if you know it, or
+leave it and assign later.
+
+### 2. Plug a device in (asset edit → Physical Wall Port)
+The picker shows each socket's room, how far it is patched and who is using it:
+
+| What you see | What it means |
+|---|---|
+| *not patched* | no panel port yet — **the device will have no network** |
+| *patched, no switch* | terminated on a panel, but no switch port recorded |
+| *live* | panel port and switch port both known |
+| *in use by …* | another device holds it; not selectable |
+
+### 3. Patch it at the rack (Network Infrastructure → panel → click a port)
+Choose the socket that lands on that port from the list of unpatched ones, then
+record the switch and switch port its patch cord goes to. If the socket was never
+recorded on the floor page, you can create it here instead.
+
+### 4. Follow the path (asset page → Network Path)
+Shows the whole chain: socket → patch panel and port → rack → IDF/MDF → switch port
+→ switch. The same panel appears in the map's side panel when you trace an asset.
+
+An empty switch side means "not surveyed yet", not "not connected" — see
+[CONNECTIONS_WORKFLOW.md](CONNECTIONS_WORKFLOW.md) for the full process.
+
+---
+
 ## Assets
 
 ### Browsing Assets

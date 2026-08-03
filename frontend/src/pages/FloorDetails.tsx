@@ -26,6 +26,8 @@ import Button from '../components/common/Button';
 import Badge from '../components/common/Badge';
 import Breadcrumb from '../components/common/Breadcrumb';
 import ConfirmDialog from '../components/common/ConfirmDialog';
+import WallPortFormModal from '../components/network/WallPortFormModal';
+import FloorWallPortList from '../components/network/FloorWallPortList';
 import WorkAreaFormModal from '../components/workarea/WorkAreaFormModal';
 import WorkAreaDetailsModal from '../components/workarea/WorkAreaDetailsModal';
 import FloorFormModal from '../components/floor/FloorFormModal';
@@ -34,6 +36,7 @@ import FloorMap from '../components/map/FloorMap';
 import { floorService, Floor } from '../services/floor.service';
 import { workareaService, WorkArea } from '../services/workarea.service';
 import { assetService, Asset } from '../services/asset.service';
+import { networkService, WallPort } from '../services/network.service';
 import { sectionService, Section } from '../services/section.service';
 import { useZones } from '../hooks/queries/useZones';
 import { workstationService, Workstation } from '../services/workstation.service';
@@ -54,6 +57,10 @@ const FloorDetails: React.FC = () => {
   // Only for the "Zones" count tile — the work areas themselves already carry
   // their zone's name and colour, so nothing else on this page needs the list.
   const { data: zonesOnFloor = [] } = useZones(id);
+  // Network sockets on this floor. Not drawn on the map (see
+  // docs/CONNECTIONS_WORKFLOW.md) — this list is where they live.
+  const [wallPorts, setWallPorts] = useState<WallPort[]>([]);
+  const [wallPortFormOpen, setWallPortFormOpen] = useState(false);
   const [sections, setSections] = useState<Section[]>([]);
   const [workstations, setWorkstations] = useState<Workstation[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
@@ -113,16 +120,18 @@ const FloorDetails: React.FC = () => {
   const loadFloorDetails = async (floorId: string) => {
     try {
       setLoading(true);
-      const [floorData, workareasData, sectionsData, workstationsData, allAssets] = await Promise.all([
+      const [floorData, workareasData, sectionsData, workstationsData, allAssets, wallPortsData] = await Promise.all([
         floorService.getFloor(floorId),
         workareaService.getWorkAreas(floorId),
         sectionService.getSections(),
         workstationService.getWorkstations(),
         assetService.getAssets({ include_master: true }),
+        networkService.getWallPorts({ floor_id: floorId }),
       ]);
 
       setFloor(floorData);
       setWorkareas(workareasData);
+      setWallPorts(wallPortsData);
       
       // Filter sections for this floor's workareas
       const workareaIds = workareasData.map(wa => wa._id);
@@ -720,6 +729,19 @@ const FloorDetails: React.FC = () => {
         )}
       </Card>
 
+      {/* Network sockets. Deliberately a list rather than dots on the map: a
+          socket is on a wall, so a top-down x/y was never accurate, and a list
+          can show each socket's patch state, which a dot cannot. */}
+      <Card padding="lg">
+        <div className={styles.sectionHeader}>
+          <h2>Network Sockets</h2>
+          <Button variant="primary" onClick={() => setWallPortFormOpen(true)}>
+            + Add Sockets
+          </Button>
+        </div>
+        <FloorWallPortList ports={wallPorts} />
+      </Card>
+
       {/* Assets Section */}
       <Card padding="lg">
         <div className={styles.sectionHeader}>
@@ -753,6 +775,14 @@ const FloorDetails: React.FC = () => {
           </div>
         )}
       </Card>
+
+      <WallPortFormModal
+        isOpen={wallPortFormOpen}
+        onClose={() => setWallPortFormOpen(false)}
+        onSuccess={() => { if (id) loadFloorDetails(id); }}
+        floorId={id || ''}
+        workareas={workareas}
+      />
 
       {/* Floor Form Modal */}
       <FloorFormModal
