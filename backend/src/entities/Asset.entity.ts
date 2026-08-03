@@ -443,12 +443,16 @@ export class Asset {
         switch_port: this.switch_port,
         dhcp_static: this.dhcp_static,
       } : undefined,
-      // Gated on person_itsm_id, matching organization/catalog_item below —
-      // person_id is a separate, not-yet-populated local identifier (the
-      // ITSM Person's own human-readable ID, e.g. a login name, isn't
-      // exposed anywhere in the Hardware Asset's payload; only its internal
-      // GUID and display name are).
-      assigned_person: this.person_itsm_id || this.person_id ? {
+      // Emitted when ANY of the three is present, including a bare name.
+      //
+      // It used to require an id (person_itsm_id or person_id), by analogy with
+      // organization/catalog_item below. That silently hid every person the
+      // inventory survey contributes: survey names are informal and mostly don't
+      // match an ITSM Person, so they are deliberately kept as free-text
+      // `person_full_name` with no id — and the import report says so. The effect
+      // was that a device the survey said belonged to someone showed no person at
+      // all in the UI, which reads as "nobody's" rather than "not linked yet".
+      assigned_person: this.person_itsm_id || this.person_id || this.person_full_name ? {
         person_id: this.person_id,
         itsm_id: this.person_itsm_id,
         full_name: this.person_full_name ?? '',

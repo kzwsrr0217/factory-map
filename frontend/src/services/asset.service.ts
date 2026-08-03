@@ -369,6 +369,36 @@ export const assetService = {
     return response.data.data;
   },
 
+  /**
+   * Applies the same few changes to many assets in one request.
+   *
+   * Deliberately narrow — room, person, status, clearing the placement — because
+   * those are the fields that turn out wrong in groups after an inventory import.
+   * Identity and ITSM-owned fields are rejected server-side.
+   *
+   * Assigning a room derives the floor and building from it, and returns any
+   * already-placed asset to the unplaced tray, since its coordinates were
+   * relative to the room it left.
+   */
+  bulkUpdate: async (
+    assetIds: string[],
+    changes: {
+      workarea_id?: string | null;
+      person_full_name?: string | null;
+      person_id?: string | null;
+      status?: string | null;
+      clear_placement?: boolean;
+    },
+  ): Promise<{
+    updated: Array<{ _id: string; display_name: string }>;
+    skipped: Array<{ _id: string; reason: string }>;
+    unplaced: string[];
+    message?: string;
+  }> => {
+    const response = await api.patch('/assets/bulk', { asset_ids: assetIds, changes });
+    return { ...response.data.data, message: response.data.message };
+  },
+
   removeConnection: async (assetId: string, connectionId: string): Promise<Asset> => {
     const response = await api.delete(`/assets/${assetId}/connections/${connectionId}`);
     return response.data.data;

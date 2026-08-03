@@ -40,6 +40,7 @@ import { useAssets, assetKeys } from '../hooks/queries/useAssets';
 import { useBuildings } from '../hooks/queries/useBuildings';
 import { useFloors } from '../hooks/queries/useFloors';
 import { useWorkareas } from '../hooks/queries/useWorkareas';
+import { getApiErrorMessage } from '../utils/apiError';
 import { useAuditLog } from '../hooks/queries/useAuditLog';
 import styles from '../styles/pages/Dashboard.module.css';
 
@@ -74,7 +75,13 @@ const Dashboard: React.FC = () => {
   const [selectedAssetIds, setSelectedAssetIds] = useState<Set<string>>(new Set());
   const [bulkUpdating, setBulkUpdating] = useState(false);
   const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false);
+  // "Move to floor" grew into a general bulk-edit panel: after an inventory
+  // import the corrections that come in groups are the ROOM (not just the floor),
+  // the person, and the status — and sometimes "put these back in the tray".
   const [bulkMoveFloorId, setBulkMoveFloorId] = useState<string>('');
+  const [bulkMoveWorkareaId, setBulkMoveWorkareaId] = useState<string>('');
+  const [bulkPerson, setBulkPerson] = useState<string>('');
+  const [bulkClearPlacement, setBulkClearPlacement] = useState(false);
   const [bulkMoveOpen, setBulkMoveOpen] = useState(false);
   const [maintenanceFilter, setMaintenanceFilter] = useState<'overdue' | 'upcoming' | null>(
     () => (localStorage.getItem('db_maint') as 'overdue' | 'upcoming' | null) ?? null
@@ -343,11 +350,10 @@ const Dashboard: React.FC = () => {
     if (selectedAssetIds.size === 0) return;
     setBulkUpdating(true);
     try {
-      await Promise.all(
-        Array.from(selectedAssetIds).map(id =>
-          assetService.updateAsset(id, { 'basic_info.status': status } as any)
-        )
-      );
+      // One request rather than one per asset: this used to fan out N parallel
+      // PATCHes, which on a 200-row selection meant 200 round-trips and a partial
+      // result if any of them failed.
+      await assetService.bulkUpdate(Array.from(selectedAssetIds), { status });
       qc.setQueryData(assetKeys.all, (prev: Asset[] | undefined) =>
         prev ? prev.map(a => selectedAssetIds.has(a._id) ? { ...a, basic_info: { ...a.basic_info, status: status as any } } : a) : prev
       );
@@ -378,27 +384,34 @@ const Dashboard: React.FC = () => {
     }
   };
 
-  const handleBulkFloorMove = async () => {
-    if (selectedAssetIds.size === 0 || !bulkMoveFloorId) return;
-    const targetFloor = floors.find(f => f._id === bulkMoveFloorId);
+  /** Whether the panel has anything to apply — guards an empty request. */
+  const bulkEditHasChanges = !!bulkMoveWorkareaId || bulkPerson.trim() !== '' || bulkClearPlacement;
+
+  const handleBulkEdit = async () => {
+    if (selectedAssetIds.size === 0 || !bulkEditHasChanges) return;
     setBulkUpdating(true);
     try {
-      await Promise.all(
-        Array.from(selectedAssetIds).map(id =>
-          assetService.updateAsset(id, {
-            hierarchy: {
-              ...(assets.find(a => a._id === id)?.hierarchy ?? { building_id: '', floor_id: '', workarea_id: '', section_id: '', workstation_id: '' }),
-              floor_id: bulkMoveFloorId,
-              building_id: targetFloor?.building_id ?? '',
-            },
-          } as any)
-        )
-      );
+      // Only the fields actually filled in are sent. The floor and building are
+      // NOT sent: the server derives them from the work area, so they cannot end
+      // up contradicting it.
+      const changes: Parameters<typeof assetService.bulkUpdate>[1] = {};
+      if (bulkMoveWorkareaId) changes.workarea_id = bulkMoveWorkareaId;
+      if (bulkPerson.trim() !== '') changes.person_full_name = bulkPerson.trim();
+      if (bulkClearPlacement) changes.clear_placement = true;
+
+      const res = await assetService.bulkUpdate(Array.from(selectedAssetIds), changes);
       qc.invalidateQueries({ queryKey: assetKeys.all });
-      toast.success(`${selectedAssetIds.size} asset${selectedAssetIds.size !== 1 ? 's' : ''} moved to ${targetFloor?.name ?? 'floor'}`);
+      // The server's message already states the counts and whether anything went
+      // back to the tray; repeating it here risks the two disagreeing.
+      if (res.skipped.length > 0) toast.warning(res.message ?? 'Applied with warnings');
+      else toast.success(res.message ?? `${res.updated.length} asset(s) updated`);
       setSelectedAssetIds(new Set());
-    } catch {
-      toast.error('Bulk move failed');
+      setBulkMoveFloorId('');
+      setBulkMoveWorkareaId('');
+      setBulkPerson('');
+      setBulkClearPlacement(false);
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, 'Bulk edit failed'));
     } finally {
       setBulkUpdating(false);
       setBulkMoveOpen(false);
@@ -974,7 +987,7 @@ const Dashboard: React.FC = () => {
                   onClick={() => setBulkMoveOpen(o => !o)}
                   disabled={bulkUpdating}
                 >
-                  <MoveRight size={13} style={{ marginRight: 3 }} />Move to floor
+                  <MoveRight size={13} style={{ marginRight: 3 }} />Edit selected
                 </button>
                 <button
                   className={styles.bulkDeleteBtn}
@@ -993,20 +1006,59 @@ const Dashboard: React.FC = () => {
             )}
             {bulkMoveOpen && (
               <div className={styles.bulkMovePanel}>
+                {/* Floor first, then its rooms — the room is what the survey gets
+                    wrong, and picking one derives the floor and building anyway. */}
                 <select
                   className={styles.bulkMoveSelect}
                   value={bulkMoveFloorId}
-                  onChange={e => setBulkMoveFloorId(e.target.value)}
+                  onChange={e => { setBulkMoveFloorId(e.target.value); setBulkMoveWorkareaId(''); }}
                 >
-                  <option value="">Select floor…</option>
+                  <option value="">Floor…</option>
                   {floors.map(f => (
                     <option key={f._id} value={f._id}>{f.name}</option>
                   ))}
                 </select>
-                <Button variant="primary" size="sm" onClick={handleBulkFloorMove} disabled={!bulkMoveFloorId || bulkUpdating} loading={bulkUpdating}>
-                  Move
+                <select
+                  className={styles.bulkMoveSelect}
+                  value={bulkMoveWorkareaId}
+                  onChange={e => setBulkMoveWorkareaId(e.target.value)}
+                  disabled={!bulkMoveFloorId}
+                  title={bulkMoveFloorId ? 'Work area to move the selected assets into' : 'Pick a floor first'}
+                >
+                  <option value="">{bulkMoveFloorId ? 'Work area…' : 'Pick a floor first'}</option>
+                  {workareas
+                    .filter(w => w.floor_id === bulkMoveFloorId)
+                    .map(w => (
+                      <option key={w._id} value={w._id}>
+                        {w.zone?.name ? `${w.name} (${w.zone.name})` : w.name}
+                      </option>
+                    ))}
+                </select>
+                <input
+                  className={styles.bulkMoveSelect}
+                  value={bulkPerson}
+                  onChange={e => setBulkPerson(e.target.value)}
+                  placeholder="Assign to person…"
+                  title="Set the same person on every selected asset"
+                />
+                <label className={styles.bulkMoveCheck} title="Clear map coordinates so the assets return to the floor map's unplaced tray">
+                  <input
+                    type="checkbox"
+                    checked={bulkClearPlacement}
+                    onChange={e => setBulkClearPlacement(e.target.checked)}
+                  />
+                  Back to unplaced
+                </label>
+                <Button variant="primary" size="sm" onClick={handleBulkEdit} disabled={!bulkEditHasChanges || bulkUpdating} loading={bulkUpdating}>
+                  Apply
                 </Button>
-                <Button variant="outline" size="sm" onClick={() => { setBulkMoveOpen(false); setBulkMoveFloorId(''); }}>
+                <Button variant="outline" size="sm" onClick={() => {
+                  setBulkMoveOpen(false);
+                  setBulkMoveFloorId('');
+                  setBulkMoveWorkareaId('');
+                  setBulkPerson('');
+                  setBulkClearPlacement(false);
+                }}>
                   Cancel
                 </Button>
               </div>

@@ -629,6 +629,11 @@ const FloorMap: React.FC<FloorMapProps> = ({
   const [renameValue, setRenameValue] = useState('');
   const [placingAsset, setPlacingAsset] = useState<Asset | null>(null);
   const [unplacedTrayOpen, setUnplacedTrayOpen] = useState(true);
+  // Kept in a ref, not state: collapsing the tray unmounts UnplacedTray, and
+  // losing what was typed meant retyping it after every glance at the map. A ref
+  // remembers it without re-rendering this component, which re-renders on every
+  // pan frame — see UnplacedTray's header for why that matters.
+  const unplacedSearchRef = useRef('');
 
   // Tooltip state
   const [tooltip, setTooltip] = useState<{
@@ -2430,6 +2435,8 @@ const FloorMap: React.FC<FloorMapProps> = ({
           placingAssetId={placingAsset?._id ?? null}
           onSelect={setPlacingAsset}
           onClose={() => setUnplacedTrayOpen(false)}
+          initialSearch={unplacedSearchRef.current}
+          onSearchChange={(q) => { unplacedSearchRef.current = q; }}
         />
       )}
 

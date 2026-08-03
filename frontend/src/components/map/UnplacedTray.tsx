@@ -13,6 +13,12 @@
  * re-renders on every pan frame, wheel zoom and tooltip change; keeping the
  * search filtering here (behind useMemo, with the query as local state) means
  * a mousemove no longer re-filters a 1000+ row list.
+ *
+ * The query survives closing and reopening the tray: FloorMap unmounts this
+ * component when the tray is collapsed, so the query is seeded from
+ * `initialSearch` and reported back through `onSearchChange`. That callback
+ * writes to a ref in FloorMap rather than state, so remembering the text costs
+ * no re-render — which is the whole reason the search lives down here.
  */
 import React, { useMemo, useState } from 'react';
 import { Asset } from '../../services/asset.service';
@@ -30,26 +36,44 @@ interface UnplacedTrayProps {
   /** Passed the asset to place, or null to cancel the current selection. */
   onSelect: (asset: Asset | null) => void;
   onClose: () => void;
+  /** Query to start from — what was typed before the tray was last closed. */
+  initialSearch?: string;
+  /** Must not trigger a re-render in the parent; see the file header. */
+  onSearchChange?: (query: string) => void;
 }
 
 /** Fields a tray search looks at, cheapest/most likely first. */
-function assetHaystack(asset: Asset): string {
+function assetFields(asset: Asset): string[] {
   return [
     asset.basic_info.display_name,
     asset.basic_info.serial_number,
     asset.custom_fields?.object_id,
     asset.itsm?.hardware_asset_id,
-  ]
-    .filter(Boolean)
-    .join(' ')
-    .toLowerCase();
+  ].filter((v): v is string => !!v).map((v) => v.toLowerCase());
+}
+
+/**
+ * Whether an asset matches, with every whitespace-separated term having to appear
+ * in at least one field.
+ *
+ * The fields are checked individually rather than joined into one string. Joining
+ * them inserted a space that was never in the data, so a query could match across
+ * a field boundary — "1 SN" hitting a device named "PC-1" with serial "SN-9"
+ * purely because the join produced "pc-1 sn-9". Per-term-per-field also makes
+ * multi-word searches behave: "pc 9" now finds that device, where a single
+ * substring search could not.
+ */
+function matchesQuery(asset: Asset, terms: string[]): boolean {
+  if (terms.length === 0) return true;
+  const fields = assetFields(asset);
+  return terms.every((term) => fields.some((field) => field.includes(term)));
 }
 
 /** Filters to at most `limit` matches, stopping as soon as it has enough. */
-function findMatches(assets: Asset[], query: string, limit = Infinity): Asset[] {
+function findMatches(assets: Asset[], terms: string[], limit = Infinity): Asset[] {
   const matches: Asset[] = [];
   for (const asset of assets) {
-    if (query && !assetHaystack(asset).includes(query)) continue;
+    if (!matchesQuery(asset, terms)) continue;
     matches.push(asset);
     if (matches.length >= limit) break;
   }
@@ -62,18 +86,26 @@ const UnplacedTray: React.FC<UnplacedTrayProps> = ({
   placingAssetId,
   onSelect,
   onClose,
+  initialSearch = '',
+  onSearchChange,
 }) => {
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(initialSearch);
   const query = search.trim().toLowerCase();
+  const terms = useMemo(() => query.split(/\s+/).filter(Boolean), [query]);
+
+  const handleSearchChange = (value: string) => {
+    setSearch(value);
+    onSearchChange?.(value);
+  };
 
   const floorMatches = useMemo(
-    () => findMatches(unplacedAssets, query),
-    [unplacedAssets, query],
+    () => findMatches(unplacedAssets, terms),
+    [unplacedAssets, terms],
   );
   // Only searched, never listed wholesale — see the file header.
   const globalMatches = useMemo(
-    () => (query ? findMatches(searchableUnplacedAssets, query, GLOBAL_RESULT_LIMIT) : []),
-    [searchableUnplacedAssets, query],
+    () => (terms.length > 0 ? findMatches(searchableUnplacedAssets, terms, GLOBAL_RESULT_LIMIT) : []),
+    [searchableUnplacedAssets, terms],
   );
 
   const renderItem = (asset: Asset) => {
@@ -110,7 +142,7 @@ const UnplacedTray: React.FC<UnplacedTrayProps> = ({
         <input
           className={styles.unplacedTraySearch}
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => handleSearchChange(e.target.value)}
           placeholder={`Search ${searchableUnplacedAssets.length} unassigned assets…`}
         />
       )}

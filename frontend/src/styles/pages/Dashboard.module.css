@@ -502,6 +502,22 @@
   font-family: inherit;
 }
 
+/* The bulk panel now holds four controls plus two buttons, so it wraps rather
+   than squeezing them off-screen on a narrow window. */
+.bulkMovePanel {
+  flex-wrap: wrap;
+}
+
+.bulkMoveCheck {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
 /* Asset card checkbox — wrapper stops click from bubbling to card nav */
 .checkboxWrap {
   flex-shrink: 0;

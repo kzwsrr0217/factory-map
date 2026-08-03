@@ -16,6 +16,9 @@
  *   GET    /:id                           — single asset with all relations.
  *   POST   /                              — create one asset.
  *   POST   /bulk                          — bulk-create from CSV/JSON import.
+ *   PATCH  /bulk                          — apply the same few changes to many
+ *                                           assets (room / person / status /
+ *                                           clear placement) in one request.
  *   PATCH  /:id                           — partial update.
  *   DELETE /:id                           — delete asset.
  *   POST   /:id/sync                      — pull latest data from ITSM.
@@ -198,6 +201,7 @@ import {
   getAssetOtChildren,
   createAsset,
   bulkCreateAssets,
+  bulkUpdateAssets,
   updateAsset,
   deleteAsset,
   syncAssetFromITSM,
@@ -224,6 +228,10 @@ router.get('/:id/ot-children',     getAssetOtChildren);
 // Write — operator or admin only
 router.post('/',    requireOperator, validate(AssetCreateSchema), auditLog('asset'), createAsset);
 router.post('/bulk', requireOperator, validate(BulkAssetSchema), auditLog('asset'), bulkCreateAssets);
+// No auditLog() middleware: it infers the action from req.method and expects one
+// flat asset in the response, so it would misfile this. The handler writes one
+// entry per asset itself.
+router.patch('/bulk', requireOperator, bulkUpdateAssets);
 router.patch('/:id',
   requireOperator,
   validate(AssetUpdateSchema),

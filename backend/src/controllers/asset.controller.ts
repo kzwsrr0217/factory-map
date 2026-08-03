@@ -45,9 +45,11 @@ import { AssetConnection } from '../entities/AssetConnection.entity';
 import { EntityKind } from '../entities/EntityKind.entity';
 import { WallPort } from '../entities/WallPort.entity';
 import { WorkArea } from '../entities/WorkArea.entity';
+import { Floor } from '../entities/Floor.entity';
 import { Section } from '../entities/Section.entity';
 import { Workstation } from '../entities/Workstation.entity';
 import { io } from '../server';
+import { chunkForEntity, findByIn } from '../utils/mssqlBatch';
 
 const repo = () => AppDataSource.getRepository(Asset);
 const masterAssetRepo = () => AppDataSource.getRepository(MasterAsset);
@@ -547,6 +549,145 @@ export const createAsset = async (req: Request, res: Response, next: NextFunctio
     const full = (await loadWithRelations(asset.id))!;
     io.emit('asset:created', full.toApiResponse());
     res.status(201).json({ success: true, data: full.toApiResponse() });
+  } catch (error) { next(error); }
+};
+
+// ── PATCH /assets/bulk ────────────────────────────────────────────────────────
+
+/** Hard cap per request. A correction pass touches tens of rows, not thousands. */
+const MAX_BULK_UPDATE = 500;
+
+/**
+ * Applies the same few changes to many assets at once.
+ *
+ * Why it exists: after the inventory survey import, corrections come in groups —
+ * "these twelve are actually in the other room", "these all belong to her now".
+ * Without this, each one is a full form round-trip, and `POST /assets/bulk` is no
+ * help because it only ever creates. That made the correction pass the most
+ * expensive part of the whole workflow.
+ *
+ * Deliberately a **narrow whitelist**: the room, the person, the status, and
+ * clearing the placement. Identity (name, serial, hardware_asset_id) and
+ * everything ITSM-owned are out of reach on purpose — a bulk edit that can
+ * overwrite a serial number across fifty rows is a data-loss tool, and those
+ * fields are never wrong in groups anyway.
+ */
+export const bulkUpdateAssets = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const body = req.body as {
+      asset_ids?: string[];
+      changes?: {
+        workarea_id?: string | null;
+        person_full_name?: string | null;
+        person_id?: string | null;
+        status?: string | null;
+        clear_placement?: boolean;
+      };
+    };
+
+    const ids = Array.isArray(body.asset_ids) ? [...new Set(body.asset_ids)] : [];
+    const changes = body.changes ?? {};
+    if (ids.length === 0) {
+      res.status(400).json({ success: false, error: 'asset_ids is required and must not be empty' });
+      return;
+    }
+    if (ids.length > MAX_BULK_UPDATE) {
+      res.status(400).json({ success: false, error: `At most ${MAX_BULK_UPDATE} assets per request` });
+      return;
+    }
+    if (Object.keys(changes).length === 0) {
+      res.status(400).json({ success: false, error: 'changes is required — nothing to apply' });
+      return;
+    }
+
+    // A work area determines its floor and building, so those are derived rather
+    // than accepted from the caller: passing all three lets them disagree, and
+    // an asset whose floor_id contradicts its work area is exactly the state
+    // findHierarchyMismatch exists to prevent.
+    let targetArea: WorkArea | null = null;
+    let targetFloorId: string | null = null;
+    let targetBuildingId: string | null = null;
+    if (changes.workarea_id !== undefined && changes.workarea_id !== null) {
+      targetArea = await AppDataSource.getRepository(WorkArea).findOneBy({ id: changes.workarea_id });
+      if (!targetArea) {
+        res.status(422).json({ success: false, error: 'workarea_id does not reference an existing work area' });
+        return;
+      }
+      targetFloorId = targetArea.floor_id;
+      const floor = await AppDataSource.getRepository(Floor).findOneBy({ id: targetArea.floor_id });
+      targetBuildingId = floor?.building_id ?? null;
+    }
+
+    const assets = await findByIn(repo(), 'id', ids);
+    const found = new Set(assets.map((a) => a.id));
+    const skipped: Array<{ _id: string; reason: string }> = ids
+      .filter((id) => !found.has(id))
+      .map((id) => ({ _id: id, reason: 'No such asset' }));
+
+    const updated: Array<{ _id: string; display_name: string }> = [];
+    /** Assets sent back to the unplaced tray because their room changed. */
+    const unplaced: string[] = [];
+
+    for (const asset of assets) {
+      if (changes.workarea_id !== undefined) {
+        const movingRoom = asset.workarea_id !== (changes.workarea_id ?? null);
+        asset.workarea_id = changes.workarea_id ?? null;
+        if (targetArea) {
+          asset.floor_id = targetFloorId;
+          asset.building_id = targetBuildingId;
+        }
+        // Coordinates are relative to the room the asset was in. Keeping them
+        // would leave it drawn inside the OLD rectangle while belonging to the
+        // new one — visibly in one room, structurally in another. Back to the
+        // tray instead, where "Arrange unplaced" can lay it out in the new room.
+        if (movingRoom && asset.is_placed) {
+          asset.loc_x = 0;
+          asset.loc_y = 0;
+          asset.is_placed = false;
+          unplaced.push(asset.display_name);
+        }
+        // Retired levels: a section/workstation from the old room would now point
+        // at another room entirely.
+        asset.section_id = null;
+        asset.workstation_id = null;
+      }
+      if (changes.person_full_name !== undefined) asset.person_full_name = changes.person_full_name ?? null;
+      if (changes.person_id !== undefined) asset.person_id = changes.person_id ?? null;
+      if (changes.status !== undefined) asset.status = changes.status ?? null;
+      if (changes.clear_placement) {
+        asset.loc_x = 0;
+        asset.loc_y = 0;
+        asset.is_placed = false;
+      }
+      updated.push({ _id: asset.id, display_name: asset.display_name });
+    }
+
+    if (assets.length > 0) await repo().save(assets, { chunk: chunkForEntity(Asset) });
+
+    // One entry per asset, matching how single edits are recorded. Written
+    // manually because the audit middleware infers the action from req.method
+    // and expects one flat asset in the response body.
+    const user = (req as AuthRequest).user;
+    if (user && updated.length > 0) {
+      const logRepo = AppDataSource.getRepository(AuditLog);
+      const entries = updated.map((u) => logRepo.create({
+        user_id: user.id, username: user.username, action: 'update',
+        entity_type: 'asset', document_id: u._id,
+        diff: { bulk_edit: changes },
+      }));
+      await logRepo.save(entries, { chunk: chunkForEntity(AuditLog) })
+        .catch(() => { /* audit failure must never fail the request */ });
+    }
+
+    for (const asset of assets) io.emit('asset:updated', asset.toApiResponse());
+
+    res.json({
+      success: true,
+      data: { updated, skipped, unplaced },
+      message: `${updated.length} asset(s) updated`
+        + (unplaced.length > 0 ? `, ${unplaced.length} returned to the unplaced tray because their work area changed` : '')
+        + (skipped.length > 0 ? `, ${skipped.length} skipped` : ''),
+    });
   } catch (error) { next(error); }
 };
 
