@@ -327,9 +327,46 @@ docker exec factory-map-mssql /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -
 docker cp factory-map-mssql:/var/opt/mssql/backup.bak ./factorymap-$(date +%Y%m%d).bak
 ```
 
-Schedule this (Windows Task Scheduler running the two commands above, or a
-cron-equivalent) and copy `.bak` files off the VM — a VM-level snapshot alone
-won't give you an easy point-in-time restore of just the database.
+### Scheduling it
+
+Use `ops/backup-factorymap.ps1` rather than the two commands by hand. It reads
+`MSSQL_PASSWORD` out of the deployment's own `.env.prod` (so the secret isn't
+duplicated into the task's arguments or into the log), writes a dated `.bak`,
+deletes the in-container copy so the volume doesn't grow, prunes host files older
+than `-KeepDays`, and **exits non-zero if the file is missing or suspiciously
+small** — a nightly task that reports success while producing nothing is worse
+than no task.
+
+```powershell
+C:\factorymap\ops\backup-factorymap.ps1 -EnvFile C:\factorymap\.env.prod -Destination D:\backups\factorymap
+```
+
+Register it (run once, as the same account that owns the podman machine):
+
+```powershell
+$action  = New-ScheduledTaskAction -Execute 'powershell.exe' `
+  -Argument '-NoProfile -ExecutionPolicy Bypass -File "C:\factorymap\ops\backup-factorymap.ps1" -EnvFile "C:\factorymap\.env.prod" -Destination "D:\backups\factorymap"'
+$trigger = New-ScheduledTaskTrigger -Daily -At 01:30
+Register-ScheduledTask -TaskName 'factorymap-backup' -Action $action -Trigger $trigger `
+  -Description 'Nightly factorymap DB backup' -RunLevel Highest
+```
+
+> **The scheduled-task gotcha here:** podman on Windows runs inside the *user's*
+> WSL2 session, so `podman exec` only works while that session exists. A task set
+> to "Run whether user is logged on or not" will fail every night with a
+> connection error. Either register it under the same account with **Run only
+> when user is logged on**, or make the podman machine start at boot and confirm
+> `podman ps` works from a non-interactive session before trusting the schedule.
+> Check the task's Last Run Result after the first night — this is exactly the
+> kind of thing that silently never runs.
+
+**Copy the `.bak` files off the VM.** A VM-level snapshot alone won't give you an
+easy point-in-time restore of just the database, and a backup that lives only on
+the machine it protects isn't a backup.
+
+What is worth protecting, concretely: the ITSM snapshot can be re-exported from
+Alemba, but the **zones, work-area rectangles, socket labels and every manual
+placement** were entered by hand and exist nowhere else.
 
 Restore is the inverse: copy the `.bak` into the container, `RESTORE DATABASE`.
 
