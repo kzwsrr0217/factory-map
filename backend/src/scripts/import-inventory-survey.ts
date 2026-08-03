@@ -27,11 +27,14 @@
  *    so re-importing a refined survey doesn't create duplicates.
  *
  * DRY RUN BY DEFAULT — this doubles as a validation tool. Building/Floor
- * always need to already exist; WorkAreas (the physical map areas)
- * also need to already exist (drawn on the map first) — this script never
- * invents hierarchy, it only matches by name (case/diacritic-insensitive)
- * and reports what didn't match, so typos/nicknames can be fixed via an
- * optional `inventory-corrections.json` in the same directory:
+ * always need to already exist. WorkAreas normally do too — the script matches
+ * by name (case/diacritic-insensitive) and reports what didn't match, so
+ * typos/nicknames can be fixed via an optional `inventory-corrections.json` in
+ * the same directory. With `--create-missing-workareas` it will instead create
+ * the rooms it couldn't find (and their zones) with default-size rectangles,
+ * then re-plan so this run's assets land in them; positioning those rectangles
+ * on the floor plan stays manual, since only a person knows where a room is.
+ * The corrections file:
  *   { "persons": { "gorog tomi": "Görög Tamás" },
  *     "helyszin": { "hr": "HR" },
  *     "work_area": { "hr iroda": "HR Iroda" } }
@@ -261,11 +264,29 @@ interface PlannedCreate {
   fields: Partial<Asset>;
 }
 
+/**
+ * A room the survey refers to that doesn't exist on the map yet.
+ *
+ * Kept as structured fields rather than the "zone / room" display string it used
+ * to be, because --create-missing-workareas needs the floor and the zone name to
+ * actually create it. The display string is derived for the report instead.
+ */
+interface MissingWorkArea {
+  floor_id: string;
+  /** "Werk1 / Ground Floor", for the report only. */
+  where: string;
+  /** Corrected `helyszin`; empty when the survey didn't give one. */
+  zone_name: string;
+  /** Corrected `work_area` — becomes WorkArea.name. */
+  room_name: string;
+}
+
 interface ImportPlan {
   toUpdate: PlannedUpdate[];
   toCreate: PlannedCreate[];
   unmatchedBuildingOrFloor: SurveyRow[];
-  unmatchedWorkArea: Set<string>;
+  /** Keyed by floor + folded zone + folded room, so each room is reported once. */
+  missingWorkAreas: Map<string, MissingWorkArea>;
   unmatchedPerson: Set<string>;
   unmatchedHwa: SurveyRow[];
 }
@@ -305,7 +326,7 @@ async function planImport(rows: SurveyRow[], corrections: Corrections): Promise<
     toUpdate: [],
     toCreate: [],
     unmatchedBuildingOrFloor: [],
-    unmatchedWorkArea: new Set(),
+    missingWorkAreas: new Map(),
     unmatchedPerson: new Set(),
     unmatchedHwa: [],
   };
@@ -318,8 +339,16 @@ async function planImport(rows: SurveyRow[], corrections: Corrections): Promise<
     const workAreaField = (row.work_area ?? '').trim();
     const workArea = matchWorkArea(workAreas, zoneIndex, floor.id, row.helyszin, workAreaField, corrections);
     if (!workArea && workAreaField) {
-      // Reported as "zone / room" so it's obvious which rectangle to draw.
-      plan.unmatchedWorkArea.add(`${(row.helyszin ?? '?').trim()} / ${workAreaField}`);
+      const roomName = correct(corrections.work_area, workAreaField);
+      const zoneName = correct(corrections.helyszin, (row.helyszin ?? '').trim());
+      // Corrected names are what gets created, so that a corrections entry fixes
+      // the room's name once instead of leaving a misspelled rectangle behind.
+      plan.missingWorkAreas.set(`${floor.id}|${fold(zoneName)}|${fold(roomName)}`, {
+        floor_id: floor.id,
+        where: `${building.name} / ${floor.name}`,
+        zone_name: zoneName,
+        room_name: roomName,
+      });
     }
 
     const person = matchPerson(personIndex, row.szemely, corrections);
@@ -394,9 +423,13 @@ function printReport(plan: ImportPlan): void {
     console.log(`\n⚠️  ${plan.unmatchedBuildingOrFloor.length} row(s) had no matching Building/Floor — add a "building"/"floor" correction, or check the building/floor exist:`);
     for (const u of uniq) console.log(`   - ${u}`);
   }
-  if (plan.unmatchedWorkArea.size > 0) {
-    console.log(`\n⚠️  ${plan.unmatchedWorkArea.size} distinct zone/room pair(s) not found on the matched floor — draw the WorkArea (its name = the room, its Zone = the helyszín), or add a "work_area"/"helyszin" correction:`);
-    for (const u of plan.unmatchedWorkArea) console.log(`   - ${u}`);
+  if (plan.missingWorkAreas.size > 0) {
+    console.log(`\n⚠️  ${plan.missingWorkAreas.size} room(s) referenced by the survey don't exist on the map yet:`);
+    for (const m of plan.missingWorkAreas.values()) {
+      console.log(`   - ${m.where}: ${m.zone_name || '(no zone)'} / ${m.room_name}`);
+    }
+    console.log('   Either draw them (name = the room, Zone = the helyszín), fix the names via');
+    console.log(`   ${CORRECTIONS_FILE}, or pass --create-missing-workareas to have them created.`);
   }
   if (plan.unmatchedPerson.size > 0) {
     console.log(`\n⚠️  ${plan.unmatchedPerson.size} distinct person name(s) didn't match anyone known from ITSM — add a "persons" correction if it's a typo/nickname, otherwise it's kept as free text:`);
@@ -427,10 +460,114 @@ async function applyPlan(plan: ImportPlan): Promise<void> {
   console.log(`\n✅ Applied: ${plan.toUpdate.length} asset(s) updated, ${plan.toCreate.length} new local asset(s) created.`);
 }
 
+/**
+ * Creates the rooms (and their zones) that the survey refers to but the map
+ * doesn't have yet.
+ *
+ * Why this is worth doing rather than drawing all of them by hand: the survey
+ * already knows every room's name and which zone it belongs to, and the importer
+ * matches rooms *by name* — so hand-typing them is both the slow part and the
+ * part that introduces the mismatches this script then reports. Created rooms get
+ * a name, a zone and a default-size rectangle; positioning them on the floor plan
+ * is still manual, because only a person knows where the room actually is.
+ *
+ * They are laid out in a grid **below everything already drawn on that floor**, so
+ * a fresh batch never lands on top of rectangles someone has already positioned.
+ */
+const NEW_AREA_W = 150;
+const NEW_AREA_H = 100;
+const NEW_AREA_GAP = 20;
+/** Matches the map's canvas width (see FloorMap's viewBox). */
+const CANVAS_W = 1000;
+
+interface CreatedHierarchy {
+  zones: number;
+  workAreas: number;
+  /** Rooms whose name now collides with another room on the same floor. */
+  duplicateNames: string[];
+}
+
+async function createMissingWorkAreas(plan: ImportPlan): Promise<CreatedHierarchy> {
+  const zoneRepo = AppDataSource.getRepository(Zone);
+  const waRepo = AppDataSource.getRepository(WorkArea);
+  const result: CreatedHierarchy = { zones: 0, workAreas: 0, duplicateNames: [] };
+
+  // Group by floor: the layout and the zone lookup are both per floor.
+  const byFloor = new Map<string, MissingWorkArea[]>();
+  for (const missing of plan.missingWorkAreas.values()) {
+    const list = byFloor.get(missing.floor_id) ?? [];
+    list.push(missing);
+    byFloor.set(missing.floor_id, list);
+  }
+
+  for (const [floorId, missingRooms] of byFloor) {
+    const existingZones = await zoneRepo.find({ where: { floor_id: floorId } });
+    const zoneByFolded = new Map(existingZones.map((z) => [fold(z.name), z]));
+
+    // Zones first, so the rooms can point at them.
+    for (const room of missingRooms) {
+      if (!room.zone_name) continue;
+      const key = fold(room.zone_name);
+      if (zoneByFolded.has(key)) continue;
+      const zone = await zoneRepo.save(zoneRepo.create({
+        floor_id: floorId,
+        name: room.zone_name,
+        color: null,           // the map picks one; an explicit colour is a human decision
+        description: null,
+      }));
+      zoneByFolded.set(key, zone);
+      result.zones++;
+    }
+
+    const existingAreas = await waRepo.find({ where: { floor_id: floorId } });
+    const existingNames = new Set(existingAreas.map((a) => fold(a.name)));
+    // Start below the lowest thing already drawn, so nothing is buried.
+    const lowestDrawn = existingAreas.reduce(
+      (low, a) => Math.max(low, (a.coord_y ?? 0) + (a.dim_height ?? NEW_AREA_H)),
+      0,
+    );
+    const startY = lowestDrawn > 0 ? lowestDrawn + NEW_AREA_GAP * 2 : NEW_AREA_GAP;
+    const cols = Math.max(1, Math.floor((CANVAS_W - NEW_AREA_GAP) / (NEW_AREA_W + NEW_AREA_GAP)));
+
+    const rooms = [...missingRooms].sort((a, b) =>
+      (a.zone_name || '').localeCompare(b.zone_name || '') || a.room_name.localeCompare(b.room_name));
+
+    const toSave: WorkArea[] = [];
+    rooms.forEach((room, i) => {
+      // Two zones can legitimately contain a room of the same name; the importer
+      // disambiguates by zone. Worth flagging though - two identically named
+      // rectangles on one floor are confusing to look at.
+      if (existingNames.has(fold(room.room_name))) result.duplicateNames.push(`${room.where}: ${room.room_name}`);
+      existingNames.add(fold(room.room_name));
+
+      const col = i % cols;
+      const row = Math.floor(i / cols);
+      toSave.push(waRepo.create({
+        floor_id: floorId,
+        name: room.room_name,
+        zone_id: room.zone_name ? (zoneByFolded.get(fold(room.zone_name))?.id ?? null) : null,
+        coord_x: NEW_AREA_GAP + col * (NEW_AREA_W + NEW_AREA_GAP),
+        coord_y: startY + row * (NEW_AREA_H + NEW_AREA_GAP),
+        dim_width: NEW_AREA_W,
+        dim_height: NEW_AREA_H,
+        production_line_code: null,
+        metadata: null,
+      }));
+    });
+
+    if (toSave.length > 0) {
+      await waRepo.save(toSave, { chunk: chunkForEntity(WorkArea) });
+      result.workAreas += toSave.length;
+    }
+  }
+
+  return result;
+}
+
 function resolveDir(): string {
   const arg = process.argv[2];
   if (!arg) {
-    console.error('✖ Usage: import-inventory-survey.ts <export-directory> [--apply]');
+    console.error('✖ Usage: import-inventory-survey.ts <export-directory> [--create-missing-workareas] [--apply]');
     process.exit(1);
   }
   return path.resolve(arg);
@@ -439,6 +576,7 @@ function resolveDir(): string {
 async function main(): Promise<void> {
   const dir = resolveDir();
   const apply = process.argv.includes('--apply');
+  const createMissing = process.argv.includes('--create-missing-workareas');
   if (!fs.existsSync(dir)) { console.error(`✖ Directory not found: ${dir}`); process.exit(1); }
 
   const corrections = loadCorrections(dir);
@@ -448,13 +586,34 @@ async function main(): Promise<void> {
 
   await AppDataSource.initialize();
   try {
-    const plan = await planImport(rows, corrections);
+    let plan = await planImport(rows, corrections);
     printReport(plan);
 
     if (!apply) {
-      console.log(`\nℹ️  Dry run only — nothing was written. Fix what's flagged above (via ${CORRECTIONS_FILE} in the same directory, or by drawing missing WorkAreas on the map), re-run to confirm it's clean, then pass --apply to commit.`);
+      if (createMissing && plan.missingWorkAreas.size > 0) {
+        console.log(`\nℹ️  --create-missing-workareas would create ${plan.missingWorkAreas.size} room(s) and their zones, listed above.`);
+      }
+      console.log(`\nℹ️  Dry run only — nothing was written. Fix what's flagged above (via ${CORRECTIONS_FILE} in the same directory, by drawing the missing WorkAreas on the map, or by passing --create-missing-workareas), re-run to confirm it's clean, then pass --apply to commit.`);
       return;
     }
+
+    if (createMissing && plan.missingWorkAreas.size > 0) {
+      const created = await createMissingWorkAreas(plan);
+      console.log(`\n🏗️  Created ${created.workAreas} work area(s) and ${created.zones} zone(s).`);
+      console.log('   They have default-size rectangles stacked below whatever was already');
+      console.log('   drawn on each floor — drag and resize them into place on the Map View.');
+      if (created.duplicateNames.length > 0) {
+        console.log(`   ⚠️  ${created.duplicateNames.length} share a name with another room on the same floor:`);
+        for (const d of created.duplicateNames) console.log(`      - ${d}`);
+      }
+      // Re-plan against the rooms that now exist, so this run's assets land in
+      // them instead of needing a second pass.
+      plan = await planImport(rows, corrections);
+      if (plan.missingWorkAreas.size > 0) {
+        console.log(`   ⚠️  ${plan.missingWorkAreas.size} room(s) still unmatched after creation — see above.`);
+      }
+    }
+
     await applyPlan(plan);
   } finally {
     await AppDataSource.destroy();

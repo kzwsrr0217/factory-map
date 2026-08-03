@@ -251,6 +251,17 @@ above the group. Click one to see its details.
    name it, without leaving the dialog
 4. The work area appears on the map and can be repositioned by dragging
 
+### Creating the rooms from the survey
+The survey names every room and the zone it belongs to, so those do not have to be
+typed in by hand. Running the import with `--create-missing-workareas` creates each
+missing room with its zone and a default-size rectangle, stacked in a grid below
+whatever is already drawn on that floor. You then drag and resize them into place
+on the Map View — that part still needs a person, since only you know where the
+room actually is.
+
+Run the import **without** `--apply` first: it writes nothing, and its output is
+exactly the list of rooms that are missing, grouped by building and floor.
+
 ### Placing many assets at once
 After importing the inventory survey, every asset has a building, floor and work
 area — but no position, so they all sit in the map's unplaced tray. On the floor

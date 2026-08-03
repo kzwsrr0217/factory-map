@@ -979,6 +979,25 @@ differing counts plus every field-level diff, and separately lists every
 still-local-only asset (grouped by type) as the backlog of devices someone
 still needs to register in Alemba.
 
+**Drawing the rooms the survey refers to.** The importer matches work areas by
+name and normally expects them to exist, which makes hand-typing them both the
+slow part of the process and the source of the mismatches the script then reports.
+`--create-missing-workareas` inverts that: it creates the rooms it could not find,
+plus any zone (`helyszin`) they need, then **re-plans** so the same run's assets
+land in them instead of needing a second pass. Created rooms get a default-size
+rectangle laid out in a grid **below everything already drawn on that floor**, so a
+fresh batch never buries rectangles someone has already positioned — positioning
+them is still manual, because only a person knows where a room actually is.
+
+Recommended order, which is also why the dry run comes first:
+
+1. `npm run import:inventory -- <dir>` — writes nothing; its output *is* the list
+   of rooms to create, grouped by building and floor.
+2. `npm run import:inventory -- <dir> --create-missing-workareas --apply`.
+3. Drag and resize the new rectangles on the Map View.
+4. Per work area, use **Arrange N unplaced** on the floor page to give the assets
+   coordinates (`POST /workareas/:id/auto-place`).
+
 **For the cabling survey**, `network-gaps-report.ts`
 (`npm run report:network -- [--csv=<path>]`) is the equivalent view — kept as its
 own script rather than folded into the reconcile report, because it shares no
