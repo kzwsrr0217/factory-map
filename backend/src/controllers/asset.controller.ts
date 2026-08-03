@@ -174,8 +174,18 @@ async function wouldCreateCycle(assetId: string, targetId: string, direction: 'p
   return false;
 }
 
-function isPlacedFromCoords(x: number, y: number): boolean {
-  return x !== 0 || y !== 0;
+/**
+ * An asset counts as placed on the map once it has a non-zero coordinate.
+ *
+ * The null coalescing is load-bearing, not defensive noise: `loc_x`/`loc_y` carry
+ * a database default of 0, so on a freshly `create()`d entity they are still
+ * **undefined** in memory until the row is reloaded. Comparing undefined against
+ * 0 is true, which used to mark every asset created through the API with a floor
+ * but no coordinates as placed — so it rendered in the map's top-left corner and
+ * never appeared in the unplaced tray, the exact state the tray exists to expose.
+ */
+function isPlacedFromCoords(x: number | null | undefined, y: number | null | undefined): boolean {
+  return (x ?? 0) !== 0 || (y ?? 0) !== 0;
 }
 
 // Map incoming nested body → entity fields

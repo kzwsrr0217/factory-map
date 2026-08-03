@@ -54,6 +54,38 @@ describe('GET /api/assets/lookups', () => {
 });
 
 describe('POST /api/assets', () => {
+  it('does not count an asset as placed just because it has a floor', async () => {
+    // Regression: loc_x/loc_y carry a DB default of 0, so on a freshly created
+    // entity they are still undefined in memory - and `undefined !== 0` is true.
+    // That marked every asset created with a floor but no coordinates as placed,
+    // which put it in the map's top-left corner and kept it out of the unplaced
+    // tray, i.e. invisible in the one list that exists to surface it. This is
+    // exactly what the inventory survey produces: a room, but no position.
+    const building = await request(app)
+      .post('/api/buildings')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ name: `__placed_probe_${Date.now()}__` });
+    const floor = await request(app)
+      .post('/api/floors')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ building_id: building.body.data._id, floor_number: 1, name: 'Probe Floor' });
+
+    const res = await request(app)
+      .post('/api/assets')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        basic_info: { display_name: '__test_unplaced__' },
+        hierarchy: { building_id: building.body.data._id, floor_id: floor.body.data._id },
+      });
+
+    expect(res.status).toBe(201);
+    expect(res.body.data.is_placed).toBe(false);
+
+    await request(app).delete(`/api/assets/${res.body.data._id}`).set('Authorization', `Bearer ${token}`);
+    await request(app).delete(`/api/floors/${floor.body.data._id}`).set('Authorization', `Bearer ${token}`);
+    await request(app).delete(`/api/buildings/${building.body.data._id}`).set('Authorization', `Bearer ${token}`);
+  });
+
   it('creates an asset with nested body', async () => {
     const res = await request(app)
       .post('/api/assets')
