@@ -6,6 +6,7 @@ import ConfirmDialog from '../components/common/ConfirmDialog';
 import { networkService, NetworkRoom, NetworkRack, PatchPanel, WallPort } from '../services/network.service';
 import { assetService, Asset } from '../services/asset.service';
 import { RackDiagram } from '../components/network/RackDiagram';
+import AutoPatchModal from '../components/network/AutoPatchModal';
 import { useToast } from '../contexts/ToastContext';
 import { useBuildings } from '../hooks/queries/useBuildings';
 import { useFloors } from '../hooks/queries/useFloors';
@@ -76,6 +77,9 @@ const NetworkInfrastructure: React.FC = () => {
    * the fallback for one that was missed. See docs/CONNECTIONS_WORKFLOW.md.
    */
   const [unpatchedSockets, setUnpatchedSockets] = useState<WallPort[]>([]);
+
+  /** Rack whose sockets are being patched from their labels in bulk. */
+  const [autoPatchRack, setAutoPatchRack] = useState<NetworkRack | null>(null);
 
   const [splitPct, setSplitPct] = useState<number>(() => {
     const saved = localStorage.getItem('infra-split-pct');
@@ -490,6 +494,7 @@ const NetworkInfrastructure: React.FC = () => {
                       <span className={styles.rackName}>{rack.name}</span>
                       <span className={styles.rackU}>{rack.u_count}U</span>
                       <div className={styles.rackActions}>
+                        <button className={styles.iconBtn} onClick={e => { e.stopPropagation(); setAutoPatchRack(rack); }} title="Patch this rack's sockets from their labels (R1/001 → first panel, port 1)">🪄</button>
                         <button className={styles.iconBtn} onClick={e => { e.stopPropagation(); openModal({ kind: 'rack', room: selectedRoom, rack }); }} title="Edit rack">✏️</button>
                         {selectedRoom.racks.length > 1 && (
                           <button className={styles.iconBtn} onClick={e => { e.stopPropagation(); openModal({ kind: 'replaceRack', room: selectedRoom, rack }); }} title="Replace rack (moves patch panels and mounted assets to a replacement cabinet)">🔁</button>
@@ -892,6 +897,20 @@ const NetworkInfrastructure: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {autoPatchRack && (
+        <AutoPatchModal
+          isOpen
+          onClose={() => setAutoPatchRack(null)}
+          onSuccess={async () => {
+            // Reload every panel of this rack — the patching touched several.
+            await Promise.all((autoPatchRack.patch_panels ?? []).map(panel => reloadPanelPorts(panel._id)));
+            await invalidateRooms();
+          }}
+          rackId={autoPatchRack._id}
+          rackName={autoPatchRack.name}
+        />
       )}
 
       <ConfirmDialog

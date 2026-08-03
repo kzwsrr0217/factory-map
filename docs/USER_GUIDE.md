@@ -289,10 +289,23 @@ The picker shows each socket's room, how far it is patched and who is using it:
 | *live* | panel port and switch port both known |
 | *in use by …* | another device holds it; not selectable |
 
-### 3. Patch it at the rack (Network Infrastructure → panel → click a port)
-Choose the socket that lands on that port from the list of unpatched ones, then
-record the switch and switch port its patch cord goes to. If the socket was never
-recorded on the floor page, you can create it here instead.
+### 3. Patch it at the rack (Network Infrastructure)
+Because the numbering runs continuously across a rack's panels, the app can work
+out where every socket lands. Use the rack's **🪄** button: it lists each
+unpatched socket with the panel and port derived from its label (`R3/025` → the
+rack's second panel, port 1), you check the list and apply. Anything it cannot
+place is listed with the reason.
+
+Nothing is written until you press apply, so if a rack's numbering ever works
+differently, you will see it in the list rather than discover it later.
+
+For the leftovers, click a panel port directly: choose the socket that lands on
+it from the list of unpatched ones, then record the switch and switch port its
+patch cord goes to. If the socket was never recorded on the floor page, you can
+create it here instead.
+
+> For this to work, each patch panel needs its correct **U position** and **port
+> count** — that is what the numbering is walked against.
 
 ### 4. Follow the path (asset page → Network Path)
 Shows the whole chain: socket → patch panel and port → rack → IDF/MDF → switch port

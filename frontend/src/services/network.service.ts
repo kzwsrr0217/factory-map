@@ -74,6 +74,30 @@ export interface WallPort {
   updated_at: string;
 }
 
+export interface PatchSuggestion {
+  wall_port_id: string;
+  label: string;
+  workarea_name: string | null;
+  patch_panel_id: string;
+  patch_panel_name: string;
+  patch_port: number;
+  /** Label of the socket already on that panel port, if any. */
+  conflict: string | null;
+}
+
+/** Why one socket could not be placed from its label. */
+export type PatchDerivationFailure =
+  | 'label-not-parseable'
+  | 'rack-name-mismatch'
+  | 'panel-missing-u-position'
+  | 'port-beyond-last-panel';
+
+export interface PatchSuggestionResult {
+  rack_name: string;
+  suggestions: PatchSuggestion[];
+  problems: Array<{ wall_port_id: string; label: string; reason: PatchDerivationFailure }>;
+}
+
 export const networkService = {
   // Rooms
   getRooms: async (params?: { building_id?: string; floor_id?: string; type?: string }): Promise<NetworkRoom[]> => {
@@ -170,6 +194,22 @@ export const networkService = {
   },
   updateWallPort: async (id: string, data: Partial<WallPort>): Promise<WallPort> => {
     const res = await api.patch(`/network/wall-ports/${id}`, data);
+    return res.data.data;
+  },
+  /**
+   * Works out from their labels where a rack's unpatched sockets belong. Labels
+   * are `R<rack>/<port>` numbered continuously across the rack's panels, so this
+   * is a derivation, not a guess — but it still writes nothing until
+   * applyWallPortPatchSuggestions is called with the accepted subset.
+   */
+  getPatchSuggestions: async (rackId: string): Promise<PatchSuggestionResult> => {
+    const res = await api.get('/network/wall-ports/patch-suggestions', { params: { rack_id: rackId } });
+    return res.data.data;
+  },
+  applyPatchSuggestions: async (
+    assignments: Array<{ wall_port_id: string; patch_panel_id: string; patch_port: number }>,
+  ): Promise<{ applied: string[]; rejected: Array<{ wall_port_id: string; reason: string }> }> => {
+    const res = await api.post('/network/wall-ports/apply-patch-suggestions', { assignments });
     return res.data.data;
   },
   deleteWallPort: async (id: string): Promise<void> => {

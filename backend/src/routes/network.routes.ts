@@ -311,6 +311,56 @@
  *       400:
  *         description: Bad range, or more than 512 sockets in one request
  *
+ * /network/wall-ports/patch-suggestions:
+ *   get:
+ *     tags: [Network]
+ *     summary: Work out from their labels where a rack's unpatched sockets belong
+ *     description: |
+ *       Socket labels are `R<rack>/<port>` with the numbers running continuously
+ *       across the rack's panels, so the label alone says which panel port a
+ *       socket lands on. Read-only: returns suggestions plus the reason for every
+ *       socket it could not place, and writes nothing until the caller posts the
+ *       accepted subset back to `/network/wall-ports/apply-patch-suggestions`.
+ *     parameters:
+ *       - in: query
+ *         name: rack_id
+ *         required: true
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         description: "{ rack_name, suggestions: [{ wall_port_id, label, patch_panel_id, patch_port, conflict }], problems: [{ label, reason }] }"
+ *       400:
+ *         description: rack_id missing
+ *
+ * /network/wall-ports/apply-patch-suggestions:
+ *   post:
+ *     tags: [Network]
+ *     summary: Apply accepted patch suggestions
+ *     description: |
+ *       Each assignment is re-checked against the port-collision guard rather
+ *       than trusted — the list may have been on screen while someone else
+ *       patched one of the same ports.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [assignments]
+ *             properties:
+ *               assignments:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *                   required: [wall_port_id, patch_panel_id, patch_port]
+ *                   properties:
+ *                     wall_port_id: { type: string }
+ *                     patch_panel_id: { type: string }
+ *                     patch_port: { type: integer }
+ *     responses:
+ *       200:
+ *         description: "{ applied: string[], rejected: [{ wall_port_id, reason }] }"
+ *
  * /network/wall-ports/{id}:
  *   get:
  *     tags: [Network]
@@ -357,7 +407,9 @@ import {
   listRooms, getRoom, createRoom, updateRoom, deleteRoom,
   listRacks, getRack, createRack, updateRack, deleteRack, replaceRack,
   listPatchPanels, getPatchPanel, createPatchPanel, updatePatchPanel, deletePatchPanel, replacePatchPanel,
-  listWallPorts, getWallPort, createWallPort, createWallPortRange, updateWallPort, deleteWallPort,
+  listWallPorts, getWallPort, createWallPort, createWallPortRange,
+  suggestWallPortPatches, applyWallPortPatchSuggestions,
+  updateWallPort, deleteWallPort,
 } from '../controllers/network.controller';
 import { validate, RoomCreateSchema, RoomUpdateSchema, RackCreateSchema, RackUpdateSchema } from '../utils/validate';
 import { requireOperator } from '../middleware/auth.middleware';
@@ -388,6 +440,9 @@ router.get('/wall-ports',         listWallPorts);
 // Before '/wall-ports/:id' would ever be consulted for a POST — kept adjacent to
 // the plain create so the pair is obvious.
 router.post('/wall-ports/range',  requireOperator, createWallPortRange);
+// Both before '/wall-ports/:id' so the literal paths win over the parameter.
+router.get('/wall-ports/patch-suggestions', suggestWallPortPatches);
+router.post('/wall-ports/apply-patch-suggestions', requireOperator, applyWallPortPatchSuggestions);
 router.get('/wall-ports/:id',     getWallPort);
 router.post('/wall-ports',        requireOperator, createWallPort);
 router.patch('/wall-ports/:id',   requireOperator, updateWallPort);

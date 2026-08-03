@@ -28,19 +28,30 @@ network sockets at all. That split is what decides the model.
 
 ## 2. Two design principles
 
-**The socket label is the identity.** Sockets are labelled `R1/001` — rack 1,
-port 001. The label is what is physically printed on the faceplate and on the
-patch panel, and it is what a technician reads out during a U1 call. It is
+**The socket label is the identity.** Sockets are labelled `R1/001`, `R3/125` —
+rack, then port. The label is what is physically printed on the faceplate and on
+the patch panel, and it is what a technician reads out during a U1 call. It is
 therefore the key, not a generated id, and not a map position.
 
-Because the label encodes the rack, **it already answers "where does this socket
-go" before any patching is recorded.** Two consequences worth exploiting:
+The port numbers run **continuously across a rack's panels**: with 24-port
+panels, `R3/001`–`R3/024` land on the rack's first panel, `R3/025`–`R3/048` on the
+second, and so on, in `u_position` order. So the label does not merely name the
+rack — it determines the exact panel port. Three consequences, all now built:
 
-- Sockets can be created in bulk from the label pattern (`R1/001`…`R1/048`) instead
+- Sockets are created in bulk from the label pattern (`R1/001`…`R1/048`) instead
   of typed one at a time, which is what makes "what sockets exist on this floor"
   cheap to fill in.
+- **Patching is derived, not looked up.** A rack's whole set of unpatched sockets
+  is placed onto its panel ports from the labels alone, and the operator confirms
+  a list instead of doing hundreds of lookups (`utils/wallPortLabel.ts`).
 - The label is checkable against reality: a socket labelled `R1/…` whose patch
   panel sits in rack R2 is a data-entry error, and a report can find it.
+
+The derivation is deliberately conservative. It refuses to order panels that lack
+a `u_position` rather than falling back to some arbitrary order, it never writes
+without the list being shown first, and it reports a named reason for every
+socket it could not place — so a wrong assumption about the numbering surfaces on
+the first rack instead of after three hundred sockets.
 
 **The map shows what people navigate by, not an inventory of wall fixtures.**
 Rooms, zones and devices go on the floor plan; sockets do not. A socket's exact
@@ -193,10 +204,17 @@ but has no socket recorded", and that is a report, not a UI rule.
 This is one visit, not two. Standing at the rack you can read which panel port a
 socket lands on and plug its patch cord, so both facts are recorded together:
 
-1. In *Network Infrastructure*, open the rack's patch panel.
-2. On a panel port, attach the existing socket (`R1/001`) — this sets
-   `patch_panel_id` + `patch_port`.
+1. In *Network Infrastructure*, use the rack's **🪄 patch-from-labels** action.
+   It places every unpatched socket labelled for that rack onto its panel port,
+   derived from the number; you check the list and apply. Sockets it cannot place
+   are listed with the reason.
+2. For anything left over, open the panel port and attach the socket by hand —
+   this sets `patch_panel_id` + `patch_port`.
 3. Record the switch and switch port the patch cord goes to.
+
+Step 1 assumes each panel's `port_count` and `u_position` are correct, since that
+is what the numbering is walked against. Getting a rack's panels right once is
+worth it: it turns the rest of that rack into one confirmation.
 
 For the mass fill after the switch replacement, **prefer not doing step 3 by
 hand.** The switch already knows: its MAC address table maps a port to the MAC of
@@ -242,20 +260,23 @@ thousands, and each one only where somebody would actually ask.
 7. ✅ **Sockets removed from the floor map**, along with the layer toggle, drag
    and popover. Connections whose far end is a socket are no longer drawn as lines
    either — without a maintained position they would point at (0,0).
+8. ✅ **Patching derived from labels** — `utils/wallPortLabel.ts` plus
+   `GET /network/wall-ports/patch-suggestions` and
+   `POST /network/wall-ports/apply-patch-suggestions`, surfaced as the rack's
+   patch-from-labels action. Read-only until confirmed; every assignment is
+   re-checked against the port-collision guard on apply, because the list may
+   have been on screen while someone else patched the same port.
 
 **Still to do:**
 
-8. **Reports** (extend `reconcile-report.ts`): unpatched sockets; wired devices
+9. **Reports** (extend `reconcile-report.ts`): unpatched sockets; wired devices
    with no socket; sockets whose label disagrees with their panel's rack.
-9. **Impact view for U2** — given a switch, list its sockets and the devices,
-   people and rooms behind them. This is what makes a maintenance window safe.
-10. **MAC-address joiner** for the Phase C mass fill, with the same dry-run
-    discipline as the survey importer: ambiguous MACs skipped, not guessed.
-
-**Open question:** does the port number map deterministically onto a panel and its
-port — e.g. `R1/001`–`R1/024` = the rack's first 24-port panel, ports 1–24? If so,
-Phase C step 2 can be pre-filled from the label and only needs confirming. If
-panels are not numbered contiguously, it stays manual as it is now.
+10. **Impact view for U2** — given a switch, list its sockets and the devices,
+    people and rooms behind them. This is what makes a maintenance window safe.
+11. **MAC-address joiner** for the Phase C switch side, with the same dry-run
+    discipline as the survey importer: ambiguous MACs skipped, not guessed. The
+    label derivation covers the panel side; the switch side still needs the
+    switches' own MAC address tables.
 
 ---
 

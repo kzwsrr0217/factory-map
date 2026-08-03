@@ -23,8 +23,9 @@ import { WallPort } from '../entities/WallPort.entity';
 import { WorkArea } from '../entities/WorkArea.entity';
 import { Floor } from '../entities/Floor.entity';
 import { Asset } from '../entities/Asset.entity';
-import { In } from 'typeorm';
+import { In, IsNull } from 'typeorm';
 import { chunkForEntity, findByIn } from '../utils/mssqlBatch';
+import { derivePatchForLabel, DerivationFailure, PanelLike } from '../utils/wallPortLabel';
 
 const roomRepo  = () => AppDataSource.getRepository(NetworkRoom);
 const rackRepo  = () => AppDataSource.getRepository(NetworkRack);
@@ -503,6 +504,140 @@ export const createWallPortRange = async (req: Request, res: Response, next: Nex
         skipped: labels.filter((l) => taken.has(l.trim().toLowerCase())),
       },
     });
+  } catch (e) { next(e); }
+};
+
+interface PatchSuggestion {
+  wall_port_id: string;
+  label: string;
+  workarea_name: string | null;
+  patch_panel_id: string;
+  patch_panel_name: string;
+  patch_port: number;
+  /** Set when the derived port is already claimed by a different socket. */
+  conflict: string | null;
+}
+
+interface PatchSuggestionProblem {
+  wall_port_id: string;
+  label: string;
+  reason: DerivationFailure;
+}
+
+/**
+ * Works out, from their labels alone, where a rack's unpatched sockets belong.
+ *
+ * Sockets are labelled `R<rack>/<port>` with the numbers running continuously
+ * across the rack's panels, so the label already says which panel port a socket
+ * lands on — see utils/wallPortLabel.ts. This turns the patching step from
+ * hundreds of lookups into a list to confirm.
+ *
+ * Read-only on purpose: it returns suggestions and the reason for every socket
+ * it could not place, and writes nothing until the caller posts back the subset
+ * it accepts (applyWallPortPatchSuggestions). A wrong assumption about the
+ * numbering therefore shows up on the first rack, not after 300 sockets.
+ */
+export const suggestWallPortPatches = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { rack_id } = req.query as { rack_id?: string };
+    if (!rack_id) { res.status(400).json({ success: false, error: 'rack_id is required' }); return; }
+
+    const rack = await rackRepo().findOne({ where: { id: rack_id }, relations: ['patch_panels', 'room'] });
+    if (!rack) { notFound(res); return; }
+
+    const panels: PanelLike[] = (rack.patch_panels ?? []).map((p) => ({
+      id: p.id, name: p.name, u_position: p.u_position, port_count: p.port_count,
+    }));
+
+    // Sockets on the same building's floors that aren't wired to a panel yet.
+    // Scoped to the building because socket labels are unique per building, not
+    // globally — another building's R1 is a different rack.
+    const floorRepo = AppDataSource.getRepository(Floor);
+    const buildingFloors = await floorRepo.find({ where: { building_id: rack.room.building_id } });
+    const floorIds = buildingFloors.map((f) => f.id);
+    const candidates = floorIds.length === 0
+      ? []
+      : await wpRepo().find({ where: { floor_id: In(floorIds), patch_panel_id: IsNull() } });
+    await withWorkAreas(candidates);
+
+    // Panel ports already taken, so a suggestion can flag rather than collide.
+    const takenByPanelPort = new Map<string, string>();
+    if (panels.length > 0) {
+      const existing = await wpRepo().find({ where: { patch_panel_id: In(panels.map((p) => p.id)) } });
+      for (const port of existing) {
+        if (port.patch_panel_id && port.patch_port != null) {
+          takenByPanelPort.set(`${port.patch_panel_id}|${port.patch_port}`, port.label);
+        }
+      }
+    }
+
+    const suggestions: PatchSuggestion[] = [];
+    const problems: PatchSuggestionProblem[] = [];
+    for (const port of candidates) {
+      const { target, failure } = derivePatchForLabel(port.label, rack.name, panels);
+      if (!target) {
+        // A label naming a different rack isn't a problem with this rack — it
+        // simply belongs to another one, so it's left out entirely.
+        if (failure && failure !== 'rack-name-mismatch') {
+          problems.push({ wall_port_id: port.id, label: port.label, reason: failure });
+        }
+        continue;
+      }
+      suggestions.push({
+        wall_port_id: port.id,
+        label: port.label,
+        workarea_name: port.workarea?.name ?? null,
+        patch_panel_id: target.panel.id,
+        patch_panel_name: target.panel.name,
+        patch_port: target.patch_port,
+        conflict: takenByPanelPort.get(`${target.panel.id}|${target.patch_port}`) ?? null,
+      });
+    }
+
+    suggestions.sort((a, b) => a.label.localeCompare(b.label));
+    res.json({ success: true, data: { rack_name: rack.name, suggestions, problems } });
+  } catch (e) { next(e); }
+};
+
+/**
+ * Applies the suggestions the caller accepted. Each is re-checked against the
+ * collision guard rather than trusted, because the list may have been on screen
+ * while someone else patched one of the same ports.
+ */
+export const applyWallPortPatchSuggestions = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { assignments } = req.body as {
+      assignments?: Array<{ wall_port_id: string; patch_panel_id: string; patch_port: number }>;
+    };
+    if (!Array.isArray(assignments) || assignments.length === 0) {
+      res.status(400).json({ success: false, error: 'assignments is required and must not be empty' });
+      return;
+    }
+    if (assignments.length > MAX_BULK_WALL_PORTS) {
+      res.status(400).json({ success: false, error: `At most ${MAX_BULK_WALL_PORTS} assignments per request` });
+      return;
+    }
+
+    const applied: string[] = [];
+    const rejected: Array<{ wall_port_id: string; reason: string }> = [];
+
+    for (const a of assignments) {
+      const port = await wpRepo().findOneBy({ id: a.wall_port_id });
+      if (!port) { rejected.push({ wall_port_id: a.wall_port_id, reason: 'Wall port no longer exists' }); continue; }
+      if (port.patch_panel_id) {
+        rejected.push({ wall_port_id: a.wall_port_id, reason: `${port.label} is already patched` });
+        continue;
+      }
+      const collision = await findWallPortCollision(a.patch_panel_id, a.patch_port, port.switch_asset_id, port.switch_port, port.id);
+      if (collision) { rejected.push({ wall_port_id: a.wall_port_id, reason: `${port.label}: ${collision}` }); continue; }
+
+      port.patch_panel_id = a.patch_panel_id;
+      port.patch_port = a.patch_port;
+      await wpRepo().save(port);
+      applied.push(port.label);
+    }
+
+    res.json({ success: true, data: { applied, rejected } });
   } catch (e) { next(e); }
 };
 
