@@ -2,13 +2,22 @@
  * asset-connections.test.ts — Integration tests for asset connection management.
  *
  * Covers:
- *   - POST   /api/assets/:id/connections                   — add connection
- *   - PATCH  /api/assets/:id/connections/:connectedAssetId — update description/label
- *   - DELETE /api/assets/:id/connections/:connectedAssetId — remove connection
+ *   - POST   /api/assets/:id/connections               — add connection
+ *   - PATCH  /api/assets/:id/connections/:connectionId — update description/label
+ *   - DELETE /api/assets/:id/connections/:connectionId — remove connection
+ *
+ * Note the URL takes the **connection row's own id**, not the connected asset's.
+ * A pair of assets can have several distinct connections between them (two
+ * physical cables, say), so (asset_id, connected_asset_id) stopped being a unique
+ * identifier — see AssetConnection.entity.ts. These tests originally passed the
+ * connected asset's id, which worked only while the pair was unique.
  *
  * Edge cases:
- *   - Duplicate connection returns 400
- *   - Remove also clears reverse direction
+ *   - Duplicate connection of the same type returns 400
+ *   - Two connections of DIFFERENT types between the same pair coexist, and
+ *     removing one leaves the other — the case the pair-as-identity model
+ *     could not express at all
+ *   - Remove also clears the reverse direction
  *   - 404 when the source asset doesn't exist
  *   - 404 when trying to update/remove a non-existent connection
  */
@@ -32,6 +41,16 @@ async function createAsset(name: string): Promise<string> {
   const id = res.body.data._id ?? res.body.data.id;
   createdAssetIds.push(id);
   return id;
+}
+
+/**
+ * The connection row's id, read off the response of the call that created it.
+ * The API is keyed on this, not on the connected asset.
+ */
+function connectionIdTo(addResponseBody: any, connectedAssetId: string): string { // eslint-disable-line @typescript-eslint/no-explicit-any
+  const conn = addResponseBody.data.connections.find((c: any) => c.connected_asset_id === connectedAssetId); // eslint-disable-line @typescript-eslint/no-explicit-any
+  if (!conn) throw new Error(`No connection to ${connectedAssetId} in the response`);
+  return conn.id;
 }
 
 beforeAll(async () => {
@@ -117,22 +136,24 @@ describe('POST /api/assets/:id/connections', () => {
 
 // ── Update connection ─────────────────────────────────────────────────────────
 
-describe('PATCH /api/assets/:id/connections/:connectedAssetId', () => {
+describe('PATCH /api/assets/:id/connections/:connectionId', () => {
   let srcId: string;
   let dstId: string;
+  let connId: string;
 
   beforeAll(async () => {
     srcId = await createAsset('Update Conn Src');
     dstId = await createAsset('Update Conn Dst');
-    await request(app)
+    const add = await request(app)
       .post(`/api/assets/${srcId}/connections`)
       .set('Authorization', `Bearer ${adminToken}`)
       .send({ connected_asset_id: dstId, connection_type: 'serial', description: 'Original desc' });
+    connId = connectionIdTo(add.body, dstId);
   });
 
   it('updates the description and label', async () => {
     const res = await request(app)
-      .patch(`/api/assets/${srcId}/connections/${dstId}`)
+      .patch(`/api/assets/${srcId}/connections/${connId}`)
       .set('Authorization', `Bearer ${adminToken}`)
       .send({ description: 'Updated desc', label: 'COM-1' });
 
@@ -144,7 +165,7 @@ describe('PATCH /api/assets/:id/connections/:connectedAssetId', () => {
 
   it('updates the connection_type', async () => {
     const res = await request(app)
-      .patch(`/api/assets/${srcId}/connections/${dstId}`)
+      .patch(`/api/assets/${srcId}/connections/${connId}`)
       .set('Authorization', `Bearer ${adminToken}`)
       .send({ connection_type: 'usb' });
 
@@ -164,18 +185,18 @@ describe('PATCH /api/assets/:id/connections/:connectedAssetId', () => {
 
 // ── Remove connection ─────────────────────────────────────────────────────────
 
-describe('DELETE /api/assets/:id/connections/:connectedAssetId', () => {
+describe('DELETE /api/assets/:id/connections/:connectionId', () => {
   it('removes the connection', async () => {
     const srcId = await createAsset('Delete Conn Src');
     const dstId = await createAsset('Delete Conn Dst');
 
-    await request(app)
+    const add = await request(app)
       .post(`/api/assets/${srcId}/connections`)
       .set('Authorization', `Bearer ${adminToken}`)
       .send({ connected_asset_id: dstId, connection_type: 'fiber' });
 
     const res = await request(app)
-      .delete(`/api/assets/${srcId}/connections/${dstId}`)
+      .delete(`/api/assets/${srcId}/connections/${connectionIdTo(add.body, dstId)}`)
       .set('Authorization', `Bearer ${adminToken}`);
 
     expect(res.status).toBe(200);
@@ -184,25 +205,46 @@ describe('DELETE /api/assets/:id/connections/:connectedAssetId', () => {
     expect(conn).toBeUndefined();
   });
 
+  it('removes only the targeted cable when a pair has several', async () => {
+    // The reason the URL is keyed on the row id: two cables between the same
+    // two devices are a real thing, and deleting one must not take the other.
+    const srcId = await createAsset('Two Cables Src');
+    const dstId = await createAsset('Two Cables Dst');
+
+    const first = await request(app)
+      .post(`/api/assets/${srcId}/connections`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ connected_asset_id: dstId, connection_type: 'ethernet', label: 'cable-1' });
+    const second = await request(app)
+      .post(`/api/assets/${srcId}/connections`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ connected_asset_id: dstId, connection_type: 'power', label: 'cable-2' });
+    expect(second.status).toBe(201);
+
+    const firstId = connectionIdTo(first.body, dstId);
+    const res = await request(app)
+      .delete(`/api/assets/${srcId}/connections/${firstId}`)
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(res.status).toBe(200);
+    const remaining = res.body.data.connections.filter((c: any) => c.connected_asset_id === dstId);
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0].label).toBe('cable-2');
+  });
+
   it('also removes the reverse direction connection', async () => {
     const srcId = await createAsset('Reverse Conn Src');
     const dstId = await createAsset('Reverse Conn Dst');
 
-    // Add forward connection
-    await request(app)
+    // A bidirectional add already writes both rows, sharing a pair_id.
+    const add = await request(app)
       .post(`/api/assets/${srcId}/connections`)
       .set('Authorization', `Bearer ${adminToken}`)
       .send({ connected_asset_id: dstId, connection_type: 'ethernet', bidirectional: true });
 
-    // Also add reverse connection
+    // Remove the forward row — the pair_id should take the reverse with it.
     await request(app)
-      .post(`/api/assets/${dstId}/connections`)
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({ connected_asset_id: srcId, connection_type: 'ethernet', bidirectional: true });
-
-    // Remove forward — should also clear reverse
-    await request(app)
-      .delete(`/api/assets/${srcId}/connections/${dstId}`)
+      .delete(`/api/assets/${srcId}/connections/${connectionIdTo(add.body, dstId)}`)
       .set('Authorization', `Bearer ${adminToken}`);
 
     // Check that dst no longer has src as a connection

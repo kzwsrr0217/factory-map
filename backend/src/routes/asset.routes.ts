@@ -20,8 +20,11 @@
  *   DELETE /:id                           — delete asset.
  *   POST   /:id/sync                      — pull latest data from ITSM.
  *   POST   /:id/connections               — add a connection to another asset.
- *   PATCH  /:id/connections/:connected    — update a connection.
- *   DELETE /:id/connections/:connected    — remove a connection.
+ *   PATCH  /:id/connections/:connectionId — update a connection.
+ *   DELETE /:id/connections/:connectionId — remove a connection.
+ *                                           Keyed on the connection row's own
+ *                                           id, not the connected asset's: a
+ *                                           pair can have several cables.
  *
  * @openapi
  * tags:
