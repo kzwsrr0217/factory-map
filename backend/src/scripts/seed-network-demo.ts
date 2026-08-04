@@ -15,7 +15,8 @@
  *   48 sockets labelled DEMO-R1/001..048, half of them patched, some of those live
  *   one rack-mounted switch the live sockets point at
  *   one workstation plugged into a live socket, so the finished state of the chain
- *     (placed -> socket -> panel -> switch port) is visible without recording anything
+ *     (placed -> socket -> panel -> switch port) is visible without recording anything,
+ *     with a maintenance date a fortnight out so the calendar has something to draw
  *
  * Every row it creates is named with the DEMO_PREFIX, and `--remove` deletes exactly
  * those and nothing else — it never matches on anything a person might have typed.
@@ -74,11 +75,18 @@ async function remove(): Promise<void> {
   const sockets = await AppDataSource.getRepository(WallPort)
     .createQueryBuilder('w').where('w.label LIKE :p', { p: `${DEMO_PREFIX}-%` }).getMany();
 
-  // A socket someone has plugged a real device into is left alone, with its patching
-  // intact: deleting it would silently change that device's recorded network path.
+  /**
+   * A socket someone has plugged a REAL device into is left alone, with its patching
+   * intact: deleting it would silently change that device's recorded network path.
+   *
+   * The script's own workstation is exempt — it is plugged into a demo socket by
+   * design, and without this exemption the guard fired on it and `--remove` could not
+   * clean up its own creation.
+   */
   const occupied = sockets.length
-    ? await AppDataSource.getRepository(Asset)
-        .createQueryBuilder('a').where('a.wall_port_id IN (:...ids)', { ids: sockets.map((s) => s.id) }).getMany()
+    ? (await AppDataSource.getRepository(Asset)
+        .createQueryBuilder('a').where('a.wall_port_id IN (:...ids)', { ids: sockets.map((s) => s.id) }).getMany())
+        .filter((a) => !a.display_name?.startsWith(`${DEMO_PREFIX}-`))
     : [];
   const occupiedPortIds = new Set(occupied.map((a) => a.wall_port_id));
   const removableSockets = sockets.filter((s) => !occupiedPortIds.has(s.id));
@@ -231,6 +239,10 @@ async function seed(): Promise<void> {
     pos_y: 200,
     is_placed: true,
     wall_port_id: liveSocket?.id ?? null,
+    // A date a fortnight out, so the maintenance calendar has something to draw. No
+    // real asset carries one yet, which left that page impossible to look at.
+    maint_next_date: new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10),
+    maint_interval_days: 180,
     source_of_truth: 'local',
   } as unknown as Asset);
 

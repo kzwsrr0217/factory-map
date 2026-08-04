@@ -15,7 +15,7 @@ import Button from '../components/common/Button';
 import Badge from '../components/common/Badge';
 import AssetDetailsModal from '../components/asset/AssetDetailsModal';
 import { Asset, assetService } from '../services/asset.service';
-import { useAssets, assetKeys } from '../hooks/queries/useAssets';
+import { useAssetsWithMaintenance, assetKeys } from '../hooks/queries/useAssets';
 import { useFloors } from '../hooks/queries/useFloors';
 import { useToast } from '../contexts/ToastContext';
 import styles from '../styles/pages/Maintenance.module.css';
@@ -23,7 +23,9 @@ import styles from '../styles/pages/Maintenance.module.css';
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 const Maintenance: React.FC = () => {
-  const { data: allAssets = [], isLoading: loading } = useAssets();
+  // Server-filtered to the assets that have a maintenance date; this page used to
+  // fetch the whole estate to find them.
+  const { data: allAssets = [], isLoading: loading } = useAssetsWithMaintenance();
   const { data: floors = [] } = useFloors();
   // Exclude replaced assets (successor_id set) — once an asset has been
   // swapped for a replacement (see replaceAsset), its own maint_next_date is

@@ -647,7 +647,12 @@ export const getAllAssets = async (req: Request, res: Response, next: NextFuncti
 
     // GETDATE() rather than a JS timestamp, so the comparison happens in the clock the
     // dates were stored with — same reasoning as getAssetStats.
-    if (maintenance === 'overdue') {
+    // 'any' is what the maintenance calendar needs: every asset with a date, across
+    // whatever month is on screen. It used to fetch the estate and keep the few rows
+    // that had one.
+    if (maintenance === 'any') {
+      qb.andWhere('a.maint_next_date IS NOT NULL');
+    } else if (maintenance === 'overdue') {
       qb.andWhere('a.maint_next_date IS NOT NULL').andWhere('a.maint_next_date < GETDATE()');
     } else if (maintenance === 'upcoming') {
       qb.andWhere('a.maint_next_date IS NOT NULL')

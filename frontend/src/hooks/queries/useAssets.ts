@@ -45,6 +45,17 @@ export function useUnplacedAssets() {
   });
 }
 
+/**
+ * Assets carrying a next-maintenance date. The calendar page used to fetch every asset
+ * and keep the handful with one.
+ */
+export function useAssetsWithMaintenance() {
+  return useQuery({
+    queryKey: ['assets', 'maintenance'] as const,
+    queryFn: () => assetService.getAssetsWithMaintenance(),
+  });
+}
+
 /** One building's devices, filtered by the server rather than in the browser. */
 export function useAssetsByBuilding(buildingId: string | undefined) {
   return useQuery({

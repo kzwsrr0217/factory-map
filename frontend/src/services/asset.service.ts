@@ -22,6 +22,7 @@
  *  - `syncAsset(id)`: trigger ITSM sync for one asset
  *  - `addConnection / updateConnection / removeConnection`: manage asset links
  *  - `getAssetsWithConnections()`: all assets with connections joined (network graph/topology)
+ *  - `getAssetsWithMaintenance()`: assets that have a next-maintenance date
  *  - `getAssetsByBuilding(buildingId)`: assets in one building
  *  - `getUnplacedAssets()`: everything not placed on a floor plan yet
  *  - `getAssetsByRack(rackId)`: devices mounted in one rack
@@ -351,7 +352,8 @@ export interface AssetQuery {
   workarea_id?: string;
   /** 'itsm' → managed, 'manual' → not; undefined → both. */
   itsm_managed?: 'itsm' | 'manual';
-  maintenance?: 'overdue' | 'upcoming';
+  /** 'any' = has a next date at all, which is what the maintenance calendar needs. */
+  maintenance?: 'overdue' | 'upcoming' | 'any';
   conflicts?: boolean;
 }
 
@@ -471,6 +473,13 @@ export const assetService = {
    */
   getAssetsWithConnections: async (): Promise<Asset[]> =>
     sweepAllPages({ include_connections: 'true' }, true),
+
+  /**
+   * Assets with a maintenance date, whatever it is. The calendar needs all of them
+   * (it pages through months), and there are far fewer of these than of everything.
+   */
+  getAssetsWithMaintenance: async (): Promise<Asset[]> =>
+    sweepAllPages({ maintenance: 'any' }),
 
   /** Assets in one building. Server-filtered, for the pickers that only need one. */
   getAssetsByBuilding: async (buildingId: string): Promise<Asset[]> =>

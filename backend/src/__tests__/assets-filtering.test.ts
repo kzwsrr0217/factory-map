@@ -387,6 +387,29 @@ describe('GET /api/assets — dashboard filters', () => {
     expect(missing.body.data).toEqual([]);
   });
 
+  it('maintenance=any means "has a date at all", for the calendar', async () => {
+    // The calendar pages through months, so it needs every asset carrying a date -
+    // not just the overdue or the next 30 days. It used to fetch the whole estate.
+    const [, second] = cleanupIds;
+    await request(app).patch(`/api/assets/${second}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ basic_info: { display_name: '__filter_active_2__' }, maintenance: { next_date: '2027-06-01' } })
+      .expect(200);
+
+    const withDate = await request(app)
+      .get('/api/assets?maintenance=any&q=__filter_&page=1&limit=200')
+      .set('Authorization', `Bearer ${token}`);
+    expect(withDate.body.data.map((a: any) => a._id)).toContain(second);
+    // A date in 2027 is neither overdue nor within 30 days, so those two windows
+    // must not claim it.
+    for (const window of ['overdue', 'upcoming']) {
+      const res = await request(app)
+        .get(`/api/assets?maintenance=${window}&q=__filter_&page=1&limit=200`)
+        .set('Authorization', `Bearer ${token}`);
+      expect(res.body.data.map((a: any) => a._id)).not.toContain(second);
+    }
+  });
+
   it('splits maintenance into overdue and upcoming', async () => {
     const [, second] = cleanupIds;
     const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);

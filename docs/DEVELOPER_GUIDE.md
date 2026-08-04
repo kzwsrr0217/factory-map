@@ -410,7 +410,7 @@ Similar CRUD, filtered by `section_id`.
 
 **`ids_only=true`** returns `data: string[]` — the ids matching the filter, uncapped, without the rows. This is what the dashboard's "select all N matching" uses: the bulk edit takes ids, so the selection stays on the audited per-asset path without shipping a thousand rows to build it.
 
-**Dashboard filters** (`manufacturer`, `model`, `serial_number`, `asset_tag`, `person`) are partial matches; `itsm_managed=true|false`, `maintenance=overdue|upcoming` (non-overlapping windows, compared with `GETDATE()`), `conflicts=true` (local source of truth plus a pending ITSM snapshot — the same definition as the stats tile).
+**Dashboard filters** (`manufacturer`, `model`, `serial_number`, `asset_tag`, `person`) are partial matches; `itsm_managed=true|false`, `maintenance=any|overdue|upcoming` (`any` = carries a date at all, which is what the calendar needs; the two windows are non-overlapping and compared with `GETDATE()`), `conflicts=true` (local source of truth plus a pending ITSM snapshot — the same definition as the stats tile).
 
 **Id lookup**: `ids=a,b,c` returns just those assets — for naming the far end of a connection without fetching the list. Max 500 per request (400 above that, deliberately not a short answer); an empty value returns nothing, not everything. `connected_to=<id>` returns assets whose connections point at that asset; only one-way links appear, since bidirectional ones are mirrored onto both assets.
 
