@@ -40,6 +40,12 @@ interface UnplacedTrayProps {
   initialSearch?: string;
   /** Must not trigger a re-render in the parent; see the file header. */
   onSearchChange?: (query: string) => void;
+  /**
+   * Called the first time someone searches, so the page can load the floor-less
+   * pool then rather than on every visit to a floor. That pool is the whole
+   * unplaced estate and is never listed — only searched.
+   */
+  onSearch?: () => void;
 }
 
 /** Fields a tray search looks at, cheapest/most likely first. */
@@ -88,6 +94,7 @@ const UnplacedTray: React.FC<UnplacedTrayProps> = ({
   onClose,
   initialSearch = '',
   onSearchChange,
+  onSearch,
 }) => {
   const [search, setSearch] = useState(initialSearch);
   const query = search.trim().toLowerCase();
@@ -96,6 +103,7 @@ const UnplacedTray: React.FC<UnplacedTrayProps> = ({
   const handleSearchChange = (value: string) => {
     setSearch(value);
     onSearchChange?.(value);
+    if (value.trim() !== '') onSearch?.();
   };
 
   const floorMatches = useMemo(
@@ -138,14 +146,18 @@ const UnplacedTray: React.FC<UnplacedTrayProps> = ({
         📦 Unplaced ({query ? `${floorMatches.length}/${unplacedAssets.length}` : unplacedAssets.length})
         <button className={styles.popoverClose} onClick={onClose}>✕</button>
       </div>
-      {searchableUnplacedAssets.length > 0 && (
-        <input
-          className={styles.unplacedTraySearch}
-          value={search}
-          onChange={(e) => handleSearchChange(e.target.value)}
-          placeholder={`Search ${searchableUnplacedAssets.length} unassigned assets…`}
-        />
-      )}
+      {/* Always rendered. It used to appear only when the searchable pool was
+          non-empty, which deadlocked once that pool became lazy: the pool loads on
+          first search, and the box you search in only existed if the pool was
+          already loaded. */}
+      <input
+        className={styles.unplacedTraySearch}
+        value={search}
+        onChange={(e) => handleSearchChange(e.target.value)}
+        placeholder={searchableUnplacedAssets.length > 0
+          ? `Search ${searchableUnplacedAssets.length} unassigned assets…`
+          : 'Search assets with no floor yet…'}
+      />
       <div className={styles.unplacedTrayList}>
         {floorMatches.map(renderItem)}
         {globalMatches.length > 0 && (

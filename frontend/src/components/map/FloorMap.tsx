@@ -388,6 +388,8 @@ interface FloorMapProps {
   searchableUnplacedAssets?: Asset[];
   allAssets?: Asset[];
   onNavigateToAsset?: (assetId: string, floorId: string) => void;
+  /** Fired the first time the unplaced tray is searched — see UnplacedTray. */
+  onUnplacedSearch?: () => void;
   /**
    * Sockets on this floor. Not drawn — sockets live in the floor page's list, not
    * on the plan (see docs/CONNECTIONS_WORKFLOW.md). Still needed here because a
@@ -447,6 +449,7 @@ const FloorMap: React.FC<FloorMapProps> = ({
   searchableUnplacedAssets = [],
   allAssets = [],
   onNavigateToAsset,
+  onUnplacedSearch,
   wallPorts = [],
   workstations = [],
   onWorkstationMove,
@@ -553,7 +556,12 @@ const FloorMap: React.FC<FloorMapProps> = ({
     });
   }, [workareas, zoneColors]);
 
-  const hasTrayContent = unplacedAssets.length > 0 || searchableUnplacedAssets.length > 0;
+  // `onUnplacedSearch` means the parent can fetch a cross-floor pool on demand, so
+  // the tray is worth opening even on a floor where everything is already placed —
+  // that is how you bring an asset in from nowhere. Gating on the pool's size alone
+  // hid the tray exactly when the pool was still unloaded.
+  const hasTrayContent =
+    unplacedAssets.length > 0 || searchableUnplacedAssets.length > 0 || !!onUnplacedSearch;
 
   // Same reasoning as workareasByPaintOrder above, for assets — the `assets`
   // prop is fetched display_name-ASC (see asset.controller.ts getAllAssets),
@@ -2437,6 +2445,7 @@ const FloorMap: React.FC<FloorMapProps> = ({
           onClose={() => setUnplacedTrayOpen(false)}
           initialSearch={unplacedSearchRef.current}
           onSearchChange={(q) => { unplacedSearchRef.current = q; }}
+          onSearch={onUnplacedSearch}
         />
       )}
 

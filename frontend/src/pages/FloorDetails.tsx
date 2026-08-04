@@ -16,7 +16,7 @@
  * Connection wiring mode is toggled from the toolbar and uses
  * FloorMap's `connectionMode` + `selectedAssetsForConnection` props.
  */
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { LayoutGrid, Monitor, Factory, Upload, Pencil, Check, AlertTriangle, FileSpreadsheet, Cable, X, Undo2, Redo2 } from 'lucide-react';
 import CsvImportModal from '../components/asset/CsvImportModal';
@@ -68,6 +68,8 @@ const FloorDetails: React.FC = () => {
   // snapshot — ITSM has no geometry, so they arrive hierarchy-less). Offered
   // through the map tray's search box; placing one assigns it to this floor.
   const [floorlessAssets, setFloorlessAssets] = useState<Asset[]>([]);
+  /** Guards against re-fetching the pool on every keystroke in the tray search. */
+  const floorlessRequested = useRef(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editMode, setEditMode] = useState(false);
@@ -117,15 +119,41 @@ const FloorDetails: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
+  /**
+   * Assets belonging to no floor at all — the pool the map tray can search so an
+   * asset with no location yet can be placed here.
+   *
+   * Loaded on demand rather than with the page: it is the whole unplaced estate
+   * (currently over a thousand rows), it is never *listed*, only searched, and most
+   * visits to a floor never touch the tray's search box at all.
+   */
+  const loadFloorlessAssets = useCallback(async () => {
+    if (floorlessRequested.current) return;
+    floorlessRequested.current = true;
+    try {
+      const all = await assetService.getAssets();
+      setFloorlessAssets(all.filter(isAwaitingFloorAssignment));
+    } catch {
+      // The tray still works for this floor's own unplaced assets; only the
+      // cross-floor search comes up empty.
+      floorlessRequested.current = false;
+    }
+  }, []);
+
   const loadFloorDetails = async (floorId: string) => {
     try {
       setLoading(true);
-      const [floorData, workareasData, sectionsData, workstationsData, allAssets, wallPortsData] = await Promise.all([
+      // Only this floor's assets, filtered server-side. This used to fetch the
+      // entire estate and filter in the browser, which became three paged requests
+      // and ~1.7 MB once the list stopped being capped at 1000 rows — all to render
+      // one floor. The floor-less pool the map tray searches is loaded separately
+      // and only when someone actually searches; see loadFloorlessAssets.
+      const [floorData, workareasData, sectionsData, workstationsData, floorAssets, wallPortsData] = await Promise.all([
         floorService.getFloor(floorId),
         workareaService.getWorkAreas(floorId),
         sectionService.getSections(),
         workstationService.getWorkstations(),
-        assetService.getAssets({ include_master: true }),
+        assetService.getAssetsByFloor(floorId, { include_master: true }),
         networkService.getWallPorts({ floor_id: floorId }),
       ]);
 
@@ -143,12 +171,7 @@ const FloorDetails: React.FC = () => {
       const floorWorkstations = workstationsData.filter(ws => sectionIds.includes(ws.section_id));
       setWorkstations(floorWorkstations);
 
-      // Filter assets for this floor
-      const floorAssets = allAssets.filter(
-        (asset) => asset.hierarchy.floor_id === floorId
-      );
       setAssets(floorAssets);
-      setFloorlessAssets(allAssets.filter(isAwaitingFloorAssignment));
     } catch (err) {
       console.error('Error loading floor details:', err);
       setError('Failed to load floor details. Please try again.');
@@ -287,6 +310,11 @@ const FloorDetails: React.FC = () => {
     } catch (error) {
       console.error('Error placing asset:', error);
       toast.error('Failed to place asset.');
+      // Put it back where it came from. The reload below restores this floor's own
+      // assets from the server, but not the floor-less pool — that is loaded once,
+      // on demand — so an asset dropped from it here would vanish from the tray
+      // until the page was reloaded.
+      if (fromFloorless) setFloorlessAssets(prev => [...prev, asset]);
       if (id) loadFloorDetails(id);
     }
   }, [assets, floorlessAssets, floor, workareas, id, toast]);
@@ -684,6 +712,7 @@ const FloorDetails: React.FC = () => {
           onWorkstationMove={editMode ? handleWorkstationMove : undefined}
           unplacedAssets={unplacedAssets}
           searchableUnplacedAssets={floorlessAssets}
+          onUnplacedSearch={loadFloorlessAssets}
           onPlaceUnplaced={handlePlaceUnplacedAsset}
           connectionMode={wireMode}
           selectedAssetsForConnection={selectedForConnection}
