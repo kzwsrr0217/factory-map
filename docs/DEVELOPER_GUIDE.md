@@ -1027,13 +1027,13 @@ Superseded rows (`successor_id` set) are skipped throughout: their duplicate ser
 *is* the point of a replacement. Monitors, phones and cameras are excluded from the
 missing-serial section — they routinely arrive without one recorded.
 
-On the current ITSM-sourced data: 6 duplicate serials (3 redeployments, 2 history,
-1 pair of real docks), 3 duplicate asset tags, 11 duplicate MACs — including
-dock/laptop pairs, where the laptop's network comes through the dock so ITSM
-recorded the dock's MAC on both — 85 devices missing a serial, 3 malformed MACs and
-133 MACs stored with a separator other than a colon. That last one is a prerequisite
-for the planned switch-port join, not a cosmetic complaint: see
-docs/CONNECTIONS_WORKFLOW.md.
+On the current ITSM-sourced data (measured after the redeployment links were
+applied, which is why some counts are lower than they were): 3 duplicate serials,
+3 duplicate asset tags, 8 duplicate MACs — including dock/laptop pairs, where the
+laptop's network comes through the dock so ITSM recorded the dock's MAC on both —
+85 devices missing a serial, 3 malformed MACs and 132 MACs stored with a separator
+other than a colon. That last one is a prerequisite for the planned switch-port
+join, not a cosmetic complaint: see docs/CONNECTIONS_WORKFLOW.md.
 
 **Acting on the redeployments** the quality report finds: `link-redeployments.ts`
 (`npm run link:redeployments [-- --apply]`) sets `successor_id` on the retired half
@@ -1052,6 +1052,20 @@ suggest, so the run flags any pair whose HWA order looks odd.
 Effect on the current data: 1057 assets became 1054, decommissioned 64 → 61, and
 the duplicate-serial section went from 6 groups to 3 — the redeployment category
 emptied out, leaving the two retired-only pairs and the one pair of real docks.
+
+**Normalising the MAC addresses** the report flags: `normalise-macs.ts`
+(`npm run normalise:macs [-- --apply] [-- --csv]`) rewrites them to
+`AA:BB:CC:DD:EE:FF`. Dry run by default. On the real data that is 132 rewrites and
+3 refusals: an address that isn't twelve hex digits is reported and left alone,
+because "probably an O for a zero" is not enough to rewrite a hardware address by —
+a wrong MAC is worse than an obviously broken one, since it will eventually match
+something.
+
+It also lists addresses held by more than one asset (8 today) with the two possible
+causes, only one of which is a defect: the same machine recorded twice, or a
+docking station and the laptop docked in it. The consequence for the planned
+switch-port join is that a MAC does **not** identify one asset — the join has to
+cope with two hits rather than assume uniqueness.
 
 **For the cabling survey**, `network-gaps-report.ts`
 (`npm run report:network -- [--csv=<path>]`) is the equivalent view — kept as its

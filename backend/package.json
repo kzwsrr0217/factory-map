@@ -20,6 +20,7 @@
     "report:network": "ts-node src/scripts/network-gaps-report.ts",
     "report:quality": "ts-node src/scripts/data-quality-report.ts",
     "link:redeployments": "ts-node src/scripts/link-redeployments.ts",
+    "normalise:macs": "ts-node src/scripts/normalise-macs.ts",
     "test": "jest --runInBand --forceExit --passWithNoTests",
     "test:watch": "jest --watch",
     "migration:generate": "typeorm-ts-node-commonjs migration:generate -d src/data-source.ts",
