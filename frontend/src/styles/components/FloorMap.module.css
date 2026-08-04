@@ -700,3 +700,29 @@
     font-size: 1rem;
   }
 }
+
+/* Placed-this-session counter and the auto-advance toggle — see UnplacedTray.tsx. */
+.unplacedTrayPlaced {
+  margin-left: auto;
+  margin-right: var(--spacing-xs);
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--color-success);
+  color: var(--color-white);
+  font-size: 10px;
+  font-weight: var(--font-weight-semibold);
+}
+
+.unplacedTrayKeep {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px 6px;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+
+.unplacedTrayKeep input {
+  cursor: pointer;
+}

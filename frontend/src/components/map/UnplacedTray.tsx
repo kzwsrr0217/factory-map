@@ -20,13 +20,15 @@
  * writes to a ref in FloorMap rather than state, so remembering the text costs
  * no re-render — which is the whole reason the search lives down here.
  */
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Asset } from '../../services/asset.service';
 import { getAssetIcon } from '../../utils/assetTypes';
 import styles from '../../styles/components/FloorMap.module.css';
 
 /** Max rows shown from the floor-less pool — it can be thousands. */
 const GLOBAL_RESULT_LIMIT = 30;
+/** Remembered across sessions; "off" is the only value that disables auto-advance. */
+const KEEP_PLACING_KEY = 'map-keep-placing';
 const NAME_TRUNCATE_AT = 20;
 
 interface UnplacedTrayProps {
@@ -46,6 +48,11 @@ interface UnplacedTrayProps {
    * unplaced estate and is never listed — only searched.
    */
   onSearch?: () => void;
+  /**
+   * The device the map just placed. With "keep placing" on, the tray answers by
+   * arming the next one in the list it is showing — see the effect below.
+   */
+  justPlacedId?: string | null;
 }
 
 /** Fields a tray search looks at, cheapest/most likely first. */
@@ -95,8 +102,20 @@ const UnplacedTray: React.FC<UnplacedTrayProps> = ({
   initialSearch = '',
   onSearchChange,
   onSearch,
+  justPlacedId = null,
 }) => {
   const [search, setSearch] = useState(initialSearch);
+  /**
+   * Whether placing a device should arm the next one. On by default and remembered,
+   * because the survey means placing a thousand devices: a trip back to the tray
+   * between each is the single most repeated action of the next few weeks. The
+   * placing banner always names what is armed, and Esc stops.
+   */
+  const [keepPlacing, setKeepPlacing] = useState(
+    () => localStorage.getItem(KEEP_PLACING_KEY) !== 'off',
+  );
+  /** Placed since this tray was opened — the only progress signal the flow has. */
+  const [placedCount, setPlacedCount] = useState(0);
   const query = search.trim().toLowerCase();
   const terms = useMemo(() => query.split(/\s+/).filter(Boolean), [query]);
 
@@ -115,6 +134,34 @@ const UnplacedTray: React.FC<UnplacedTrayProps> = ({
     () => (terms.length > 0 ? findMatches(searchableUnplacedAssets, terms, GLOBAL_RESULT_LIMIT) : []),
     [searchableUnplacedAssets, terms],
   );
+
+  /**
+   * Arm the next device after one is placed.
+   *
+   * "Next" is the one after the placed device in the list as displayed — floor
+   * matches first, then the cross-floor search results — so it follows whatever
+   * order and filter the person is working through. The placed device may still be
+   * in the props for one render (the page updates its own state right after), so it
+   * is excluded explicitly rather than waited for.
+   */
+  // Seeded with whatever is already set, so reopening the tray after a placement
+  // doesn't read a stale id as a fresh one and arm a device nobody asked for.
+  const advancedFor = useRef<string | null>(justPlacedId);
+  useEffect(() => {
+    if (!justPlacedId || advancedFor.current === justPlacedId) return;
+    advancedFor.current = justPlacedId;
+    setPlacedCount((n) => n + 1);
+    if (!keepPlacing) return;
+
+    const visible = [...floorMatches, ...globalMatches];
+    const placedAt = visible.findIndex((a) => a._id === justPlacedId);
+    const next = visible.slice(placedAt + 1).find((a) => a._id !== justPlacedId)
+      // Wrapped: after the last one, carry on from the top with whatever is left
+      // rather than stopping in the middle of a room.
+      ?? visible.find((a) => a._id !== justPlacedId);
+    if (next) onSelect(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [justPlacedId]);
 
   const renderItem = (asset: Asset) => {
     const isPlacing = placingAssetId === asset._id;
@@ -144,8 +191,22 @@ const UnplacedTray: React.FC<UnplacedTrayProps> = ({
     <div className={styles.unplacedTray}>
       <div className={styles.unplacedTrayHeader}>
         📦 Unplaced ({query ? `${floorMatches.length}/${unplacedAssets.length}` : unplacedAssets.length})
+        {placedCount > 0 && (
+          <span className={styles.unplacedTrayPlaced}>{placedCount} placed</span>
+        )}
         <button className={styles.popoverClose} onClick={onClose}>✕</button>
       </div>
+      <label className={styles.unplacedTrayKeep}>
+        <input
+          type="checkbox"
+          checked={keepPlacing}
+          onChange={(e) => {
+            setKeepPlacing(e.target.checked);
+            localStorage.setItem(KEEP_PLACING_KEY, e.target.checked ? 'on' : 'off');
+          }}
+        />
+        <span>Keep placing — arm the next device automatically</span>
+      </label>
       {/* Always rendered. It used to appear only when the searchable pool was
           non-empty, which deadlocked once that pool became lazy: the pool loads on
           first search, and the box you search in only existed if the pool was

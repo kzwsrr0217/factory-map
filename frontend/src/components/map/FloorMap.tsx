@@ -508,6 +508,13 @@ const FloorMap: React.FC<FloorMapProps> = ({
   /** The layer checkbox list. Six toggles as icon-only buttons were unreadable. */
   const [layersOpen, setLayersOpen] = useState(false);
   /**
+   * The device just placed on the map. The tray watches this to arm the next one, so
+   * that placing a room's worth of devices is click-click-click rather than a trip
+   * back to the tray between each. Kept here because this is where a placement
+   * happens; the ordering of "next" belongs to the tray, which owns the list.
+   */
+  const [justPlacedId, setJustPlacedId] = useState<string | null>(null);
+  /**
    * Layer visibility when the host page doesn't own it. Only MapView passes `layers`
    * + `onLayerToggle` (it persists the choice); the floor page and the dashboard's
    * embedded map do not, and there the toggles used to do nothing at all — the
@@ -1281,6 +1288,10 @@ const FloorMap: React.FC<FloorMapProps> = ({
 
     if (placingAsset) {
       onPlaceUnplaced?.(placingAsset._id, x, y);
+      // Cleared here, and re-armed by the tray with the next device when "keep
+      // placing" is on — see UnplacedTray's justPlacedId effect. Clearing it either
+      // way means a failed placement can't leave a stale selection armed.
+      setJustPlacedId(placingAsset._id);
       setPlacingAsset(null);
       return;
     }
@@ -2501,6 +2512,7 @@ const FloorMap: React.FC<FloorMapProps> = ({
           initialSearch={unplacedSearchRef.current}
           onSearchChange={(q) => { unplacedSearchRef.current = q; }}
           onSearch={onUnplacedSearch}
+          justPlacedId={justPlacedId}
         />
       )}
 
