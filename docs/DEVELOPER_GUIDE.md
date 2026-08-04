@@ -1032,6 +1032,24 @@ recorded the dock's MAC on both — 85 devices missing a serial, 3 malformed MAC
 for the planned switch-port join, not a cosmetic complaint: see
 docs/CONNECTIONS_WORKFLOW.md.
 
+**Acting on the redeployments** the quality report finds: `link-redeployments.ts`
+(`npm run link:redeployments [-- --apply]`) sets `successor_id` on the retired half
+of each pair. Dry run by default. It only touches the unambiguous shape — exactly
+two rows sharing a serial, exactly one of them live, neither already linked — and
+prints why it left everything else alone.
+
+One caveat it states rather than hides: the direction comes from **status**, not
+from dates, because the data holds none — `itsm_modified_at` is null on these rows
+and `created_at` is just when the import ran. Treating the decommissioned row as
+the predecessor is sound as a statement about which record is current, which is
+what the app needs, but it is not a claim about chronology. On the real data one
+pair has the *lower* HWA still live, contradicting what the numbering would
+suggest, so the run flags any pair whose HWA order looks odd.
+
+Effect on the current data: 1057 assets became 1054, decommissioned 64 → 61, and
+the duplicate-serial section went from 6 groups to 3 — the redeployment category
+emptied out, leaving the two retired-only pairs and the one pair of real docks.
+
 **For the cabling survey**, `network-gaps-report.ts`
 (`npm run report:network -- [--csv=<path>]`) is the equivalent view — kept as its
 own script rather than folded into the reconcile report, because it shares no
