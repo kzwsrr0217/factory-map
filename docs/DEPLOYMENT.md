@@ -400,8 +400,8 @@ Re-run this whenever you refresh the snapshot (it's a full replace of
 Use the script:
 
 ```powershell
-cd C:actory-map\ops
-.\deploy-factorymap.ps1 -Root C:actory-map -HostName <VM-HOST>
+cd C:\factory-map\ops
+.\deploy-factorymap.ps1 -Root C:\factory-map -HostName <VM-HOST>
 ```
 
 It does the whole sequence below and stops at the first failure, saying what state
