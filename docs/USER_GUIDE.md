@@ -77,6 +77,7 @@ The left **sidebar** is the main navigation menu, in groups:
 | — | Dashboard | Overview statistics, asset list, bulk actions |
 | Places | Buildings | Browse buildings and floors |
 | Places | Map View | Interactive floor plan map |
+| Places | Survey progress | How far the recording has got, floor by floor: rooms, devices on the plan, sockets patched through to a switch |
 | Devices | Unplaced Assets | Assets not yet positioned on any floor plan |
 | Devices | Orphaned Assets | Assets whose IFS/CMDB master row no longer resolves |
 | Devices | Maintenance | Monthly calendar of scheduled maintenance |

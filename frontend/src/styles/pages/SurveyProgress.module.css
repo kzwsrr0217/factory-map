@@ -1,0 +1,160 @@
+/* Survey progress — see SurveyProgress.tsx. Laid out so a column can be scanned
+   down: every floor puts the same three measures in the same places. */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-lg);
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--spacing-lg);
+  flex-wrap: wrap;
+}
+
+.header h1 {
+  margin: 0 0 var(--spacing-xs);
+}
+
+.subtitle {
+  max-width: 70ch;
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+/* The devices-on-no-floor backlog. Deliberately the loudest thing on the page. */
+.backlog {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  border-left: 3px solid var(--color-warning);
+  color: var(--color-text-primary);
+}
+
+.backlogLink {
+  margin-left: auto;
+  white-space: nowrap;
+  color: var(--color-primary);
+  font-weight: var(--font-weight-medium);
+  text-decoration: none;
+}
+
+.backlogLink:hover { text-decoration: underline; }
+
+.buildingName {
+  margin: 0 0 var(--spacing-md);
+  font-size: var(--font-size-lg);
+}
+
+.floorList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+.floorRow {
+  padding: var(--spacing-md);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.floorHead {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  flex-wrap: wrap;
+  margin-bottom: var(--spacing-sm);
+}
+
+.floorName {
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  text-decoration: none;
+}
+
+.floorName:hover { color: var(--color-primary); text-decoration: underline; }
+
+.floorLevel {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.warnTag {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--color-warning-light);
+  color: var(--color-text-primary);
+  font-size: 10px;
+  font-weight: var(--font-weight-medium);
+}
+
+.floorMetrics {
+  display: grid;
+  grid-template-columns: 120px repeat(2, minmax(180px, 1fr));
+  gap: var(--spacing-lg);
+}
+
+.metric {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.metricHead {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.metricValue {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+}
+
+.meter {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.meterText {
+  font-size: var(--font-size-sm);
+}
+
+.meterNone {
+  color: var(--color-text-secondary);
+  font-style: italic;
+}
+
+.meterTrack {
+  display: block;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--color-gray-200);
+  overflow: hidden;
+}
+
+.meterFill {
+  display: block;
+  height: 100%;
+  background: var(--color-primary);
+}
+
+.meterFillDone { background: var(--color-success); }
+
+.meterLabel,
+.socketDetail {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+@media (max-width: 900px) {
+  .floorMetrics { grid-template-columns: 1fr; gap: var(--spacing-md); }
+}

@@ -44,6 +44,7 @@ import Settings from './pages/Settings';
 import UserManagement from './pages/UserManagement';
 import AuditLog from './pages/AuditLog';
 import UnplacedAssets from './pages/UnplacedAssets';
+import SurveyProgress from './pages/SurveyProgress';
 import OrphanedAssets from './pages/OrphanedAssets';
 import Alerts from './pages/Alerts';
 import NetworkGraph from './pages/NetworkGraph';
@@ -92,6 +93,7 @@ function App() {
                           <Route path="/settings" element={<Settings />} />
                           <Route path="/settings/users" element={<UserManagement />} />
                           <Route path="/audit" element={<AuditLog />} />
+                          <Route path="/progress" element={<SurveyProgress />} />
                           <Route path="/unplaced" element={<UnplacedAssets />} />
                           <Route path="/orphaned" element={<OrphanedAssets />} />
                           <Route path="/alerts" element={<Alerts />} />

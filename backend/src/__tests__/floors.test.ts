@@ -7,6 +7,7 @@
  *   - POST /api/floors               — create: success, duplicate floor_number
  *   - PATCH /api/floors/:id          — update name, floor_number; duplicate number rejection
  *   - DELETE /api/floors/:id         — delete: success; 404 on unknown
+ *   - GET  /api/floors/progress      — survey state per floor, counted server-side
  *
  * Each test creates its own building and floor so there are no cross-test dependencies.
  */
@@ -319,5 +320,92 @@ describe('GET /api/floors/:id/svg', () => {
       .get(`/api/floors/${floorWithSvgId}/svg`)
       .set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(400);
+  });
+});
+
+
+// ── Survey progress ───────────────────────────────────────────────────────────
+
+describe('GET /api/floors/progress', () => {
+  const auth = () => ({ Authorization: `Bearer ${adminToken}` });
+  const created: { assets: string[]; sockets: string[]; areas: string[]; floors: string[] } =
+    { assets: [], sockets: [], areas: [], floors: [] };
+
+  afterAll(async () => {
+    for (const id of created.assets) {
+      await request(app).delete(`/api/assets/${id}`).set(auth());
+    }
+    for (const id of created.sockets) {
+      await request(app).delete(`/api/network/wall-ports/${id}`).set(auth());
+    }
+    for (const id of created.areas) {
+      await request(app).delete(`/api/workareas/${id}`).set(auth());
+    }
+    for (const id of created.floors) {
+      await request(app).delete(`/api/floors/${id}`).set(auth());
+    }
+  });
+
+  it('counts rooms, placed devices and socket states for a floor', async () => {
+    const floorRes = await request(app).post('/api/floors').set(auth())
+      .send({ building_id: buildingId, floor_number: 91, name: `${FLOOR_PREFIX}_progress` });
+    const floorId = floorRes.body.data._id;
+    created.floors.push(floorId);
+
+    const areaRes = await request(app).post('/api/workareas').set(auth())
+      .send({ name: `${FLOOR_PREFIX}_area`, floor_id: floorId, coordinates: { x: 10, y: 10 }, dimensions: { width: 100, height: 80 } });
+    created.areas.push(areaRes.body.data._id);
+
+    // One device standing on the plan, one only assigned to the floor.
+    const placed = await request(app).post('/api/assets').set(auth()).send({
+      basic_info: { display_name: `${FLOOR_PREFIX}_placed` },
+      hierarchy: { building_id: buildingId, floor_id: floorId },
+      location: { coordinates: { x: 40, y: 40 } },
+    });
+    created.assets.push(placed.body.data._id);
+    const assigned = await request(app).post('/api/assets').set(auth()).send({
+      basic_info: { display_name: `${FLOOR_PREFIX}_assigned` },
+      hierarchy: { building_id: buildingId, floor_id: floorId },
+    });
+    created.assets.push(assigned.body.data._id);
+
+    const socket = await request(app).post('/api/network/wall-ports').set(auth())
+      .send({ label: `${FLOOR_PREFIX}/001`, floor_id: floorId });
+    created.sockets.push(socket.body.data._id);
+
+    const res = await request(app).get('/api/floors/progress').set(auth());
+    expect(res.status).toBe(200);
+    const row = res.body.data.find((f: any) => f.floor_id === floorId);
+    expect(row).toBeDefined();
+    expect(row.building_name).toBe(FLOOR_PREFIX);
+    expect(row.work_areas).toBe(1);
+    // `total` is what belongs on this plan; `placed` is what actually stands on it.
+    expect(row.assets).toEqual({ total: 2, placed: 1 });
+    // An unpatched socket counts as recorded but neither patched nor live — the
+    // distinction the whole cabling workflow rests on.
+    expect(row.sockets.total).toBe(1);
+    expect(row.sockets.patched).toBe(0);
+    expect(row.sockets.live).toBe(0);
+    expect(row.sockets.occupied).toBe(0);
+  });
+
+  it('reports devices belonging to no floor as the backlog', async () => {
+    const homeless = await request(app).post('/api/assets').set(auth())
+      .send({ basic_info: { display_name: `${FLOOR_PREFIX}_nofloor` } });
+    created.assets.push(homeless.body.data._id);
+
+    const res = await request(app).get('/api/floors/progress').set(auth());
+    expect(res.status).toBe(200);
+    // Counted in meta rather than as a floor row: a per-floor table alone would look
+    // finished while the estate sits outside the building.
+    expect(res.body.meta.unassigned_assets).toBeGreaterThanOrEqual(1);
+    expect(res.body.data.some((f: any) => f.floor_id === null)).toBe(false);
+  });
+
+  it('is not read as a floor id', async () => {
+    // The route sits before /:id; without that ordering "progress" would 404 here.
+    const res = await request(app).get('/api/floors/progress').set(auth());
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.data)).toBe(true);
   });
 });

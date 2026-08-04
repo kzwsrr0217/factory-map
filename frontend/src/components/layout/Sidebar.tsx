@@ -15,6 +15,7 @@ import {
   Wrench,
   RefreshCw,
   Keyboard,
+  Gauge,
   LucideIcon,
 } from 'lucide-react';
 import { useMaintenanceCounts } from '../../hooks/useMaintenanceCounts';
@@ -54,6 +55,8 @@ const menuGroups: MenuGroup[] = [
     items: [
       { icon: Building2, label: 'Buildings', path: '/buildings' },
       { icon: Map,       label: 'Map View',  path: '/map' },
+      // Where the survey stands, floor by floor — the phase this app is in.
+      { icon: Gauge,     label: 'Survey progress', path: '/progress' },
     ],
   },
   {

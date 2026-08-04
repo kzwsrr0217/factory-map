@@ -355,6 +355,7 @@ All routes require a valid `Authorization: Bearer <JWT>` header except `/api/aut
 | Method | Path | Query | Description |
 |--------|------|-------|-------------|
 | GET | `/` | `building_id?` | List floors, optionally filtered |
+| GET | `/progress` | — | Survey state per floor: rooms, devices assigned vs placed, sockets total/patched/live/occupied, plus `meta.unassigned_assets` (devices on no floor). Counted with group-bys, never by shipping rows — see the Survey progress page |
 | GET | `/:id` | — | Single floor |
 | POST | `/` | — | Create floor |
 | PATCH | `/:id` | — | Update; validates unique floor_number per building |

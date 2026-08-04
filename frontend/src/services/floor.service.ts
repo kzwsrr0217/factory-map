@@ -32,7 +32,41 @@ export interface Floor {
   updated_at?: string;
 }
 
+/** One floor's survey state — see GET /floors/progress in floor.controller.ts. */
+export interface FloorProgress {
+  floor_id: string;
+  floor_name: string;
+  floor_number: number;
+  building_id: string;
+  building_name: string | null;
+  has_floor_plan: boolean;
+  work_areas: number;
+  assets: { total: number; placed: number };
+  /** `patched` reaches a panel; `live` also has a switch port; `occupied` is devices. */
+  sockets: { total: number; patched: number; live: number; occupied: number };
+}
+
+export interface FloorProgressResponse {
+  floors: FloorProgress[];
+  /** Devices on no floor at all — the backlog a per-floor table would hide. */
+  unassigned_assets: number;
+  generated_at: string;
+}
+
 export const floorService = {
+  /**
+   * How far the survey has got, counted in the database. Cheap enough to open
+   * whenever — the socket counts alone would be thousands of rows to ship.
+   */
+  getProgress: async (): Promise<FloorProgressResponse> => {
+    const response = await api.get('/floors/progress');
+    return {
+      floors: response.data.data as FloorProgress[],
+      unassigned_assets: response.data.meta?.unassigned_assets ?? 0,
+      generated_at: response.data.meta?.generated_at ?? '',
+    };
+  },
+
   // Get all floors
   getFloors: async (buildingId?: string): Promise<Floor[]> => {
     const url = buildingId ? `/floors?building_id=${buildingId}` : '/floors';

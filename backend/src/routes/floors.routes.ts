@@ -101,6 +101,7 @@
 import { Router } from 'express';
 import {
   getAllFloors,
+  getFloorProgress,
   getFloorById,
   getFloorSvg,
   createFloor,
@@ -112,6 +113,8 @@ import { requireOperator } from '../middleware/auth.middleware';
 const router = Router();
 
 router.get('/', getAllFloors);
+// Before /:id so "progress" isn't read as a floor id.
+router.get('/progress', getFloorProgress);
 router.get('/:id/svg', getFloorSvg);
 router.get('/:id', getFloorById);
 router.post('/', requireOperator, createFloor);
