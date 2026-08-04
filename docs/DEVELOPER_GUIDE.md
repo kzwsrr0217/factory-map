@@ -1061,6 +1061,38 @@ Effect on the current data: 1057 assets became 1054, decommissioned 64 → 61, a
 the duplicate-serial section went from 6 groups to 3 — the redeployment category
 emptied out, leaving the two retired-only pairs and the one pair of real docks.
 
+**Matching the physical inventory against ITSM**: `match-report.ts`
+(`npm run report:match [-- --csv]`) answers "this device was found in a room, which ITSM
+record is it?" for every local asset with no HWA link, and reports the two directions
+that decide whether the data is actually consistent: assets carrying an HWA the export
+does not contain, and hardware ITSM has that the survey never found. READ ONLY.
+
+The rules live in `services/itsm/inventoryMatch.ts`, apart from the script, so the same
+verdicts can drive a task list. Four verdicts — `confident`, `ambiguous`, `weak-only`,
+`no-evidence` — and the reasoning behind them is measured on the real export rather than
+assumed:
+
+- A key that is not unique on the ITSM side is **demoted**, not trusted. Dell PPIDs sit
+  in the serial field identically across every unit of a model, and a dock passes its MAC
+  to the laptop docked in it, so both "keys" can name two records. This is the whole
+  difference between the matcher and a join on serial.
+- Field counts over the 1057 rows: `model` is empty on **every** row (the model is in
+  `catalog_item_name`), and `asset_tag`/`display_name` both hold the HWA number itself —
+  so neither can help a device whose sticker is missing. What a surveyed device really
+  brings is a serial, a type and a person's name.
+- A field filled on both sides that **disagrees** blocks the confident verdict however
+  strong the key: a serial matching while ITSM says monitor and the surveyor wrote laptop
+  is likelier a mistyped serial than a match.
+- Person names are compared as an order-independent set of parts: the export writes
+  "Móder, Hajnalka", the survey "moder hajnalka". Comparing those as strings made the
+  same person a conflict and suppressed nearly every good match — found by running the
+  report on real data, not in review.
+
+`no-evidence` deliberately splits two situations that need different tasks: a serial no
+ITSM record carries ("genuinely absent from ITSM") versus nothing recorded to match on at
+all, where registering the device risks duplicating hardware ITSM already holds and
+nobody can tell.
+
 **Normalising the MAC addresses** the report flags: `normalise-macs.ts`
 (`npm run normalise:macs [-- --apply] [-- --csv]`) rewrites them to
 `AA:BB:CC:DD:EE:FF`. Dry run by default. On the real data that is 132 rewrites and

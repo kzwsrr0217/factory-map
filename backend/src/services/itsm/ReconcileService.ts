@@ -433,7 +433,7 @@ export async function listLinked(): Promise<IReconcileLinkedAsset[]> {
 // Serial number is the only identifier both sides record, so it's the join
 // key that closes that loop.
 
-function normalizeSerial(serial: string | null | undefined): string {
+export function normalizeSerial(serial: string | null | undefined): string {
   return (serial ?? '').trim().toLowerCase();
 }
 
@@ -447,7 +447,7 @@ function normalizeSerial(serial: string | null | undefined): string {
  * punctuation placeholder can't qualify. Genuine serials in that same export
  * ("111207", "6wxsrm3", "cn-00ffxd-74261-44l-59ws") all pass comfortably.
  */
-function isUsableSerial(serial: string | null | undefined): boolean {
+export function isUsableSerial(serial: string | null | undefined): boolean {
   const s = normalizeSerial(serial);
   if (s.length < 5) return false;
   return (s.match(/[a-z0-9]/g) ?? []).length >= 3;
