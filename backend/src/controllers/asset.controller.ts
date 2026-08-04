@@ -402,6 +402,74 @@ const LOOKUP_COLUMNS: Record<string, string> = {
   organization:         'org_display_name',
   serial_object:        'serial_object',
   asset_type:           'asset_type',
+  person_full_name:     'person_full_name',
+};
+
+/**
+ * The Dashboard's headline numbers, counted in SQL over the whole table.
+ *
+ * Why this exists: the Dashboard used to derive every tile, chart and dropdown
+ * from one unpaginated `GET /assets`, which is capped at 1000 rows. With 1057
+ * assets in the database that already meant "1000 Total Assets" on screen and 57
+ * rows missing from every list, filter and picker — silently, since nothing read
+ * the `truncated` flag the endpoint was returning. After the full factory survey
+ * the gap would have been in the thousands.
+ *
+ * Counting server-side also makes the numbers cheap: a few GROUP BYs instead of
+ * shipping ~1.7 MB of JSON so the browser can call `.filter().length` on it.
+ *
+ * Superseded assets (`successor_id` set) are excluded throughout — they are the
+ * historical rows of a replacement, and counting them would inflate every total
+ * against what the lists show.
+ */
+export const getAssetStats = async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const live = () => repo().createQueryBuilder('a').where('a.successor_id IS NULL');
+
+    /**
+     * `nullLabel` is per column rather than a single constant: a null status is
+     * "unknown", a null type is "untyped" and a null floor is "unassigned", and
+     * lumping all three under one word would make the charts read wrong.
+     */
+    const countBy = async (column: string, nullLabel: string): Promise<Record<string, number>> => {
+      const rows = await live()
+        .select(`ISNULL(a.${column}, :${column}Null)`, 'key')
+        .addSelect('COUNT(*)', 'count')
+        .groupBy(`ISNULL(a.${column}, :${column}Null)`)
+        .setParameter(`${column}Null`, nullLabel)
+        .getRawMany<{ key: string; count: number }>();
+      return Object.fromEntries(rows.map((r) => [r.key, Number(r.count)]));
+    };
+
+    // GETDATE() rather than a JS timestamp: the comparison then happens in the
+    // same clock the dates were stored with, and the query stays sargable.
+    const [total, itsmManaged, unplaced, overdue, dueSoon, conflicts] = await Promise.all([
+      live().getCount(),
+      live().andWhere('a.is_managed = 1').getCount(),
+      live().andWhere('a.is_placed = 0').andWhere('a.rack_id IS NULL').getCount(),
+      live().andWhere('a.maint_next_date IS NOT NULL').andWhere('a.maint_next_date < GETDATE()').getCount(),
+      live().andWhere('a.maint_next_date IS NOT NULL')
+        .andWhere('a.maint_next_date >= GETDATE()')
+        .andWhere('a.maint_next_date < DATEADD(day, 30, GETDATE())').getCount(),
+      // An asset the app owns locally that also has a pending ITSM snapshot —
+      // the two disagree and someone has to decide.
+      live().andWhere('a.source_of_truth = :local', { local: 'local' })
+        .andWhere('a.itsm_snapshot IS NOT NULL').getCount(),
+    ]);
+
+    const [byStatus, byType, byFloor] = await Promise.all([
+      countBy('status', 'unknown'),
+      countBy('asset_type', 'untyped'),
+      countBy('floor_id', 'unassigned'),
+    ]);
+
+    res.json({
+      success: true,
+      data: { total, itsm_managed: itsmManaged, unplaced, maintenance_overdue: overdue,
+              maintenance_due_soon: dueSoon, itsm_conflicts: conflicts,
+              by_status: byStatus, by_type: byType, by_floor: byFloor },
+    });
+  } catch (error) { next(error); }
 };
 
 export const getAssetLookups = async (_req: Request, res: Response, next: NextFunction): Promise<void> => {

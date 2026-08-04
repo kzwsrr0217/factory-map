@@ -36,6 +36,19 @@ export const handlers = [
   ),
 
   // Assets
+  // Counts come from here, never from the list endpoint — see GET /assets/stats.
+  // Zeros by default; tests that assert tile values stub this handler.
+  rest.get(`${API}/assets/stats`, (_req, res, ctx) =>
+    res(ctx.json({
+      success: true,
+      data: {
+        total: 0, itsm_managed: 0, unplaced: 0,
+        maintenance_overdue: 0, maintenance_due_soon: 0, itsm_conflicts: 0,
+        by_status: {}, by_type: {}, by_floor: {},
+      },
+    })),
+  ),
+
   rest.get(`${API}/assets`, (_req, res, ctx) =>
     res(ctx.json({
       success: true,

@@ -3,6 +3,7 @@ import { assetService, Asset } from '../../services/asset.service';
 
 export const assetKeys = {
   all: ['assets'] as const,
+  stats: ['assets', 'stats'] as const,
   byFloor: (floorId: string) => ['assets', 'floor', floorId] as const,
   detail: (id: string) => ['assets', id] as const,
   history: (id: string) => ['assets', id, 'history'] as const,
@@ -12,6 +13,18 @@ export function useAssets() {
   return useQuery({
     queryKey: assetKeys.all,
     queryFn: () => assetService.getAssets(),
+  });
+}
+
+/**
+ * The Dashboard's numbers. Separate from useAssets on purpose: the list is capped
+ * at 1000 rows and the counts must not be.
+ */
+export function useAssetStats() {
+  return useQuery({
+    queryKey: ['assets', 'stats'] as const,
+    queryFn: assetService.getStats,
+    staleTime: 60 * 1000,
   });
 }
 

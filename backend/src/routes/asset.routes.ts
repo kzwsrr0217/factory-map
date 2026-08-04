@@ -11,6 +11,9 @@
  *
  * Routes:
  *   GET    /                              — list all assets (with filters).
+ *   GET    /stats                         — headline counts over the WHOLE table
+ *                                           (the list endpoint caps at 1000, so
+ *                                           the UI must not derive totals from it).
  *   GET    /lookups                       — autocomplete values (departments,
  *                                           VLANs, persons, etc.).
  *   GET    /:id                           — single asset with all relations.
@@ -201,6 +204,7 @@ import {
   getAssetOtChildren,
   createAsset,
   bulkCreateAssets,
+  getAssetStats,
   bulkUpdateAssets,
   updateAsset,
   deleteAsset,
@@ -221,6 +225,8 @@ const router = Router();
 // Read — any authenticated role
 router.get('/',                    getAllAssets);
 router.get('/lookups',             getAssetLookups);
+// Before '/:id' so the literal path wins over the parameter.
+router.get('/stats',               getAssetStats);
 router.get('/maintenance-counts',  getMaintenanceCounts);
 router.get('/:id',                 getAssetById);
 router.get('/:id/ot-children',     getAssetOtChildren);

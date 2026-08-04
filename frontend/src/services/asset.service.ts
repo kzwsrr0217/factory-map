@@ -26,6 +26,22 @@
  */
 import api from './api';
 
+/** Counts computed server-side over every asset — see assetService.getStats. */
+export interface AssetStats {
+  total: number;
+  itsm_managed: number;
+  unplaced: number;
+  maintenance_overdue: number;
+  maintenance_due_soon: number;
+  itsm_conflicts: number;
+  /** Keyed by status; assets with none are counted under "unknown". */
+  by_status: Record<string, number>;
+  /** Keyed by type; assets with none are counted under "untyped". */
+  by_type: Record<string, number>;
+  /** Keyed by floor id; assets on no floor are counted under "unassigned". */
+  by_floor: Record<string, number>;
+}
+
 export type AssetStatus = 'active' | 'inactive' | 'maintenance' | 'retired';
 
 export interface AssetItsmSnapshot {
@@ -380,6 +396,28 @@ export const assetService = {
    * already-placed asset to the unplaced tray, since its coordinates were
    * relative to the room it left.
    */
+  /**
+   * Headline counts over the WHOLE table.
+   *
+   * `getAssets()` caps at 1000 rows, so anything derived from its length is wrong
+   * the moment the estate is bigger than that — which it already is. Totals,
+   * charts and tiles must come from here instead.
+   */
+  getStats: async (): Promise<AssetStats> => {
+    const response = await api.get('/assets/stats');
+    return response.data.data;
+  },
+
+  /**
+   * Server-side search. Used instead of filtering the cached list, so an asset
+   * beyond the 1000-row cap is still findable — otherwise it exists in the
+   * database and nowhere in the UI.
+   */
+  searchAssets: async (query: string, limit = 50): Promise<Asset[]> => {
+    const response = await api.get('/assets', { params: { q: query, page: 1, limit } });
+    return (response.data.data as Asset[]).map(normalizeAsset);
+  },
+
   bulkUpdate: async (
     assetIds: string[],
     changes: {

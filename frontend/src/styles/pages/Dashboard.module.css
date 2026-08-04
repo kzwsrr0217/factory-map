@@ -508,6 +508,24 @@
   flex-wrap: wrap;
 }
 
+/* Notes beside the "Assets (n)" heading: what the list is showing, and what it
+   isn't. The warning variant is amber, not red — a capped list is a limitation
+   to work around, not an error. */
+.listNote {
+  margin-left: var(--spacing-sm);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-normal);
+  color: var(--color-text-secondary);
+}
+
+.listNoteWarn {
+  margin-left: var(--spacing-sm);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-warning);
+  cursor: help;
+}
+
 .bulkMoveCheck {
   display: flex;
   align-items: center;

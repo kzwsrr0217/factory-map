@@ -35,11 +35,30 @@ describe('GET /api/assets', () => {
     expect(Array.isArray(res.body.data)).toBe(true);
   });
 
-  it('supports search query parameter', async () => {
-    const res = await request(app)
-      .get('/api/assets?search=test')
+  it('filters by the q search parameter', async () => {
+    // This asserted only `200` against `?search=`, a parameter the endpoint does
+    // not read — so it passed no matter what the search did. The parameter is `q`,
+    // and the assertion now checks that it actually narrows the result.
+    const unique = `__searchprobe_${Date.now()}__`;
+    const created = await request(app)
+      .post('/api/assets')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ basic_info: { display_name: unique } });
+    expect(created.status).toBe(201);
+
+    const hit = await request(app)
+      .get(`/api/assets?q=${unique}`)
       .set('Authorization', `Bearer ${token}`);
-    expect(res.status).toBe(200);
+    expect(hit.status).toBe(200);
+    expect(hit.body.data).toHaveLength(1);
+    expect(hit.body.data[0].basic_info.display_name).toBe(unique);
+
+    const miss = await request(app)
+      .get(`/api/assets?q=${unique}_nothing_matches_this`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(miss.body.data).toHaveLength(0);
+
+    await request(app).delete(`/api/assets/${created.body.data._id}`).set('Authorization', `Bearer ${token}`);
   });
 });
 

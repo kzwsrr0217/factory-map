@@ -36,7 +36,7 @@ import { loadSettings } from '../utils/settings';
 import { useToast } from '../contexts/ToastContext';
 import { useSocket } from '../hooks/useSocket';
 import AssetCreationWizard from '../components/asset/AssetCreationWizard';
-import { useAssets, assetKeys } from '../hooks/queries/useAssets';
+import { useAssets, useAssetStats, assetKeys } from '../hooks/queries/useAssets';
 import { useBuildings } from '../hooks/queries/useBuildings';
 import { useFloors } from '../hooks/queries/useFloors';
 import { useWorkareas } from '../hooks/queries/useWorkareas';
@@ -60,6 +60,22 @@ const Dashboard: React.FC = () => {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { data: rawAssets = [], isLoading, isError } = useAssets();
+  // Every count and chart comes from here, not from `assets.length`. The list
+  // endpoint caps at 1000 rows, so with 1057 assets in the database the tiles read
+  // "1000 Total Assets" and every breakdown was short by the same 57 — 941 active
+  // shown as 894, and so on. See GET /assets/stats.
+  const { data: assetStats } = useAssetStats();
+
+  /**
+   * Search results from the server, used instead of filtering the cached list.
+   *
+   * Filtering the cache can only ever find assets inside the 1000 rows it holds,
+   * so anything past the cap was unreachable — present in the database and absent
+   * from the UI, including from search, which is the one place you'd go looking.
+   * Debounced because it fires per keystroke.
+   */
+  const [serverSearchResults, setServerSearchResults] = useState<Asset[] | null>(null);
+  const [searching, setSearching] = useState(false);
   const { data: buildings = [] } = useBuildings();
   const { data: floors = [] } = useFloors();
   const { data: workareas = [] } = useWorkareas();
@@ -167,8 +183,11 @@ const Dashboard: React.FC = () => {
   const filteredAssets = useMemo(() => {
     const t = Date.now();
     const td = 30 * 86400000;
-    let filtered = [...assets];
-    if (searchQuery) {
+    // When the server answered, start from its results: they cover the whole
+    // table, where the cached list stops at 1000 rows. The remaining filters below
+    // then narrow that set client-side exactly as before.
+    let filtered = serverSearchResults ? [...serverSearchResults] : [...assets];
+    if (searchQuery && !serverSearchResults) {
       const query = searchQuery.toLowerCase();
       filtered = filtered.filter(
         (asset) =>
@@ -196,7 +215,7 @@ const Dashboard: React.FC = () => {
     if (quickStatusFilter) filtered = filtered.filter(a => a.basic_info?.status === quickStatusFilter);
     if (assignedToFilter) filtered = filtered.filter(a => a.assigned_person?.full_name === assignedToFilter);
     return filtered;
-  }, [assets, searchQuery, filters, maintenanceFilter, conflictFilter, quickStatusFilter, assignedToFilter]);
+  }, [assets, serverSearchResults, searchQuery, filters, maintenanceFilter, conflictFilter, quickStatusFilter, assignedToFilter]);
 
   useEffect(() => { setPage(1); }, [searchQuery, filters, maintenanceFilter, conflictFilter, quickStatusFilter, assignedToFilter]);
 
@@ -421,6 +440,27 @@ const Dashboard: React.FC = () => {
 
   // ── Persist filters + view state ────────────────────────────
   useEffect(() => { localStorage.setItem('db_search', searchQuery); }, [searchQuery]);
+
+  useEffect(() => {
+    const term = searchQuery.trim();
+    if (term.length < 2) {
+      // One character matches most of the estate; not worth a round trip, and the
+      // cached list handles it acceptably.
+      setServerSearchResults(null);
+      setSearching(false);
+      return;
+    }
+    setSearching(true);
+    const timer = setTimeout(() => {
+      assetService.searchAssets(term, 200)
+        .then(setServerSearchResults)
+        // On failure the cached list still filters, so the box keeps working —
+        // it just can't reach past the cap.
+        .catch(() => setServerSearchResults(null))
+        .finally(() => setSearching(false));
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
   useEffect(() => { localStorage.setItem('db_filters', JSON.stringify(filters)); }, [filters]);
   useEffect(() => {
     if (maintenanceFilter) localStorage.setItem('db_maint', maintenanceFilter);
@@ -497,18 +537,23 @@ const Dashboard: React.FC = () => {
     (k) => filters[k as keyof FilterCriteria] && k !== 'itsmManaged' && filters[k as keyof FilterCriteria] !== 'all'
   ).length;
 
-  const conflictCount = assets.filter(
-    a => a.itsm?.source_of_truth === 'local' && !!(a as any).itsm_snapshot?.display_name
-  ).length;
+  const conflictCount = assetStats?.itsm_conflicts ?? 0;
 
   const stats = {
-    totalAssets: assets.length,
-    itsmManaged: assets.filter((a) => a.itsm?.is_managed).length,
+    totalAssets: assetStats?.total ?? 0,
+    itsmManaged: assetStats?.itsm_managed ?? 0,
     buildings: buildings.length,
     floors: floors.length,
-    active: assets.filter((a) => a.basic_info?.status === 'active').length,
-    maintenance: assets.filter((a) => a.basic_info?.status === 'maintenance').length,
+    active: assetStats?.by_status?.active ?? 0,
+    maintenance: assetStats?.by_status?.maintenance ?? 0,
   };
+
+  /**
+   * How many assets the list endpoint withheld. Shown rather than swallowed: the
+   * endpoint has always reported the cap, the UI just never mentioned it, so rows
+   * beyond it were missing from every list with no indication at all.
+   */
+  const notLoaded = Math.max(0, (assetStats?.total ?? 0) - assets.length);
 
   const assignedPersons = useMemo(() => {
     const names = new Set<string>();
@@ -516,30 +561,18 @@ const Dashboard: React.FC = () => {
     return Array.from(names).sort();
   }, [assets]);
 
-  const maintenanceStats = assets.reduce(
-    (acc, a) => {
-      if (a.maintenance?.next_date) {
-        const next = new Date(a.maintenance.next_date).getTime();
-        if (next < now) acc.overdue++;
-        else if (next - now < thirtyDays) acc.upcoming++;
-      }
-      return acc;
-    },
-    { overdue: 0, upcoming: 0 }
-  );
+  const maintenanceStats = {
+    overdue: assetStats?.maintenance_overdue ?? 0,
+    upcoming: assetStats?.maintenance_due_soon ?? 0,
+  };
 
-  const byType = Object.entries(
-    assets.reduce<Record<string, number>>((acc, a) => {
-      const t = a.basic_info?.type || 'untyped';
-      acc[t] = (acc[t] || 0) + 1;
-      return acc;
-    }, {})
-  ).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  const byType = Object.entries(assetStats?.by_type ?? {})
+    .sort((a, b) => b[1] - a[1]).slice(0, 5);
 
   const byFloor = floors
     .map(f => ({
       floor: f,
-      count: assets.filter(a => a.hierarchy.floor_id === f._id).length,
+      count: assetStats?.by_floor?.[f._id] ?? 0,
     }))
     .filter(f => f.count > 0)
     .sort((a, b) => b.count - a.count)
@@ -817,7 +850,7 @@ const Dashboard: React.FC = () => {
                 { key: 'inactive',    label: 'Inactive',     color: '#6b7280' },
                 { key: 'retired',     label: 'Retired',      color: '#ef4444' },
               ] as const).map(({ key, label, color }) => {
-                const count = assets.filter(a => a.basic_info?.status === key).length;
+                const count = assetStats?.by_status?.[key] ?? 0;
                 return (
                   <div key={key} className={styles.breakdownRow}>
                     <span className={styles.breakdownLabel}>{label}</span>
@@ -834,7 +867,7 @@ const Dashboard: React.FC = () => {
               <div className={styles.statusSegBar}>
                 {(['active', 'maintenance', 'inactive', 'retired'] as const).map(key => {
                   const color = key === 'active' ? '#10b981' : key === 'maintenance' ? '#f59e0b' : key === 'inactive' ? '#6b7280' : '#ef4444';
-                  const pct = (assets.filter(a => a.basic_info?.status === key).length / stats.totalAssets) * 100;
+                  const pct = ((assetStats?.by_status?.[key] ?? 0) / (stats.totalAssets || 1)) * 100;
                   return pct > 0 ? <div key={key} style={{ width: `${pct}%`, background: color, height: '100%', borderRadius: 0 }} title={`${key}: ${pct.toFixed(0)}%`} /> : null;
                 })}
               </div>
@@ -892,6 +925,20 @@ const Dashboard: React.FC = () => {
                 title="Select / deselect all on this page"
               />
               <h3>Assets ({sortedAssets.length})</h3>
+              {searching && <span className={styles.listNote}>searching…</span>}
+              {serverSearchResults && (
+                <span className={styles.listNote}>
+                  searched all {assetStats?.total ?? '?'} assets
+                </span>
+              )}
+              {/* Says out loud what the endpoint has always reported and the UI
+                  never showed: rows past the cap are missing from this list.
+                  Hidden while searching, since search does cover everything. */}
+              {!serverSearchResults && notLoaded > 0 && (
+                <span className={styles.listNoteWarn} title="The list endpoint returns at most 1000 rows. Use the search box to reach the rest.">
+                  ⚠ {notLoaded} more not shown — search to reach them
+                </span>
+              )}
             </div>
             <div className={styles.assetsHeaderRight}>
               {viewMode === 'table' && (

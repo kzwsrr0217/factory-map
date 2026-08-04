@@ -67,6 +67,30 @@ function renderDashboard() {
   );
 }
 
+/**
+ * Stubs GET /assets/stats, which is where every tile and chart gets its numbers.
+ *
+ * They used to be derived from the length of the asset list, which is capped at
+ * 1000 rows — so with 1057 assets the dashboard read "1000 Total Assets" and every
+ * breakdown was short by the same 57. These tests asserted that derivation, so they
+ * had to change with it.
+ */
+function stubStats(overrides: Record<string, unknown>) {
+  server.use(
+    rest.get(`${API}/assets/stats`, (_req, res, ctx) =>
+      res(ctx.json({
+        success: true,
+        data: {
+          total: 0, itsm_managed: 0, unplaced: 0,
+          maintenance_overdue: 0, maintenance_due_soon: 0, itsm_conflicts: 0,
+          by_status: {}, by_type: {}, by_floor: {},
+          ...overrides,
+        },
+      })),
+    ),
+  );
+}
+
 describe('Dashboard — stat cards', () => {
   it('renders all six stat card labels', async () => {
     renderDashboard();
@@ -87,7 +111,10 @@ describe('Dashboard — stat cards', () => {
     expect(statValues.length).toBeGreaterThanOrEqual(4);
   });
 
-  it('shows correct total and active count when assets are loaded', async () => {
+  it('takes the total from the stats endpoint, not from the length of the list', async () => {
+    // Deliberately inconsistent with each other: the list returns 3 rows while the
+    // stats say 1057. The tile must show 1057 — that is the whole point, since the
+    // list is capped and the total is not.
     server.use(
       rest.get(`${API}/assets`, (_req, res, ctx) =>
         res(ctx.json({
@@ -100,6 +127,7 @@ describe('Dashboard — stat cards', () => {
         })),
       ),
     );
+    stubStats({ total: 1057, by_status: { active: 941, maintenance: 3 } });
     renderDashboard();
 
     // Wait for data to load (loading skeleton disappears)
@@ -108,22 +136,12 @@ describe('Dashboard — stat cards', () => {
       // The stat value is the sibling div above the label
       const statContent = totalLabel.closest('[class*="statContent"]') ?? totalLabel.parentElement;
       const valueEl = statContent?.querySelector('[class*="statValue"]');
-      expect(valueEl?.textContent).toBe('3');
+      expect(valueEl?.textContent).toBe('1057');
     }, { timeout: 4000 });
   });
 
   it('shows correct In Maintenance count', async () => {
-    server.use(
-      rest.get(`${API}/assets`, (_req, res, ctx) =>
-        res(ctx.json({
-          success: true,
-          data: [
-            makeAsset({ _id: 'b1', basic_info: { display_name: 'IPC-001', status: 'maintenance', type: 'IPC' } }),
-            makeAsset({ _id: 'b2', basic_info: { display_name: 'IPC-002', status: 'maintenance', type: 'IPC' } }),
-          ],
-        })),
-      ),
-    );
+    stubStats({ total: 2, by_status: { maintenance: 2 } });
     renderDashboard();
 
     await waitFor(() => {
