@@ -1,20 +1,24 @@
 /**
- * usePersonSuggestions.ts — Extracts unique person records from loaded assets.
+ * usePersonSuggestions.ts — Known people, for the asset form's person field.
  *
- * Since the ITSM person directory is not directly exposed as an API endpoint,
- * this hook derives the list of known persons from the `assigned_person` field
- * of all assets. Duplicates are removed using a Map keyed by `person_id`.
- * Results are sorted alphabetically by full name.
+ * The ITSM person directory isn't exposed to this app, so the names come from the
+ * assets themselves — but from a dedicated endpoint (`GET /assets/persons`) rather
+ * than from a full asset download. Deriving them client-side meant shipping the
+ * entire asset list (1.65 MB, and several requests once that list was paged) to
+ * collect a few hundred names, and it required both a name and a `person_id`,
+ * which silently dropped everyone the inventory survey contributes: informal names
+ * deliberately kept as free text with no id. Those are the people most likely to
+ * be typed here, so they are included, with a null id.
  *
- * Used by the asset form's "Assigned Person" autocomplete field. If a person
- * has never been assigned to any asset in Factory Map, they won't appear here —
- * the user can still type a name/ID manually.
+ * Someone never assigned to any asset still won't appear; the field stays free
+ * text, so they can be typed in.
  */
 import { useState, useEffect } from 'react';
 import { assetService } from '../services/asset.service';
 
 export interface PersonSuggestion {
   full_name: string;
+  /** Empty when the person is known only by name — see the file header. */
   person_id: string;
 }
 
@@ -22,18 +26,14 @@ export const usePersonSuggestions = () => {
   const [suggestions, setSuggestions] = useState<PersonSuggestion[]>([]);
 
   useEffect(() => {
-    assetService.getAssets().then(assets => {
-      const seen = new Map<string, PersonSuggestion>();
-      assets.forEach(a => {
-        if (a.assigned_person?.full_name && a.assigned_person?.person_id) {
-          seen.set(a.assigned_person.person_id, {
-            full_name: a.assigned_person.full_name,
-            person_id: a.assigned_person.person_id,
-          });
-        }
-      });
-      setSuggestions(Array.from(seen.values()).sort((a, b) => a.full_name.localeCompare(b.full_name)));
-    }).catch(() => {});
+    assetService.getPersons()
+      .then(rows => setSuggestions(rows.map(r => ({
+        full_name: r.full_name,
+        // The form's datalists key on person_id; '' keeps them keyable without
+        // pretending an id exists.
+        person_id: r.person_id ?? '',
+      }))))
+      .catch(() => {});
   }, []);
 
   return suggestions;

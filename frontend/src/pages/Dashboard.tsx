@@ -549,9 +549,12 @@ const Dashboard: React.FC = () => {
   };
 
   /**
-   * How many assets the list endpoint withheld. Shown rather than swallowed: the
-   * endpoint has always reported the cap, the UI just never mentioned it, so rows
-   * beyond it were missing from every list with no indication at all.
+   * How many assets are missing from the loaded list.
+   *
+   * Normally zero — getAssets() pages through the whole set. It only becomes
+   * non-zero if the sweep hit its page ceiling, and then it must be visible:
+   * presenting a partial list as complete is the failure this whole change is
+   * about.
    */
   const notLoaded = Math.max(0, (assetStats?.total ?? 0) - assets.length);
 

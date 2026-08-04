@@ -38,6 +38,12 @@ export const handlers = [
   // Assets
   // Counts come from here, never from the list endpoint — see GET /assets/stats.
   // Zeros by default; tests that assert tile values stub this handler.
+  // Person autocomplete source — a dedicated endpoint, not derived from the
+  // asset list. See usePersonSuggestions.
+  rest.get(`${API}/assets/persons`, (_req, res, ctx) =>
+    res(ctx.json({ success: true, data: [] })),
+  ),
+
   rest.get(`${API}/assets/stats`, (_req, res, ctx) =>
     res(ctx.json({
       success: true,

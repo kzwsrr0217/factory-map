@@ -44,6 +44,7 @@ import { networkService, WallPort } from '../../services/network.service';
 import { ASSET_TYPE_OPTIONS } from '../../utils/assetTypes';
 import { ASSET_TEMPLATES } from '../../utils/assetTemplates';
 import { usePersonSuggestions } from '../../hooks/usePersonSuggestions';
+import { useAssetSearch } from '../../hooks/useAssetSearch';
 import { useAssetLookups, invalidateLookupCache } from '../../hooks/useAssetLookups';
 import { useToast } from '../../contexts/ToastContext';
 import styles from '../../styles/components/AssetFormModal.module.css';
@@ -222,10 +223,17 @@ const AssetFormModal: React.FC<AssetFormModalProps> = ({
   useEffect(() => {
     if (isOpen) {
       loadHierarchy();
-      assetService.getAssets().then(assets => {
+      // Only the assets this form already points at, so their names can be shown
+      // beside the ids. The pickers themselves search the server as you type —
+      // see useAssetSearch — instead of filtering a full download.
+      Promise.all(
+        [asset?.predecessor_id, asset?.successor_id]
+          .filter((id): id is string => !!id)
+          .map(id => assetService.getAsset(id).catch(() => null))
+      ).then(linked => {
         setAllAssets(
-          assets
-            .filter(a => !asset || a._id !== asset._id)
+          linked
+            .filter((a): a is Asset => !!a)
             .map(a => ({
               _id: a._id,
               label: a.basic_info.display_name + (a.custom_fields?.object_id ? ` [${a.custom_fields.object_id}]` : ''),
@@ -620,6 +628,32 @@ const AssetFormModal: React.FC<AssetFormModalProps> = ({
     [workareas, formData.workarea_id],
   );
 
+  // Server-side search for the lifecycle pickers. Excludes this asset and
+  // whichever end of the pair is already chosen, so a replacement chain can't be
+  // pointed at itself — the backend rejects that too, but a dropdown offering an
+  // option that will be refused is worse than one that never offers it.
+  const predecessorSearchState = useAssetSearch(predecessorSearch);
+  const successorSearchState = useAssetSearch(successorSearch);
+
+  const toOption = (a: Asset): AssetOption => ({
+    _id: a._id,
+    label: a.basic_info.display_name + (a.custom_fields?.object_id ? ` [${a.custom_fields.object_id}]` : ''),
+  });
+
+  const predecessorMatches = useMemo(
+    () => predecessorSearchState.results
+      .filter(a => a._id !== asset?._id && a._id !== formData.successor_id)
+      .map(toOption),
+    [predecessorSearchState.results, asset, formData.successor_id],
+  );
+
+  const successorMatches = useMemo(
+    () => successorSearchState.results
+      .filter(a => a._id !== asset?._id && a._id !== formData.predecessor_id)
+      .map(toOption),
+    [successorSearchState.results, asset, formData.predecessor_id],
+  );
+
   const selectedWallPort = useMemo(
     () => wallPorts.find((wp) => wp._id === wallPortId) ?? null,
     [wallPorts, wallPortId],
@@ -825,13 +859,17 @@ const AssetFormModal: React.FC<AssetFormModalProps> = ({
 
           {personSuggestions.length > 0 && (
             <>
+              {/* Keyed by name, not by person_id: people known only by name have
+                  no id (the inventory survey's contribution), so keying on the id
+                  would collide across all of them. Names are unique here — the
+                  endpoint groups by name. */}
               <datalist id="person-names-list">
                 {personSuggestions.map(p => (
-                  <option key={p.person_id} value={p.full_name}>{p.person_id}</option>
+                  <option key={p.full_name} value={p.full_name}>{p.person_id}</option>
                 ))}
               </datalist>
               <datalist id="person-ids-list">
-                {personSuggestions.map(p => (
+                {personSuggestions.filter(p => p.person_id).map(p => (
                   <option key={p.person_id} value={p.person_id}>{p.full_name}</option>
                 ))}
               </datalist>
@@ -1352,16 +1390,12 @@ const AssetFormModal: React.FC<AssetFormModalProps> = ({
                     onChange={(e) => setPredecessorSearch(e.target.value)}
                     list="predecessor-options"
                     onBlur={(e) => {
-                      const match = allAssets.find(a => a.label === e.target.value);
+                      const match = predecessorMatches.find(a => a.label === e.target.value);
                       if (match) { setField({ predecessor_id: match._id }); setPredecessorSearch(''); }
                     }}
                   />
                   <datalist id="predecessor-options">
-                    {allAssets
-                      .filter(a => a._id !== formData.successor_id)
-                      .filter(a => !predecessorSearch || a.label.toLowerCase().includes(predecessorSearch.toLowerCase()))
-                      .slice(0, 30)
-                      .map(a => <option key={a._id} value={a.label} />)}
+                    {predecessorMatches.map(a => <option key={a._id} value={a.label} />)}
                   </datalist>
                 </>
               )}
@@ -1389,16 +1423,12 @@ const AssetFormModal: React.FC<AssetFormModalProps> = ({
                     onChange={(e) => setSuccessorSearch(e.target.value)}
                     list="successor-options"
                     onBlur={(e) => {
-                      const match = allAssets.find(a => a.label === e.target.value);
+                      const match = successorMatches.find(a => a.label === e.target.value);
                       if (match) { setField({ successor_id: match._id }); setSuccessorSearch(''); }
                     }}
                   />
                   <datalist id="successor-options">
-                    {allAssets
-                      .filter(a => a._id !== formData.predecessor_id)
-                      .filter(a => !successorSearch || a.label.toLowerCase().includes(successorSearch.toLowerCase()))
-                      .slice(0, 30)
-                      .map(a => <option key={a._id} value={a.label} />)}
+                    {successorMatches.map(a => <option key={a._id} value={a.label} />)}
                   </datalist>
                 </>
               )}

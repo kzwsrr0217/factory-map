@@ -205,6 +205,7 @@ import {
   createAsset,
   bulkCreateAssets,
   getAssetStats,
+  getAssetPersons,
   bulkUpdateAssets,
   updateAsset,
   deleteAsset,
@@ -227,6 +228,7 @@ router.get('/',                    getAllAssets);
 router.get('/lookups',             getAssetLookups);
 // Before '/:id' so the literal path wins over the parameter.
 router.get('/stats',               getAssetStats);
+router.get('/persons',             getAssetPersons);
 router.get('/maintenance-counts',  getMaintenanceCounts);
 router.get('/:id',                 getAssetById);
 router.get('/:id/ot-children',     getAssetOtChildren);

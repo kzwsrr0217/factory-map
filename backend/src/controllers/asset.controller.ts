@@ -472,6 +472,38 @@ export const getAssetStats = async (_req: Request, res: Response, next: NextFunc
   } catch (error) { next(error); }
 };
 
+/**
+ * Distinct people the assets know about, for the person autocomplete.
+ *
+ * There is no ITSM person directory exposed to this app, so the names come from
+ * the assets themselves. The frontend used to derive this by downloading every
+ * asset — 1.65 MB and, once the list was paged, several requests — purely to
+ * collect a few hundred names.
+ *
+ * It also required both a name AND a person_id, which silently excluded everyone
+ * the inventory survey contributes: those are informal names deliberately kept as
+ * free text with no id. Those are exactly the people someone is most likely to be
+ * typing, so they are included here with a null id.
+ */
+export const getAssetPersons = async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    // Grouped by name rather than SELECT DISTINCT over the pair: the same person
+    // can appear both with and without an id (survey rows carry only a name), and
+    // DISTINCT would then list them twice. MAX() picks up an id if any asset has
+    // one and yields null when none do.
+    const rows = await repo()
+      .createQueryBuilder('a')
+      .select('a.person_full_name', 'full_name')
+      .addSelect('MAX(a.person_id)', 'person_id')
+      .where('a.person_full_name IS NOT NULL')
+      .andWhere("a.person_full_name != ''")
+      .groupBy('a.person_full_name')
+      .orderBy('a.person_full_name', 'ASC')
+      .getRawMany<{ full_name: string; person_id: string | null }>();
+    res.json({ success: true, data: rows });
+  } catch (error) { next(error); }
+};
+
 export const getAssetLookups = async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const results: Record<string, string[]> = {};

@@ -26,6 +26,15 @@
  */
 import api from './api';
 
+/**
+ * Rows per request when sweeping the whole asset list. Matches the server's own
+ * per-page maximum (see getAllAssets), so the sweep uses the fewest round trips
+ * the API allows.
+ */
+const ASSET_PAGE_SIZE = 500;
+/** Most pages one sweep will fetch — 25k assets. See getAssets. */
+const PAGE_CEILING = 50;
+
 /** Counts computed server-side over every asset — see assetService.getStats. */
 export interface AssetStats {
   total: number;
@@ -276,12 +285,48 @@ const normalizeAsset = (a: Asset): Asset => ({
 
 export const assetService = {
   // Get all assets
+  /**
+   * Every asset, fetched page by page.
+   *
+   * A single unpaginated call caps at 1000 rows server-side, which silently hid
+   * the 57th-to-last asset onward from every list, filter and picker built on
+   * this. Paging through instead means the caller gets the whole set and the
+   * client-side filtering they already do stays correct.
+   *
+   * `PAGE_CEILING` is a real limit, not a formality: at some estate size shipping
+   * everything to the browser stops being reasonable, and the honest thing is to
+   * stop and say so rather than either hang or truncate quietly. When it trips,
+   * `lastFetchWasTruncated` goes true and the Dashboard says how many are missing.
+   * The proper fix at that point is server-side filtering and sorting for the
+   * list, not a bigger ceiling.
+   */
   getAssets: async (opts?: { include_master?: boolean }): Promise<Asset[]> => {
-    const response = await api.get('/assets', {
-      params: opts?.include_master ? { include_master: 'true' } : undefined,
-    });
-    return (response.data.data as Asset[]).map(normalizeAsset);
+    const all: Asset[] = [];
+    let page = 1;
+    let totalPages = 1;
+
+    do {
+      const response = await api.get('/assets', {
+        params: {
+          page,
+          limit: ASSET_PAGE_SIZE,
+          ...(opts?.include_master ? { include_master: 'true' } : {}),
+        },
+      });
+      all.push(...(response.data.data as Asset[]).map(normalizeAsset));
+      totalPages = response.data.meta?.totalPages ?? 1;
+      page++;
+    } while (page <= totalPages && page <= PAGE_CEILING);
+
+    assetService.lastFetchWasTruncated = totalPages > PAGE_CEILING;
+    return all;
   },
+
+  /**
+   * Whether the last getAssets() stopped at the ceiling rather than the end of the
+   * data. Read by the Dashboard so a partial list is never presented as complete.
+   */
+  lastFetchWasTruncated: false,
 
   // Assets whose master_ifs_id points at a MasterAsset row that no longer
   // resolves (see MasterAsset.entity.ts / attachMasterData) — filtered
@@ -405,6 +450,20 @@ export const assetService = {
    */
   getStats: async (): Promise<AssetStats> => {
     const response = await api.get('/assets/stats');
+    return response.data.data;
+  },
+
+  /**
+   * Distinct people the assets know about, for the person autocomplete.
+   *
+   * A dedicated endpoint rather than deriving it from a full asset download: that
+   * shipped 1.65 MB to collect a few hundred names, and it required an id as well
+   * as a name, which excluded everyone the inventory survey contributes — informal
+   * names kept as free text with no id, i.e. exactly the people most likely to be
+   * typed into this field.
+   */
+  getPersons: async (): Promise<Array<{ full_name: string; person_id: string | null }>> => {
+    const response = await api.get('/assets/persons');
     return response.data.data;
   },
 

@@ -180,3 +180,41 @@ describe('GET /api/assets/stats', () => {
     expect(res.status).toBe(401);
   });
 });
+
+describe('GET /api/assets/persons', () => {
+  it('includes people known only by name, not just those with an ITSM id', async () => {
+    // The frontend used to derive this list from a full asset download and required
+    // both a name and an id, which dropped everyone the inventory survey
+    // contributes — informal names kept as free text on purpose. Those are the
+    // people most likely to be typed into the field the list feeds.
+    const withId = `${PREFIX} Named Person`;
+    const nameOnly = `${PREFIX} Nameonly Person`;
+    await createAsset('has-id', { assigned_person: { full_name: withId, person_id: `${PREFIX}-id` } });
+    await createAsset('name-only', { assigned_person: { full_name: nameOnly } });
+
+    const res = await request(app).get('/api/assets/persons').set(auth());
+    expect(res.status).toBe(200);
+    const byName = new Map(res.body.data.map((p: any) => [p.full_name, p.person_id]));
+
+    expect(byName.get(withId)).toBe(`${PREFIX}-id`);
+    expect(byName.has(nameOnly)).toBe(true);
+    expect(byName.get(nameOnly)).toBeNull();
+  });
+
+  it('lists each person once even when some of their assets carry no id', async () => {
+    // Grouped by name rather than DISTINCT over (name, id), which would list such
+    // a person twice and give the autocomplete duplicate entries.
+    const shared = `${PREFIX} Mixed Person`;
+    await createAsset('mixed-a', { assigned_person: { full_name: shared, person_id: `${PREFIX}-mixed` } });
+    await createAsset('mixed-b', { assigned_person: { full_name: shared } });
+
+    const res = await request(app).get('/api/assets/persons').set(auth());
+    const hits = res.body.data.filter((p: any) => p.full_name === shared);
+    expect(hits).toHaveLength(1);
+    expect(hits[0].person_id).toBe(`${PREFIX}-mixed`);
+  });
+
+  it('requires authentication', async () => {
+    expect((await request(app).get('/api/assets/persons')).status).toBe(401);
+  });
+});
