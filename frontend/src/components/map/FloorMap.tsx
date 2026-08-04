@@ -36,6 +36,10 @@ import { WorkArea } from '../../services/workarea.service';
 import { Asset } from '../../services/asset.service';
 import { WallPort } from '../../services/network.service';
 import { Workstation } from '../../services/workstation.service';
+import {
+  ZoomIn, ZoomOut, Crosshair, RotateCcw, Magnet, Layers as LayersIcon,
+  Sun, Moon, Frame, Scan, ImageDown, FileText, Printer, Pencil, X,
+} from 'lucide-react';
 import Tooltip from '../common/Tooltip';
 import ConfirmDialog from '../common/ConfirmDialog';
 import { getAssetIcon, ASSET_TYPE_MAP } from '../../utils/assetTypes';
@@ -413,6 +417,26 @@ interface FloorMapProps {
   onWorkstationMove?: (workstationId: string, x: number, y: number) => void;
 }
 
+/**
+ * The layer list, in the order it reads on screen. Kept as data so the checkbox rows
+ * and their labels stay in one place — the previous six icon buttons carried their
+ * meaning only in a tooltip.
+ *
+ * `labels` and `minimap` are local view state; the other four are the `layers` prop
+ * the host page owns (it persists them), so they go through `onLayerToggle`.
+ */
+/** What a map shows unless the host page says otherwise. */
+const DEFAULT_LAYERS = { workareas: true, assets: true, connections: false, grid: true };
+
+const LAYER_ROWS: Array<{ key: 'workareas' | 'assets' | 'connections' | 'grid' | 'labels' | 'minimap'; label: string }> = [
+  { key: 'workareas',   label: 'Work areas' },
+  { key: 'assets',      label: 'Devices' },
+  { key: 'labels',      label: 'Device names' },
+  { key: 'connections', label: 'Connections' },
+  { key: 'grid',        label: 'Grid' },
+  { key: 'minimap',     label: 'Minimap' },
+];
+
 const GRID_SIZE = 50; // Grid snap size
 const WORLD_W = 1000; // Base world width (viewBox coordinate space)
 const WORLD_H = 800;  // Base world height
@@ -433,7 +457,7 @@ const FloorMap: React.FC<FloorMapProps> = ({
   backgroundImage,
   deployMode = false,
   deployPosition,
-  layers = { workareas: true, assets: true, connections: false, grid: true },
+  layers: layersProp,
   onLayerToggle,
   connectionMode = false,
   selectedAssetsForConnection = [],
@@ -481,6 +505,20 @@ const FloorMap: React.FC<FloorMapProps> = ({
   const [zoom, setZoom] = useState(1);
   const [backgroundOpacity, setBackgroundOpacity] = useState(0.5);
   const [snapToGrid, setSnapToGrid] = useState(true);
+  /** The layer checkbox list. Six toggles as icon-only buttons were unreadable. */
+  const [layersOpen, setLayersOpen] = useState(false);
+  /**
+   * Layer visibility when the host page doesn't own it. Only MapView passes `layers`
+   * + `onLayerToggle` (it persists the choice); the floor page and the dashboard's
+   * embedded map do not, and there the toggles used to do nothing at all — the
+   * default prop object made them look enabled and every click was dropped.
+   */
+  const [ownLayers, setOwnLayers] = useState(DEFAULT_LAYERS);
+  const layers = layersProp ?? ownLayers;
+  const toggleLayer = useCallback((key: keyof typeof DEFAULT_LAYERS) => {
+    if (onLayerToggle) onLayerToggle(key);
+    else setOwnLayers(prev => ({ ...prev, [key]: !prev[key] }));
+  }, [onLayerToggle]);
   const [showMinimap, setShowMinimap] = useState(true);
   const [bgFitMode, setBgFitMode] = useState<'meet' | 'slice'>('meet');
   const [drawStart, setDrawStart] = useState<{ x: number; y: number } | null>(null);
@@ -1355,17 +1393,17 @@ const FloorMap: React.FC<FloorMapProps> = ({
           under the minimap (extra groups wrap into a second column instead) */}
       <div className={styles.controls}>
         <div className={styles.controlGroup} role="group" aria-label="View">
-          <button onClick={handleZoomIn} className={styles.controlButton} title="Zoom In (scroll up / +)">
-            ➕
+          <button onClick={handleZoomIn} className={styles.controlButton} title="Zoom in (scroll up / +)" aria-label="Zoom in">
+            <ZoomIn size={17} />
           </button>
-          <button onClick={handleZoomOut} className={styles.controlButton} title="Zoom Out (scroll down / −)">
-            ➖
+          <button onClick={handleZoomOut} className={styles.controlButton} title="Zoom out (scroll down / −)" aria-label="Zoom out">
+            <ZoomOut size={17} />
           </button>
-          <button onClick={handleFit} className={styles.controlButton} title="Fit to content (F)">
-            🎯
+          <button onClick={handleFit} className={styles.controlButton} title="Fit to content (F)" aria-label="Fit to content">
+            <Crosshair size={17} />
           </button>
-          <button onClick={handleResetView} className={styles.controlButton} title="Reset View (0)">
-            🔄
+          <button onClick={handleResetView} className={styles.controlButton} title="Reset view (0)" aria-label="Reset view">
+            <RotateCcw size={17} />
           </button>
         </div>
 
@@ -1373,96 +1411,108 @@ const FloorMap: React.FC<FloorMapProps> = ({
           <button
             onClick={() => setSnapToGrid(!snapToGrid)}
             className={`${styles.controlButton} ${snapToGrid ? styles.active : ''}`}
-            title="Snap to Grid"
+            title="Snap to grid while dragging"
+            aria-label="Snap to grid while dragging"
+            aria-pressed={snapToGrid}
           >
-            🧲
-          </button>
-          <button
-            onClick={() => setShowMinimap(!showMinimap)}
-            className={`${styles.controlButton} ${showMinimap ? styles.active : ''}`}
-            title="Toggle Minimap"
-          >
-            🗺️
-          </button>
-          <button
-            onClick={() => setShowLabels(s => !s)}
-            className={`${styles.controlButton} ${showLabels ? styles.active : ''}`}
-            title="Toggle Asset Labels"
-          >
-            🏷️
+            <Magnet size={17} />
           </button>
           {backgroundImage && (
             <>
               <button
                 onClick={handleOpacityDecrease}
                 className={styles.controlButton}
-                title="Decrease Background Opacity"
+                title="Dim the floor plan behind"
+                aria-label="Dim the floor plan behind"
               >
-                🌑
+                <Moon size={17} />
               </button>
               <button
                 onClick={handleOpacityIncrease}
                 className={styles.controlButton}
-                title="Increase Background Opacity"
+                title="Brighten the floor plan behind"
+                aria-label="Brighten the floor plan behind"
               >
-                🌕
+                <Sun size={17} />
               </button>
               <button
                 onClick={() => setBgFitMode(m => m === 'meet' ? 'slice' : 'meet')}
                 className={`${styles.controlButton} ${bgFitMode === 'slice' ? styles.active : ''}`}
-                title={bgFitMode === 'meet' ? 'Switch to Fill (slice)' : 'Switch to Fit (meet)'}
+                title={bgFitMode === 'meet' ? 'Floor plan: fill the canvas (crops)' : 'Floor plan: fit whole plan'}
+                aria-label={bgFitMode === 'meet' ? 'Floor plan: fill the canvas (crops)' : 'Floor plan: fit whole plan'}
               >
-                {bgFitMode === 'meet' ? '⬛' : '🔳'}
+                {bgFitMode === 'meet' ? <Scan size={17} /> : <Frame size={17} />}
               </button>
             </>
           )}
         </div>
 
+        {/* Layers — a named list rather than six unlabelled toggles. Which of
+            "🏭 💻 🔗 #️⃣ 🏷️ 🗺️" hides connections was a guess-and-hover job, and the
+            state of each was only readable as a highlight. */}
         <div className={styles.controlGroup} role="group" aria-label="Layers">
           <button
-            onClick={() => onLayerToggle?.('workareas')}
-            className={`${styles.controlButton} ${layers.workareas ? styles.active : ''}`}
-            title="Toggle Work Areas"
+            onClick={() => setLayersOpen(o => !o)}
+            className={`${styles.controlButton} ${styles.controlButtonWide} ${layersOpen ? styles.active : ''}`}
+            title="Choose what the map shows"
+            aria-haspopup="true"
+            aria-expanded={layersOpen}
           >
-            🏭
+            <LayersIcon size={17} />
+            <span>Layers</span>
           </button>
-          <button
-            onClick={() => onLayerToggle?.('assets')}
-            className={`${styles.controlButton} ${layers.assets ? styles.active : ''}`}
-            title="Toggle Assets"
-          >
-            💻
-          </button>
-          <button
-            onClick={() => onLayerToggle?.('connections')}
-            className={`${styles.controlButton} ${layers.connections ? styles.active : ''}`}
-            title="Toggle Connections"
-          >
-            🔗
-          </button>
-          <button
-            onClick={() => onLayerToggle?.('grid')}
-            className={`${styles.controlButton} ${layers.grid ? styles.active : ''}`}
-            title="Toggle Grid"
-          >
-            #️⃣
-          </button>
+          {layersOpen && (
+            <div
+              className={styles.layersMenu}
+              role="group"
+              aria-label="Map layers"
+              onKeyDown={(e) => { if (e.key === 'Escape') setLayersOpen(false); }}
+            >
+              <div className={styles.layersMenuHead}>
+                Show on the map
+                <button
+                  className={styles.popoverClose}
+                  onClick={() => setLayersOpen(false)}
+                  aria-label="Close layer list"
+                ><X size={14} /></button>
+              </div>
+              {LAYER_ROWS.map(row => {
+                const checked = row.key === 'labels' ? showLabels
+                  : row.key === 'minimap' ? showMinimap
+                  : layers[row.key as keyof typeof layers];
+                return (
+                  <label key={row.key} className={styles.layersMenuRow}>
+                    <input
+                      type="checkbox"
+                      checked={!!checked}
+                      onChange={() => {
+                        if (row.key === 'labels') setShowLabels(v => !v);
+                        else if (row.key === 'minimap') setShowMinimap(v => !v);
+                        else toggleLayer(row.key as keyof typeof DEFAULT_LAYERS);
+                      }}
+                    />
+                    <span>{row.label}</span>
+                  </label>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         <div className={styles.controlGroup} role="group" aria-label="Export">
-          <button onClick={handleExportImage} className={styles.controlButton} title="Export as PNG">
-            💾
+          <button onClick={handleExportImage} className={styles.controlButton} title="Export as PNG" aria-label="Export as PNG">
+            <ImageDown size={17} />
           </button>
-          <button onClick={handleExportPdf} className={styles.controlButton} title="Export as PDF">
-            📄
+          <button onClick={handleExportPdf} className={styles.controlButton} title="Export as PDF" aria-label="Export as PDF">
+            <FileText size={17} />
           </button>
-          <button onClick={handlePrint} className={styles.controlButton} title="Print">
-            🖨️
+          <button onClick={handlePrint} className={styles.controlButton} title="Print" aria-label="Print">
+            <Printer size={17} />
           </button>
         </div>
         {editable && (
           <div className={styles.editMode}>
-            <span>✏️ Edit Mode</span>
+            <span><Pencil size={13} /> Edit mode</span>
           </div>
         )}
       </div>
