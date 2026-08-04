@@ -397,9 +397,27 @@ Re-run this whenever you refresh the snapshot (it's a full replace of
 
 ## 6. Upgrades / redeploys
 
-Recreating a container silently breaks the port proxy (see the warning in §2),
-so the portproxy rules have to come down before the rebuild and go back up
-after — otherwise the app comes back up "healthy" but unreachable:
+Use the script:
+
+```powershell
+cd C:actory-map\ops
+.\deploy-factorymap.ps1 -Root C:actory-map -HostName <VM-HOST>
+```
+
+It does the whole sequence below and stops at the first failure, saying what state
+that leaves behind — in particular, if it dies while the portproxy rules are down it
+says so and prints the commands to restore them, because that is the state in which
+the app looks healthy and is unreachable.
+
+`-DryRun` prints every step without running any of it. `-SkipPull` deploys what is
+already checked out, which is what you want when re-running after a failed step. With
+uncommitted changes in the checkout it refuses to pull rather than deciding for you
+whether a hotfix someone made on the VM should survive.
+
+The manual sequence, which the script follows and which is still what to fall back on
+if it fails midway — recreating a container silently breaks the port proxy (see the
+warning in §2), so the portproxy rules have to come down before the rebuild and go
+back up after, otherwise the app comes back up "healthy" but unreachable:
 
 ```powershell
 cd C:\factory-map
