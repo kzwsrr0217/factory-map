@@ -224,6 +224,14 @@ of ports and can be re-run after every change. This is the highest-value
 automation in the whole connection story. Whatever the join cannot match is a
 short manual list, not a full survey.
 
+> **Normalise the MACs before joining.** `npm run report:quality` found the stored
+> values in three separator styles — 611 colon-separated, 115 hyphenated, 19 with
+> none — plus three outright malformed (an `O` typed for a `0` twice, and one
+> missing a digit). A naive join would miss 136 assets **silently**, and the
+> silence is what matters: those sockets would look un-surveyed rather than
+> unmatched, so nobody would go back for them. Compare on bare uppercase hex, and
+> fix the three typos by hand first.
+
 ### Phase D — the non-network cables (opportunistic, ongoing)
 
 Layer B rows, recorded when someone is at the rack or the desk anyway rather than

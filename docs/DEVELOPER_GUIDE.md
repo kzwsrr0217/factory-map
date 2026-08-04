@@ -1007,13 +1007,30 @@ serial where the type implies one, references to a building/floor/work area that
 no longer exists, and an asset whose work area sits on a different floor than the
 asset does.
 
-Superseded rows (`successor_id` set) are skipped throughout: their duplicate
-serial *is* the point of a replacement, and flagging them would drown the real
-findings. Monitors, phones and cameras are excluded from the missing-serial
-section for the same reason — they routinely arrive without one recorded. On the
-current ITSM-sourced data it reports 6 duplicate serials, 3 duplicate asset tags
-and 85 devices missing a serial, which is the kind of thing the reconcile pass
-exists to work through.
+Each duplicate group is classified rather than listed flat, because the three cases
+want three different responses: **all live** (decide which record is real), **one
+live and the rest retired** (a redeployment — link them old → new), and **all
+retired** (history, nothing to do). Every member's own type, MAC and catalogue item
+is printed so a person can judge; the report deliberately does not decide.
+
+That classification exists because a flat list is actively dangerous in one
+direction: several collisions in the real data are Dell docking stations whose
+"serial" is a PPID, a model-level code identical across every unit. Merging those
+would delete a real device — and docks are what hold the wall socket in the
+connection model. Groups whose shared value looks like a part number rather than a
+unit serial are marked.
+
+Superseded rows (`successor_id` set) are skipped throughout: their duplicate serial
+*is* the point of a replacement. Monitors, phones and cameras are excluded from the
+missing-serial section — they routinely arrive without one recorded.
+
+On the current ITSM-sourced data: 6 duplicate serials (3 redeployments, 2 history,
+1 pair of real docks), 3 duplicate asset tags, 11 duplicate MACs — including
+dock/laptop pairs, where the laptop's network comes through the dock so ITSM
+recorded the dock's MAC on both — 85 devices missing a serial, 3 malformed MACs and
+133 MACs stored with a separator other than a colon. That last one is a prerequisite
+for the planned switch-port join, not a cosmetic complaint: see
+docs/CONNECTIONS_WORKFLOW.md.
 
 **For the cabling survey**, `network-gaps-report.ts`
 (`npm run report:network -- [--csv=<path>]`) is the equivalent view — kept as its

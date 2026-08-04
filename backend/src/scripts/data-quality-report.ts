@@ -65,6 +65,114 @@ function fold(v: string): string {
   return v.trim().toLowerCase();
 }
 
+/**
+ * Statuses that mean the asset is gone. Everything else counts as live —
+ * including "inactive", which is a device sitting in a cupboard, not a device
+ * that stopped existing.
+ */
+const RETIRED_STATUSES = new Set(['decommissioned', 'retired']);
+const isRetired = (a: Asset): boolean => RETIRED_STATUSES.has((a.status ?? '').toLowerCase());
+
+/**
+ * What a group of assets sharing an identifier actually is. The three cases want
+ * three different responses, and a flat "N duplicates" list gets them confused —
+ * which is dangerous in one specific direction: several of the collisions in real
+ * data are docking stations whose "serial" is a Dell PPID, i.e. a model-level code
+ * identical across every unit. Merging those would delete a real device, and docks
+ * are what hold the wall socket in the connection model.
+ */
+type DuplicateKind = 'all-live' | 'redeployment' | 'all-retired';
+
+function classify(group: Asset[]): DuplicateKind {
+  const live = group.filter((a) => !isRetired(a));
+  if (live.length === group.length) return 'all-live';
+  if (live.length === 0) return 'all-retired';
+  return 'redeployment';
+}
+
+/**
+ * Whether a shared "serial" looks like a model-level part number rather than a
+ * per-unit one.
+ *
+ * The specific trap in this data: Dell accessories carry a PPID like
+ * `CN-05FDDV-12966-81C-3C80-A05`, identical across every unit of the model, and it
+ * ends up in the serial field. Two docks sharing one are two real devices, and
+ * merging them would delete one — docks are what hold the wall socket in the
+ * connection model, so it matters beyond the asset list.
+ *
+ * Detected by shape, the only honest signal available here: a Dell service tag is
+ * seven alphanumerics, a PPID is far longer and hyphenated. It says "looks like",
+ * and the report prints each member's own fields so a person can judge.
+ *
+ * An earlier version of this check claimed "probably separate devices, do not
+ * merge" whenever the members had distinct asset tags. That was circular: in this
+ * data the asset tag is derived from each record's own HWA, so it differs for every
+ * pair by construction and proved nothing — it fired on all six serial collisions,
+ * including the workstation redeployments where merging is exactly the right call.
+ */
+const UNIT_SERIAL_MAX = 12;
+
+function looksLikeModelCode(sharedValue: string): boolean {
+  return sharedValue.length > UNIT_SERIAL_MAX && sharedValue.includes('-');
+}
+
+/**
+ * A MAC reduced to bare uppercase hex, so `18:03:73:DE:BE:1D`,
+ * `18-03-73-DE-BE-1D` and `180373DEBE1D` all compare equal.
+ *
+ * This matters well beyond tidiness. The plan for filling in switch ports after the
+ * replacement is to join the switches' MAC address tables against `Asset.mac_address`
+ * (docs/CONNECTIONS_WORKFLOW.md, phase C) — the single highest-value automation in
+ * the whole connection story. A naive join would silently miss every asset stored
+ * in a different separator style, and "silently missed" is the failure mode that
+ * matters: those sockets would look un-surveyed rather than unmatched.
+ */
+function normaliseMac(mac: string): string {
+  return mac.replace(/[^0-9a-fA-F]/g, '').toUpperCase();
+}
+
+/** A MAC is canonical if it is 12 hex digits in colon-separated pairs. */
+function isCanonicalMac(mac: string): boolean {
+  return /^([0-9A-F]{2}:){5}[0-9A-F]{2}$/.test(mac.trim().toUpperCase());
+}
+
+/** The members' own identifying fields, so the reader can tell them apart. */
+function memberDetail(a: Asset): string {
+  return [
+    a.asset_type ? `type ${a.asset_type}` : null,
+    a.mac_address ? `MAC ${a.mac_address}` : null,
+    a.catalog_display_name || null,
+  ].filter(Boolean).join(', ');
+}
+
+const KIND_HEADINGS: Record<DuplicateKind, string> = {
+  'all-live': 'all live — decide which record is the real one',
+  redeployment: 'one live, the rest retired — looks like a redeployment; link them old → new',
+  'all-retired': 'retired only — history, no action needed',
+};
+
+/** Prints a duplicate section split by what each group actually is. */
+function printDuplicates(title: string, groups: Array<{ value: string; group: Asset[]; kind: DuplicateKind; note: string | null }>, emptyText: string): void {
+  console.log(`\n${title}: ${groups.length}`);
+  if (groups.length === 0) {
+    console.log(`   ${emptyText}`);
+    return;
+  }
+  for (const kind of ['all-live', 'redeployment', 'all-retired'] as DuplicateKind[]) {
+    const of = groups.filter((g) => g.kind === kind);
+    if (of.length === 0) continue;
+    console.log(`   ${KIND_HEADINGS[kind]} (${of.length}):`);
+    for (const g of of) {
+      console.log(`     - ${g.value}`);
+      for (const a of g.group) {
+        const detail = memberDetail(a);
+        console.log(`         ${a.display_name} (${a.status ?? 'no status'})${detail ? ` — ${detail}` : ''}`);
+      }
+      if (g.note) console.log(`         ⓘ ${g.note}`);
+    }
+  }
+}
+
 async function main(): Promise<void> {
   const csvArg = process.argv.find((a) => a.startsWith('--csv='));
   const csvPath = csvArg ? csvArg.slice('--csv='.length) : null;
@@ -110,22 +218,54 @@ async function main(): Promise<void> {
       return new Map([...byValue].filter(([, group]) => group.length > 1));
     };
 
-    const dupSerial: Row[] = [];
-    for (const [value, group] of collisionsBy('serial_number')) {
-      dupSerial.push(add('duplicate-serial', value, '',
-        `${group.length} assets: ${group.map((a) => a.display_name).join(', ')}`));
-    }
+    /** Builds the classified groups for one field, and records them as CSV rows. */
+    const duplicatesOf = (field: 'serial_number' | 'hardware_asset_id' | 'asset_tag', section: string) => {
+      return [...collisionsBy(field)].map(([value, group]) => {
+        const kind = classify(group);
+        const note = looksLikeModelCode(value)
+          ? 'the shared value looks like a model-level part number (e.g. a Dell PPID), not a unit serial'
+          : null;
+        add(section, value, kind,
+          group.map((a) => `${a.display_name} (${a.status ?? 'no status'})`).join('; ')
+          + (note ? ` — ${note}` : ''));
+        return { value, group, kind, note };
+      });
+    };
 
-    const dupHwa: Row[] = [];
-    for (const [value, group] of collisionsBy('hardware_asset_id')) {
-      dupHwa.push(add('duplicate-hardware-asset-id', value, '',
-        `${group.length} assets: ${group.map((a) => a.display_name).join(', ')}`));
-    }
+    const dupSerial = duplicatesOf('serial_number', 'duplicate-serial');
+    const dupHwa = duplicatesOf('hardware_asset_id', 'duplicate-hardware-asset-id');
+    const dupTag = duplicatesOf('asset_tag', 'duplicate-asset-tag');
 
-    const dupTag: Row[] = [];
-    for (const [value, group] of collisionsBy('asset_tag')) {
-      dupTag.push(add('duplicate-asset-tag', value, '',
-        `${group.length} assets: ${group.map((a) => a.display_name).join(', ')}`));
+    // MACs are grouped on the normalised value, so two records of the same machine
+    // stored with different separators collide as they should.
+    const byMac = new Map<string, Asset[]>();
+    for (const a of live) {
+      if (!a.mac_address || !normaliseMac(a.mac_address)) continue;
+      const key = normaliseMac(a.mac_address);
+      byMac.set(key, [...(byMac.get(key) ?? []), a]);
+    }
+    const dupMac = [...byMac].filter(([, g]) => g.length > 1).map(([value, group]) => {
+      const kind = classify(group);
+      add('duplicate-mac', value, kind,
+        group.map((a) => `${a.display_name} (${a.status ?? 'no status'})`).join('; '));
+      return { value, group, kind, note: null as string | null };
+    });
+
+    // Two different problems, so two lists. A malformed MAC is a typo to correct;
+    // a differently separated one is only a problem for whoever joins on it.
+    const malformedMac: Row[] = [];
+    const differentlySeparatedMac: Row[] = [];
+    for (const a of live) {
+      if (!a.mac_address?.trim()) continue;
+      const hex = normaliseMac(a.mac_address);
+      if (hex.length !== 12) {
+        malformedMac.push(add('mac-malformed', a.display_name, placeOf(a),
+          `stored as "${a.mac_address}" — ${hex.length} hex digits, not 12`
+          + (/[^0-9a-fA-F:.\- ]/.test(a.mac_address) ? ' (contains a non-hex character — likely O for 0 or I for 1)' : '')));
+      } else if (!isCanonicalMac(a.mac_address)) {
+        differentlySeparatedMac.push(add('mac-not-canonical', a.display_name, placeOf(a),
+          `stored as "${a.mac_address}"`));
+      }
     }
 
     // A row with no serial, no HWA and no asset tag cannot be matched against
@@ -179,11 +319,11 @@ async function main(): Promise<void> {
     console.log('═══ Asset data quality ═══');
     console.log(`\n${live.length} live asset(s) checked (${assets.length - live.length} superseded row(s) skipped).`);
 
-    printSection('1. Same serial number on several assets', dupSerial,
+    printDuplicates('1. Same serial number on several assets', dupSerial,
       'None — every serial number is unique.');
-    printSection('2. Same hardware asset id on several assets', dupHwa,
+    printDuplicates('2. Same hardware asset id on several assets', dupHwa,
       'None — every HWA is unique.');
-    printSection('3. Same asset tag on several assets', dupTag,
+    printDuplicates('3. Same asset tag on several assets', dupTag,
       'None — every asset tag is unique.');
     printSection('4. Nothing to identify the asset by', unidentifiable,
       'None — every asset has a serial, an HWA or an asset tag.');
@@ -195,11 +335,29 @@ async function main(): Promise<void> {
       'None — every building/floor/work area reference resolves.');
     printSection('8. Work area is on a different floor than the asset', hierarchyMismatch,
       'None — every asset agrees with its work area about the floor.');
+    printDuplicates('9. Same MAC address on several assets (after normalising)', dupMac,
+      'None — every MAC belongs to one asset.');
+    printSection('10. Malformed MAC address', malformedMac,
+      'None — every MAC has 12 hex digits.');
+    printSection('11. MAC address not in colon-separated form', differentlySeparatedMac,
+      'None — every MAC is stored canonically.');
 
-    console.log('\nNote: monitors, phones and cameras are excluded from section 5 — they');
-    console.log('routinely arrive with no serial recorded, and listing them hides the rest.');
+    console.log('\nNotes:');
+    console.log(' - Monitors, phones and cameras are excluded from section 5 — they routinely');
+    console.log('   arrive with no serial recorded, and listing them hides the rest.');
+    console.log(' - A shared "serial" is not always a duplicate device: Dell accessories');
+    console.log('   carry a PPID identical across every unit of the model, and it ends up in');
+    console.log('   the serial field. Those are marked with an i. Each member has its type,');
+    console.log('   MAC and catalogue item are listed so you can tell two real devices from');
+    console.log('   one recorded twice — the report does not decide that for you.');
+    console.log(' - Section 11 is not cosmetic: the plan for filling in switch ports is to');
+    console.log('   join the switches\' MAC tables against these values, and a differently');
+    console.log('   separated MAC would be missed silently, leaving those sockets looking');
+    console.log('   un-surveyed rather than unmatched. See docs/CONNECTIONS_WORKFLOW.md.');
 
     if (csvPath) {
+      // `where` holds the classification for the duplicate sections and the
+      // location for the rest — named generically because it is one column.
       const lines = ['section,item,where,detail'];
       for (const r of rows) lines.push([r.section, r.item, r.where, r.detail].map(csvEscape).join(','));
       fs.writeFileSync(csvPath, lines.join('\n'), 'utf8');
