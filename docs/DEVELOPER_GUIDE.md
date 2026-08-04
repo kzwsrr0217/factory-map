@@ -1093,6 +1093,35 @@ ITSM record carries ("genuinely absent from ITSM") versus nothing recorded to ma
 all, where registering the device risks duplicating hardware ITSM already holds and
 nobody can tell.
 
+**The task list that closes the inventory**: `generate-tasks.ts`
+(`npm run tasks:generate [-- --apply] [-- --csv]`) turns those verdicts, plus the
+reconcile state, into typed tasks in `normalisation_tasks`. Dry run by default.
+
+"Everything is consistent" is true exactly when this produces no open tasks — which is
+why the list is **derived on every run**, never maintained by hand. A re-run upserts on
+`(kind, subject_key)` (a unique index, so running it twice cannot double the list), and
+the only human-owned columns are the assignee, the note and the dismissal.
+
+Eight kinds, each naming an action rather than a symptom: `check-hwa`, `decide-match`,
+`identify-device`, `register-in-itsm`, `link-to-itsm`, `label-device`,
+`resolve-field-differences`, `verify-disposal`.
+
+Two rules make it trustworthy:
+
+- **Only tasks whose completion shows up in the data close themselves** (`closed_by:
+  'system'`). Everything is machine-verifiable except `label-device`: a label leaves no
+  trace in any export, so nothing but a person can say it was applied. `verify-disposal`
+  looked human at first and is not — judgement is needed to *do* it, not to prove it was
+  done; both resolutions (someone links a local asset, or the record stops coming in the
+  export) are visible. A test caught that.
+- **A dismissal covers the situation it was made about.** `evidence_hash` is what "the
+  same situation" means; if the evidence changes the task comes back, mirroring the
+  per-field ignore on the reconcile page.
+
+Verified end to end on the real data: recording a serial on a device closed its
+`identify-device` task by itself and raised `register-in-itsm` in its place, and a second
+run created nothing.
+
 **Normalising the MAC addresses** the report flags: `normalise-macs.ts`
 (`npm run normalise:macs [-- --apply] [-- --csv]`) rewrites them to
 `AA:BB:CC:DD:EE:FF`. Dry run by default. On the real data that is 132 rewrites and
