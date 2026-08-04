@@ -43,7 +43,7 @@ import { workareaService, WorkArea } from '../../services/workarea.service';
 import { networkService, WallPort } from '../../services/network.service';
 import { ASSET_TYPE_OPTIONS } from '../../utils/assetTypes';
 import { ASSET_TEMPLATES } from '../../utils/assetTemplates';
-import { usePersonSuggestions } from '../../hooks/usePersonSuggestions';
+import { usePersonSuggestions, invalidatePersonSuggestions } from '../../hooks/usePersonSuggestions';
 import { useAssetSearch } from '../../hooks/useAssetSearch';
 import { useAssetLookups, invalidateLookupCache } from '../../hooks/useAssetLookups';
 import { useToast } from '../../contexts/ToastContext';
@@ -579,6 +579,7 @@ const AssetFormModal: React.FC<AssetFormModalProps> = ({
       }
 
       invalidateLookupCache();
+      invalidatePersonSuggestions();
       onSuccess();
       onClose();
     } catch (err) {

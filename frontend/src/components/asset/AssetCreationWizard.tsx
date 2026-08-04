@@ -26,7 +26,7 @@ import { sectionService, Section } from '../../services/section.service';
 import { networkService, WallPort, NetworkRack } from '../../services/network.service';
 import { ASSET_TYPE_OPTIONS } from '../../utils/assetTypes';
 import { ASSET_TEMPLATES } from '../../utils/assetTemplates';
-import { usePersonSuggestions } from '../../hooks/usePersonSuggestions';
+import { usePersonSuggestions, invalidatePersonSuggestions } from '../../hooks/usePersonSuggestions';
 import { useAssetLookups, invalidateLookupCache } from '../../hooks/useAssetLookups';
 import { useToast } from '../../contexts/ToastContext';
 import styles from '../../styles/components/AssetCreationWizard.module.css';
@@ -377,6 +377,7 @@ const AssetCreationWizard: React.FC<AssetCreationWizardProps> = ({
         }).catch(() => {});
       }
       invalidateLookupCache();
+      invalidatePersonSuggestions();
       onSuccess();
       onClose();
     } catch {
