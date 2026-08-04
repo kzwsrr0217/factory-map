@@ -19,6 +19,8 @@
  *  - `syncAsset(id)`: trigger ITSM sync for one asset
  *  - `addConnection / updateConnection / removeConnection`: manage asset links
  *  - `getAssetsWithConnections()`: all assets with connections joined (network graph/topology)
+ *  - `getAssetsByBuilding(buildingId)`: assets in one building
+ *  - `getAssetsByRack(rackId)`: devices mounted in one rack
  *  - `getAssetsByIds(ids)`: named assets only — for resolving a connection's far end
  *  - `getAssetsConnectedTo(id)`: assets whose one-way links point at this asset
  *  - `notifyWorkItem(assetId, itemId)`: send immediate alert for one work-item task
@@ -208,7 +210,10 @@ export interface Asset {
     patch_panel_id: string | null;
     patch_panel_name: string | null;
     patch_port: number | null;
+    /** Ids so the UI can link to the rack view where patching happens. */
+    rack_id?: string | null;
     rack_name: string | null;
+    building_id?: string | null;
     room_name: string | null;
     room_type: string | null;
     switch_asset_id: string | null;
@@ -361,6 +366,23 @@ export const assetService = {
    */
   getAssetsWithConnections: async (): Promise<Asset[]> =>
     sweepAllPages({ include_connections: 'true' }),
+
+  /** Assets in one building. Server-filtered, for the pickers that only need one. */
+  getAssetsByBuilding: async (buildingId: string): Promise<Asset[]> => {
+    const response = await api.get('/assets', { params: { building_id: buildingId } });
+    return (response.data.data as Asset[]).map(normalizeAsset);
+  },
+
+  /**
+   * Devices mounted in one rack. Server-filtered: the rack view used to fetch every
+   * asset with its connections to find the handful in one cabinet.
+   */
+  getAssetsByRack: async (rackId: string): Promise<Asset[]> => {
+    const response = await api.get('/assets', {
+      params: { rack_id: rackId, include_connections: 'true' },
+    });
+    return (response.data.data as Asset[]).map(normalizeAsset);
+  },
 
   /**
    * Specific assets by id, chunked. For resolving connection peers — the asset on

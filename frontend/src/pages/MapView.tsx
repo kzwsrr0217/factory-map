@@ -1111,7 +1111,11 @@ const MapView: React.FC = () => {
                       <div style={{ padding: '6px 12px 4px', fontSize: 10, fontWeight: 600, color: 'var(--color-text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px', borderBottom: '1px solid var(--color-gray-100)' }}>
                         Physical Connection
                       </div>
-                      <PhysicalPathTrace asset={tracingAsset} peerAssets={namedAssets} />
+                      <PhysicalPathTrace
+                        asset={tracingAsset}
+                        peerAssets={namedAssets}
+                        onAssignSocket={() => setEditAsset(tracingAsset)}
+                      />
 
                       {/* ── Logical connections ─────────────────────────── */}
                       <div style={{ padding: '6px 12px 4px', fontSize: 10, fontWeight: 600, color: 'var(--color-text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px', borderBottom: '1px solid var(--color-gray-100)', borderTop: '1px solid var(--color-gray-100)', marginTop: 4 }}>

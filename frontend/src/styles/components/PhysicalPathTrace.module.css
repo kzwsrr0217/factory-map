@@ -1,43 +1,100 @@
-/* Lifted from MapView.module.css when the trace was extracted so it could also
-   be shown on the asset page. MapView keeps its own copies for the logical
-   connections list, which was not extracted. */
+/* The four-step physical chain — see PhysicalPathTrace.tsx.
+   Every step is drawn whether or not it is recorded, so the styling has to make
+   "done", "this is the next thing to do" and "not there yet" tellable apart at a
+   glance without colour being the only signal: the icon becomes a tick when done,
+   and the next step is the only one with a visible action. */
 
-.connection {
+.chain {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
   padding: var(--spacing-sm) var(--spacing-md);
 }
 
-.endpoint {
-  padding-left: 16px;
-  border-left: 2px solid var(--color-gray-200);
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.endpointName {
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-semibold);
-  color: var(--color-text-primary);
+.chainStep {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--spacing-sm);
+  padding: 6px var(--spacing-sm);
+  border-left: 2px solid var(--color-gray-200);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.chainStepDone {
+  border-left-color: var(--color-success);
+  color: var(--color-text-primary);
+}
+
+/* The one step the reader is meant to act on. */
+.chainStepNext {
+  border-left-color: var(--color-warning);
+  background: var(--color-bg-secondary);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+
+.chainIcon {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.chainStepDone .chainIcon { color: var(--color-success); }
+.chainStepNext .chainIcon { color: var(--color-warning); }
+
+.chainBody {
+  display: flex;
   flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  flex: 1;
+  min-width: 0;
 }
 
-.endpointSub {
-  font-weight: var(--font-weight-normal);
-  font-size: var(--font-size-xs);
-  color: var(--color-text-secondary);
+.chainLabel {
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-primary);
 }
 
-.step {
-  font-size: var(--font-size-xs);
-  color: var(--color-text-secondary);
+.chainValue {
   display: flex;
   align-items: center;
   gap: 4px;
   flex-wrap: wrap;
-  padding-left: 4px;
+  color: var(--color-text-secondary);
+}
+
+.chainMissing {
+  color: var(--color-text-secondary);
+  font-style: italic;
+}
+
+/* Link and button share this so "Place it" and "Assign a socket" read alike. */
+.stepAction {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 3px 8px;
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-primary);
+  font-size: var(--font-size-xs);
+  font-family: inherit;
+  font-weight: var(--font-weight-medium);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.stepAction:hover {
+  background: var(--color-primary);
+  color: #fff;
+}
+
+.endpointSub {
+  font-weight: var(--font-weight-normal);
+  color: var(--color-text-secondary);
 }
 
 .stepBadge {
@@ -53,11 +110,4 @@
 .stepMono {
   font-family: monospace;
   color: var(--color-text-primary);
-}
-
-.unpatched {
-  font-size: var(--font-size-xs);
-  color: #9ca3af;
-  font-style: italic;
-  padding-left: 4px;
 }

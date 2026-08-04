@@ -520,7 +520,11 @@ export class Asset {
         patch_panel_id: this.wall_port.patch_panel_id,
         patch_panel_name: (this.wall_port as any).patch_panel?.name ?? null,
         patch_port: this.wall_port.patch_port,
+        // Ids alongside the names so the UI can link straight to the rack the socket
+        // is patched into — that is where the patching itself is done.
+        rack_id: (this.wall_port as any).patch_panel?.rack?.id ?? null,
         rack_name: (this.wall_port as any).patch_panel?.rack?.name ?? null,
+        building_id: (this.wall_port as any).patch_panel?.rack?.room?.building_id ?? null,
         room_name: (this.wall_port as any).patch_panel?.rack?.room?.name ?? null,
         room_type: (this.wall_port as any).patch_panel?.rack?.room?.type ?? null,
         switch_asset_id: this.wall_port.switch_asset_id,

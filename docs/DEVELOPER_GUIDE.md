@@ -388,7 +388,7 @@ Similar CRUD, filtered by `section_id`.
 
 | Method | Path | Query params | Notes |
 |--------|------|-------------|-------|
-| GET | `/` | `floor_id, building_id, workarea_id, section_id, status, type, is_placed, q, page, limit, include_connections, include_master, orphaned, ids, connected_to` | Full-text search on display_name, serial, asset_tag, manufacturer, model, IP, hostname, person. `orphaned=true` filters to assets with a `master_ifs_id` that no longer resolves to a `MasterAsset` row |
+| GET | `/` | `floor_id, building_id, workarea_id, section_id, rack_id, status, type, is_placed, q, page, limit, include_connections, include_master, orphaned, ids, connected_to` | Full-text search on display_name, serial, asset_tag, manufacturer, model, IP, hostname, person. `orphaned=true` filters to assets with a `master_ifs_id` that no longer resolves to a `MasterAsset` row |
 | GET | `/lookups` | — | Distinct values for all autocomplete fields |
 | GET | `/maintenance-counts` | — | `{ overdue, due_soon }` — excludes replaced assets (`successor_id` set) |
 | GET | `/:id` | — | Single asset with software + connections; always resolves `master` (`null` if orphaned) |

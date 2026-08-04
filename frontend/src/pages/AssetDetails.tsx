@@ -907,7 +907,14 @@ const AssetDetails: React.FC = () => {
                   Same component the map's side panel uses. */}
               <div className={styles.field} style={{ gridColumn: '1 / -1' }}>
                 <label>Network Path</label>
-                <PhysicalPathTrace asset={asset} />
+                {/* Both actions are wired here because this page can answer them:
+                    the editor holds the socket field, and the floor page is where
+                    an asset gets placed. */}
+                <PhysicalPathTrace
+                  asset={asset}
+                  onAssignSocket={() => setFormOpen(true)}
+                  placeHref={asset.hierarchy.floor_id ? `/floors/${asset.hierarchy.floor_id}` : '/unplaced'}
+                />
               </div>
             </div>
           </Card>

@@ -19,6 +19,9 @@ import NetworkInfrastructure from '../pages/NetworkInfrastructure';
 
 jest.mock('react-router-dom', () => ({
   useNavigate: () => jest.fn(),
+  // The page reads ?rack= / ?building= to land on the cabinet an asset's network
+  // path links to — see the deep-link effect in NetworkInfrastructure.tsx.
+  useSearchParams: () => [new URLSearchParams(), jest.fn()],
   useLocation: () => ({ state: null, pathname: '/infrastructure', search: '', hash: '' }),
   Link: ({ children, to }: { children: React.ReactNode; to: string }) =>
     <a href={String(to)}>{children}</a>,

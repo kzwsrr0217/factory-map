@@ -536,7 +536,7 @@ const ID_LOOKUP_MAX = 500;
 
 export const getAllAssets = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const { page, limit, floor_id, building_id, workarea_id, section_id, status, type, is_placed, q, include_connections, include_master, orphaned, ids, connected_to } =
+    const { page, limit, floor_id, building_id, workarea_id, section_id, rack_id, status, type, is_placed, q, include_connections, include_master, orphaned, ids, connected_to } =
       req.query as Record<string, string | undefined>;
 
     const qb = repo().createQueryBuilder('a');
@@ -586,6 +586,9 @@ export const getAllAssets = async (req: Request, res: Response, next: NextFuncti
     if (floor_id)    qb.andWhere('a.floor_id = :floor_id', { floor_id });
     if (building_id) qb.andWhere('a.building_id = :building_id', { building_id });
     if (workarea_id) qb.andWhere('a.workarea_id = :workarea_id', { workarea_id });
+    // Rack-mounted devices. The rack view needs the few assets in one cabinet; it
+    // used to fetch every asset and filter in the browser to find them.
+    if (rack_id)     qb.andWhere('a.rack_id = :rack_id', { rack_id });
     if (section_id)  qb.andWhere('a.section_id = :section_id', { section_id });
     if (status)      qb.andWhere('a.status = :status', { status });
     if (type)        qb.andWhere('a.asset_type = :type', { type });

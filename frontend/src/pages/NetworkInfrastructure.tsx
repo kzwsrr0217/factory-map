@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import Card from '../components/common/Card';
 import Button from '../components/common/Button';
@@ -38,6 +39,7 @@ const NetworkInfrastructure: React.FC = () => {
   const { data: buildings = [], isLoading: loadingBuildings } = useBuildings();
   const { data: floors = [] } = useFloors();
 
+  const [searchParams, setSearchParams] = useSearchParams();
   const [selectedBuildingId, setSelectedBuildingId] = useState('');
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
   const [selectedRackId, setSelectedRackId] = useState<string | null>(null);
@@ -125,6 +127,35 @@ const NetworkInfrastructure: React.FC = () => {
   const selectedRoom = rooms.find(r => r._id === selectedRoomId) ?? null;
   const selectedRack = selectedRoom?.racks.find(r => r._id === selectedRackId) ?? null;
 
+  /**
+   * Deep link from an asset's network path ("Patch it at the rack"). Patching is only
+   * possible here, so the link has to land on the right cabinet rather than on the
+   * page's first building — otherwise the action tells you where to go and then
+   * leaves you to find it.
+   *
+   * The rack id alone identifies the room, once this building's rooms have loaded;
+   * `building` comes along because the rooms query is scoped to a building.
+   */
+  const requestedBuildingId = searchParams.get('building');
+  const requestedRackId = searchParams.get('rack');
+
+  useEffect(() => {
+    if (requestedBuildingId) setSelectedBuildingId(requestedBuildingId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requestedBuildingId]);
+
+  useEffect(() => {
+    if (!requestedRackId || rooms.length === 0) return;
+    const room = rooms.find(r => r.racks.some(rk => rk._id === requestedRackId));
+    if (!room) return;
+    setSelectedRoomId(room._id);
+    setSelectedRackId(requestedRackId);
+    // Consume the params: from here on the selection is the page's own state, and a
+    // stale ?rack= would fight every click.
+    setSearchParams(new URLSearchParams(), { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requestedRackId, rooms]);
+
   // Reset room/rack selection when building changes; load assets for switch picker
   useEffect(() => {
     setSelectedRoomId(null);
@@ -133,9 +164,11 @@ const NetworkInfrastructure: React.FC = () => {
     setAllBuildingPorts([]);
     setPortSearch('');
     if (selectedBuildingId) {
-      assetService.getAssets().then(all => {
-        setBuildingAssets(all.filter(a => a.hierarchy?.building_id === selectedBuildingId));
-      }).catch(() => {});
+      // Server-filtered; this used to fetch every asset and keep the ones in this
+      // building, for a switch picker that only ever shows one building's devices.
+      assetService.getAssetsByBuilding(selectedBuildingId)
+        .then(setBuildingAssets)
+        .catch(() => {});
     }
   }, [selectedBuildingId]);
 
@@ -196,8 +229,7 @@ const NetworkInfrastructure: React.FC = () => {
   };
 
   const loadRackAssets = async (rackId: string) => {
-    const all = await assetService.getAssetsWithConnections();
-    setRackAssets(all.filter(a => a.hierarchy?.rack_id === rackId));
+    setRackAssets(await assetService.getAssetsByRack(rackId));
   };
 
   const openModal = (state: ModalState) => {

@@ -59,6 +59,10 @@
  *         schema: { type: string }
  *         description: Search across name, serial, IP, hostname, manufacturer
  *       - in: query
+ *         name: rack_id
+ *         schema: { type: string }
+ *         description: Assets mounted in this rack
+ *       - in: query
  *         name: ids
  *         schema: { type: string }
  *         description: >
