@@ -386,7 +386,12 @@ interface FloorMapProps {
   // onPlaceUnplaced handler does that). Kept separate from unplacedAssets so
   // the default tray list stays floor-scoped instead of showing 1000+ rows.
   searchableUnplacedAssets?: Asset[];
-  allAssets?: Asset[];
+  /**
+   * Assets this floor's links point at, for naming the far end of a cross-floor
+   * connection. Only ever read by id — it does not have to be, and should not be,
+   * every asset in the database (see MapView.loadPeerAssets).
+   */
+  peerAssets?: Asset[];
   onNavigateToAsset?: (assetId: string, floorId: string) => void;
   /** Fired the first time the unplaced tray is searched — see UnplacedTray. */
   onUnplacedSearch?: () => void;
@@ -447,7 +452,7 @@ const FloorMap: React.FC<FloorMapProps> = ({
   unplacedAssets = [],
   onPlaceUnplaced,
   searchableUnplacedAssets = [],
-  allAssets = [],
+  peerAssets = [],
   onNavigateToAsset,
   onUnplacedSearch,
   wallPorts = [],
@@ -696,12 +701,12 @@ const FloorMap: React.FC<FloorMapProps> = ({
         result.set(asset._id, offFloor.map(c => ({
           connectedAssetId: c.connected_asset_id,
           connectionType: c.connection_type,
-          connectedAsset: allAssets.find(a => a._id === c.connected_asset_id),
+          connectedAsset: peerAssets.find(a => a._id === c.connected_asset_id),
         })));
       }
     });
     return result;
-  }, [assets, allAssets, wallPorts]);
+  }, [assets, peerAssets, wallPorts]);
 
   // Snap to grid helper
   const snapToGridHelper = (value: number): number => {

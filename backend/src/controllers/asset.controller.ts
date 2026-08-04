@@ -525,9 +525,18 @@ export const getAssetLookups = async (_req: Request, res: Response, next: NextFu
 
 // ── GET /assets ───────────────────────────────────────────────────────────────
 
+/**
+ * Ids accepted in one `?ids=` lookup. Each becomes a query parameter and MSSQL
+ * allows 2100 per statement, so this leaves plenty of headroom while still being
+ * more than any single view needs — a floor's off-floor connection peers number in
+ * the dozens. Over the limit is a 400 rather than a silent truncation, because a
+ * short answer to an id lookup looks exactly like "those assets don't exist".
+ */
+const ID_LOOKUP_MAX = 500;
+
 export const getAllAssets = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const { page, limit, floor_id, building_id, workarea_id, section_id, status, type, is_placed, q, include_connections, include_master, orphaned } =
+    const { page, limit, floor_id, building_id, workarea_id, section_id, status, type, is_placed, q, include_connections, include_master, orphaned, ids, connected_to } =
       req.query as Record<string, string | undefined>;
 
     const qb = repo().createQueryBuilder('a');
@@ -538,6 +547,40 @@ export const getAllAssets = async (req: Request, res: Response, next: NextFuncti
         .leftJoinAndSelect('wp.patch_panel', 'wp_pp')
         .leftJoinAndSelect('wp_pp.rack', 'wp_rack')
         .leftJoinAndSelect('wp_rack.room', 'wp_room');
+    }
+
+    // Resolve specific assets by id. This is how a caller names the far end of a
+    // connection — a peer on another floor, the switch behind a socket — without
+    // downloading the estate to do a handful of id lookups. Bounded: each id is a
+    // query parameter and MSSQL allows 2100 per statement, so the whole list has to
+    // stay well under that; callers chunk (see assetService.getAssetsByIds).
+    if (ids !== undefined) {
+      const wanted = [...new Set(ids.split(',').map((s) => s.trim()).filter(Boolean))];
+      if (wanted.length > ID_LOOKUP_MAX) {
+        res.status(400).json({
+          success: false,
+          error: `Too many ids in one request (${wanted.length}); the maximum is ${ID_LOOKUP_MAX}.`,
+        });
+        return;
+      }
+      // An explicit empty list means "nothing", not "everything" — without this a
+      // caller that found no peers would receive the first 1000 assets.
+      if (wanted.length === 0) {
+        res.json({ success: true, data: [], meta: { total: 0 } });
+        return;
+      }
+      qb.andWhere('a.id IN (:...ids)', { ids: wanted });
+    }
+
+    // Assets whose connections point AT this one. A bidirectional link is mirrored
+    // into a row on each side (see AssetConnection.entity.ts), so this only turns up
+    // one-way links — but from the target those are otherwise invisible without
+    // scanning every asset's connection list.
+    if (connected_to) {
+      qb.andWhere(
+        'EXISTS (SELECT 1 FROM asset_connections ac WHERE ac.asset_id = a.id AND ac.connected_asset_id = :connected_to)',
+        { connected_to },
+      );
     }
 
     if (floor_id)    qb.andWhere('a.floor_id = :floor_id', { floor_id });

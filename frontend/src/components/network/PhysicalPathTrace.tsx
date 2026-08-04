@@ -19,13 +19,13 @@ import styles from '../../styles/components/PhysicalPathTrace.module.css';
 interface PhysicalPathTraceProps {
   asset: Asset;
   /** Used to name the switch behind `switch_asset_id`. Optional — the port shows either way. */
-  allAssets?: Asset[];
+  peerAssets?: Asset[];
   /** Shown when the asset has no socket assigned. */
   emptyHint?: string;
 }
 
 const PhysicalPathTrace: React.FC<PhysicalPathTraceProps> = ({
-  asset, allAssets = [], emptyHint = 'No wall port assigned — edit the asset to set one',
+  asset, peerAssets = [], emptyHint = 'No wall port assigned — edit the asset to set one',
 }) => {
   const port = asset.wall_port;
 
@@ -34,7 +34,7 @@ const PhysicalPathTrace: React.FC<PhysicalPathTraceProps> = ({
   }
 
   const switchAsset = port.switch_asset_id
-    ? allAssets.find((a) => a._id === port.switch_asset_id)
+    ? peerAssets.find((a) => a._id === port.switch_asset_id)
     : undefined;
 
   return (

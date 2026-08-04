@@ -55,7 +55,17 @@ const MapView: React.FC = () => {
   const [selectedFloor, setSelectedFloor] = useState<Floor | null>(null);
   const [workareas, setWorkareas] = useState<WorkArea[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
-  const [allAssets, setAllAssets] = useState<Asset[]>([]);
+  /**
+   * Assets referenced from this floor but not on it: the far end of a cross-floor
+   * link, the switch behind a socket. Fetched by id (see loadPeerAssets) purely so
+   * those references can be named — this is not, and must not become, the whole
+   * estate. It used to be exactly that: one unpaginated GET /assets, which the
+   * server caps at 1000 rows, so with 1057 assets the last 57 silently had no name
+   * anywhere on the map.
+   */
+  const [peerAssets, setPeerAssets] = useState<Asset[]>([]);
+  /** One-way links pointing at the asset being traced; loaded when the trace opens. */
+  const [inboundAssets, setInboundAssets] = useState<Asset[]>([]);
   const [wallPorts, setWallPorts] = useState<WallPort[]>([]);
   const [workstations, setWorkstations] = useState<Workstation[]>([]);
   const [loading, setLoading] = useState(true);
@@ -208,6 +218,17 @@ const MapView: React.FC = () => {
     ];
   }, [assets]);
 
+  /**
+   * Every asset the map can put a name to: this floor's own, the peers fetched by
+   * id, and the inbound links of whatever is being traced. Deduped, since a peer may
+   * also be standing on this floor.
+   */
+  const namedAssets = useMemo(() => {
+    const byId = new Map<string, Asset>();
+    for (const a of [...assets, ...peerAssets, ...inboundAssets]) byId.set(a._id, a);
+    return [...byId.values()];
+  }, [assets, peerAssets, inboundAssets]);
+
   const workareaOptions = useMemo(() => [
     { value: 'all', label: 'All Areas' },
     { value: 'none', label: 'No Work Area' },
@@ -218,14 +239,12 @@ const MapView: React.FC = () => {
     try {
       setMetaLoading(true);
       setError(null);
-      const [buildingsData, floorsData, allAssetsData] = await Promise.all([
+      const [buildingsData, floorsData] = await Promise.all([
         hierarchyService.getBuildings(),
         floorService.getFloors(),
-        assetService.getAssetsWithConnections(),
       ]);
       setBuildings(buildingsData);
       setFloors(floorsData);
-      setAllAssets(allAssetsData);
 
       // Honour ?building=<id>&floor=<id> deep-link params (e.g. from Dashboard "Show on map")
       const paramBuilding = searchParams.get('building');
@@ -311,6 +330,39 @@ const MapView: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedFloorId]);
 
+  /**
+   * Names for everything this floor points at from somewhere else: the far end of a
+   * cross-floor connection, and the switch a socket is patched to. Only those ids
+   * are fetched — a few dozen at most — instead of the whole asset list, which is
+   * what the map needed the list for in the first place.
+   *
+   * Failure is not surfaced: the map draws fine, a cross-floor badge just shows the
+   * peer's id instead of its name.
+   */
+  const loadPeerAssets = useCallback(async (floorAssets: Asset[], floorWallPorts: WallPort[]) => {
+    const onFloor = new Set(floorAssets.map((a) => a._id));
+    const portIds = new Set(floorWallPorts.map((wp) => wp._id));
+    const wanted = new Set<string>();
+    for (const asset of floorAssets) {
+      for (const c of asset.connections ?? []) {
+        // Wall ports live in their own table and are already loaded for this floor.
+        if (!onFloor.has(c.connected_asset_id) && !portIds.has(c.connected_asset_id)) {
+          wanted.add(c.connected_asset_id);
+        }
+      }
+    }
+    for (const wp of floorWallPorts) {
+      if (wp.switch_asset_id && !onFloor.has(wp.switch_asset_id)) wanted.add(wp.switch_asset_id);
+    }
+    if (wanted.size === 0) { setPeerAssets([]); return; }
+    try {
+      setPeerAssets(await assetService.getAssetsByIds([...wanted]));
+    } catch (error) {
+      console.error('Error resolving connection peers:', error);
+      setPeerAssets([]);
+    }
+  }, []);
+
   const loadMapData = useCallback(async (floorId: string) => {
     if (!floorId) {
       setSelectedFloor(null);
@@ -341,13 +393,14 @@ const MapView: React.FC = () => {
       const workareaIds = new Set(workareasData.map((wa) => wa._id));
       const sectionIds = new Set(allSections.filter((s) => workareaIds.has(s.workarea_id)).map((s) => s._id));
       setWorkstations(allWorkstations.filter((ws) => sectionIds.has(ws.section_id)));
+      loadPeerAssets(floorAssets, floorWallPorts);
     } catch (error) {
       console.error('Error loading map data:', error);
       setError('Failed to load floor data. Please try selecting a different floor.');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [loadPeerAssets]);
 
   useEffect(() => {
     loadMapData(selectedFloorId);
@@ -669,9 +722,19 @@ const MapView: React.FC = () => {
     }
   }, [workstations, applyWorkstationMove, undoRedo]);
 
-  const handleAssetTrace = useCallback((asset: Asset) => {
+  const handleAssetTrace = useCallback(async (asset: Asset) => {
     setTracingAsset(asset);
     setSidePanelOpen(true);
+    // One-way links pointing at this asset. Bidirectional ones are already on the
+    // asset itself (AssetConnection mirrors them), so this is the only part of the
+    // trace that cannot be answered from what the floor already loaded. Asked for
+    // per asset rather than by scanning every asset's connections client-side.
+    setInboundAssets([]);
+    try {
+      setInboundAssets(await assetService.getAssetsConnectedTo(asset._id));
+    } catch (error) {
+      console.error('Error loading inbound connections:', error);
+    }
   }, []);
 
   const CONN_COLORS: Record<string, string> = {
@@ -1020,7 +1083,7 @@ const MapView: React.FC = () => {
               onWorkareaClick={handleWorkareaClick}
               onConnectionDelete={handleConnectionDelete}
               activeConnectionTypes={activeConnectionTypes.size > 0 ? activeConnectionTypes : undefined}
-              allAssets={allAssets}
+              peerAssets={namedAssets}
               onNavigateToAsset={handleNavigateToAsset}
               wallPorts={wallPorts}
                   floorName={selectedFloor.name}
@@ -1048,7 +1111,7 @@ const MapView: React.FC = () => {
                       <div style={{ padding: '6px 12px 4px', fontSize: 10, fontWeight: 600, color: 'var(--color-text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px', borderBottom: '1px solid var(--color-gray-100)' }}>
                         Physical Connection
                       </div>
-                      <PhysicalPathTrace asset={tracingAsset} allAssets={allAssets} />
+                      <PhysicalPathTrace asset={tracingAsset} peerAssets={namedAssets} />
 
                       {/* ── Logical connections ─────────────────────────── */}
                       <div style={{ padding: '6px 12px 4px', fontSize: 10, fontWeight: 600, color: 'var(--color-text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px', borderBottom: '1px solid var(--color-gray-100)', borderTop: '1px solid var(--color-gray-100)', marginTop: 4 }}>
@@ -1076,7 +1139,7 @@ const MapView: React.FC = () => {
                           target_port: (c as any).target_port ?? null,
                         }));
                         const incoming: TraceEdge[] = [];
-                        for (const a of allAssets) {
+                        for (const a of inboundAssets) {
                           if (a._id === tracingAsset._id) continue;
                           for (const c of a.connections ?? []) {
                             if (c.connected_asset_id !== tracingAsset._id) continue;
@@ -1099,7 +1162,7 @@ const MapView: React.FC = () => {
                         }
                         return allEdges.map((edge, i) => {
                           const connectedPort = wallPorts.find(wp => wp._id === edge.peer_id);
-                          const connectedAsset = allAssets.find(a => a._id === edge.peer_id);
+                          const connectedAsset = namedAssets.find(a => a._id === edge.peer_id);
                           const isRackMounted = !!connectedAsset?.hierarchy?.rack_id;
                           const isOnFloor = !isRackMounted && filteredAssets.some(a => a._id === edge.peer_id);
                           const lineColor = CONN_COLORS[edge.connection_type] ?? '#9ca3af';
@@ -1136,7 +1199,7 @@ const MapView: React.FC = () => {
                                     <div className={styles.traceStep}>🔀 switch port <span className={styles.traceStepMono}>{connectedPort.switch_port}</span></div>
                                   )}
                                   {connectedPort.switch_asset_id && (() => {
-                                    const sw = allAssets.find(a => a._id === connectedPort.switch_asset_id);
+                                    const sw = namedAssets.find(a => a._id === connectedPort.switch_asset_id);
                                     return sw ? (
                                       <div className={styles.traceStep}>🖧 <span className={styles.traceStepMono}>{sw.basic_info.display_name}</span> <span className={styles.traceStepBadge}>{sw.basic_info.type}</span></div>
                                     ) : null;

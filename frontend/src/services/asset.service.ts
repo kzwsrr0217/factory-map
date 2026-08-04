@@ -19,6 +19,8 @@
  *  - `syncAsset(id)`: trigger ITSM sync for one asset
  *  - `addConnection / updateConnection / removeConnection`: manage asset links
  *  - `getAssetsWithConnections()`: all assets with connections joined (network graph/topology)
+ *  - `getAssetsByIds(ids)`: named assets only — for resolving a connection's far end
+ *  - `getAssetsConnectedTo(id)`: assets whose one-way links point at this asset
  *  - `notifyWorkItem(assetId, itemId)`: send immediate alert for one work-item task
  *  - `acceptItsmSnapshot(id)`: promote pending ITSM snapshot to live data
  *  - `syncAllFromItsm()`: full ITSM sync
@@ -283,6 +285,35 @@ const normalizeAsset = (a: Asset): Asset => ({
   itsm: a.itsm ?? { hardware_asset_id: null, is_managed: false, last_synced: null, sync_status: 'never' },
 });
 
+/**
+ * Every asset matching `params`, fetched page by page — the shared body behind
+ * getAssets() and getAssetsWithConnections(). See getAssets for why paging rather
+ * than one unpaginated call, and what the ceiling means.
+ */
+const sweepAllPages = async (params: Record<string, string | number>): Promise<Asset[]> => {
+  const all: Asset[] = [];
+  let page = 1;
+  let totalPages = 1;
+
+  do {
+    const response = await api.get('/assets', {
+      params: { page, limit: ASSET_PAGE_SIZE, ...params },
+    });
+    all.push(...(response.data.data as Asset[]).map(normalizeAsset));
+    totalPages = response.data.meta?.totalPages ?? 1;
+    page++;
+  } while (page <= totalPages && page <= PAGE_CEILING);
+
+  assetService.lastFetchWasTruncated = totalPages > PAGE_CEILING;
+  return all;
+};
+
+/**
+ * Ids per `?ids=` request. Well under the server's 500 so the URL stays a sane
+ * length; peer lookups are normally a handful of ids and never hit this.
+ */
+const ID_LOOKUP_CHUNK = 100;
+
 export const assetService = {
   // Get all assets
   /**
@@ -300,27 +331,8 @@ export const assetService = {
    * The proper fix at that point is server-side filtering and sorting for the
    * list, not a bigger ceiling.
    */
-  getAssets: async (opts?: { include_master?: boolean }): Promise<Asset[]> => {
-    const all: Asset[] = [];
-    let page = 1;
-    let totalPages = 1;
-
-    do {
-      const response = await api.get('/assets', {
-        params: {
-          page,
-          limit: ASSET_PAGE_SIZE,
-          ...(opts?.include_master ? { include_master: 'true' } : {}),
-        },
-      });
-      all.push(...(response.data.data as Asset[]).map(normalizeAsset));
-      totalPages = response.data.meta?.totalPages ?? 1;
-      page++;
-    } while (page <= totalPages && page <= PAGE_CEILING);
-
-    assetService.lastFetchWasTruncated = totalPages > PAGE_CEILING;
-    return all;
-  },
+  getAssets: async (opts?: { include_master?: boolean }): Promise<Asset[]> =>
+    sweepAllPages(opts?.include_master ? { include_master: 'true' } : {}),
 
   /**
    * Whether the last getAssets() stopped at the ceiling rather than the end of the
@@ -336,9 +348,47 @@ export const assetService = {
     return (response.data.data as Asset[]).map(normalizeAsset);
   },
 
-  // Get all assets including their connections (for network graph / topology)
-  getAssetsWithConnections: async (): Promise<Asset[]> => {
-    const response = await api.get('/assets', { params: { include_connections: 'true' } });
+  /**
+   * Every asset including its connections — for views that really do draw the whole
+   * topology (NetworkGraph, the reports, NetworkInfrastructure).
+   *
+   * Paged, like getAssets: this used to be one unpaginated call, which the server
+   * caps at 1000 rows, so with 1057 assets the graph was quietly missing nodes and
+   * any edge that ended on one of them.
+   *
+   * If all you need is to *name* the far end of a link, don't use this — fetch those
+   * ids with getAssetsByIds instead.
+   */
+  getAssetsWithConnections: async (): Promise<Asset[]> =>
+    sweepAllPages({ include_connections: 'true' }),
+
+  /**
+   * Specific assets by id, chunked. For resolving connection peers — the asset on
+   * another floor, the switch behind a socket — without downloading the estate.
+   * Unknown ids are simply absent from the result.
+   */
+  getAssetsByIds: async (ids: string[]): Promise<Asset[]> => {
+    const unique = [...new Set(ids.filter(Boolean))];
+    if (unique.length === 0) return [];
+    const chunks: string[][] = [];
+    for (let i = 0; i < unique.length; i += ID_LOOKUP_CHUNK) {
+      chunks.push(unique.slice(i, i + ID_LOOKUP_CHUNK));
+    }
+    const responses = await Promise.all(
+      chunks.map((chunk) => api.get('/assets', { params: { ids: chunk.join(',') } })),
+    );
+    return responses.flatMap((r) => (r.data.data as Asset[]).map(normalizeAsset));
+  },
+
+  /**
+   * Assets with a connection pointing AT this one. Only one-way links turn up —
+   * bidirectional ones are mirrored onto both assets already, so the asset's own
+   * connections list has them.
+   */
+  getAssetsConnectedTo: async (assetId: string): Promise<Asset[]> => {
+    const response = await api.get('/assets', {
+      params: { connected_to: assetId, include_connections: 'true' },
+    });
     return (response.data.data as Asset[]).map(normalizeAsset);
   },
 

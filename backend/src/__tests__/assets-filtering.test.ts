@@ -8,6 +8,8 @@
  *   - GET /api/assets?include_connections=true — includes connections array
  *   - GET /api/assets?search=X               — full-text search
  *   - GET /api/assets?type=IPC               — filters by asset type
+ *   - GET /api/assets?ids=a,b                — resolves specific assets by id
+ *   - GET /api/assets?connected_to=X         — assets whose one-way links point at X
  *   - Filter combinations (status + search)
  *   - Unauthenticated request → 401
  */
@@ -225,5 +227,85 @@ describe('GET /api/assets — combined filters', () => {
     expect(res.status).toBe(200);
     const statuses = res.body.data.map((a: any) => a.basic_info?.status ?? a.status);
     expect(statuses.every((s: string) => s === 'active')).toBe(true);
+  });
+});
+
+
+describe('GET /api/assets — id lookup (ids param)', () => {
+  it('returns exactly the assets asked for', async () => {
+    const [first, second] = cleanupIds;
+    const res = await request(app)
+      .get(`/api/assets?ids=${first},${second}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.map((a: any) => a._id).sort()).toEqual([first, second].sort());
+  });
+
+  it('ignores ids that do not exist rather than failing', async () => {
+    const res = await request(app)
+      .get(`/api/assets?ids=${cleanupIds[0]},00000000-0000-0000-0000-000000000000`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(1);
+  });
+
+  it('treats an empty ids list as "nothing", not "everything"', async () => {
+    // The trap this guards: a caller that found no peers sending ids= and getting
+    // back the first 1000 assets, which then look like connection peers.
+    const res = await request(app)
+      .get('/api/assets?ids=')
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual([]);
+  });
+
+  it('rejects more ids than it will look up instead of answering short', async () => {
+    const tooMany = Array.from({ length: 501 }, (_, i) => `id-${i}`).join(',');
+    const res = await request(app)
+      .get(`/api/assets?ids=${tooMany}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/501/);
+  });
+
+  it('combines with other filters rather than overriding them', async () => {
+    const res = await request(app)
+      .get(`/api/assets?ids=${cleanupIds.join(',')}&status=maintenance`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    const names = res.body.data.map((a: any) => a.basic_info.display_name);
+    expect(names).toEqual(['__filter_maint_1__']);
+  });
+});
+
+describe('GET /api/assets — inbound links (connected_to param)', () => {
+  it('finds the asset behind a one-way link, and not the other way round', async () => {
+    const [source, target] = cleanupIds;
+    await request(app)
+      .post(`/api/assets/${source}/connections`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ connected_asset_id: target, connection_type: 'network', bidirectional: false })
+      .expect(201);
+
+    const inbound = await request(app)
+      .get(`/api/assets?connected_to=${target}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(inbound.status).toBe(200);
+    expect(inbound.body.data.map((a: any) => a._id)).toEqual([source]);
+
+    // A one-way link is only visible from its source, which is the whole reason
+    // this param exists — nothing points at the source.
+    const reverse = await request(app)
+      .get(`/api/assets?connected_to=${source}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(reverse.body.data).toEqual([]);
+  });
+
+  it('returns nothing for an asset no link points at', async () => {
+    const res = await request(app)
+      .get('/api/assets?connected_to=00000000-0000-0000-0000-000000000000')
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual([]);
   });
 });

@@ -59,6 +59,19 @@
  *         schema: { type: string }
  *         description: Search across name, serial, IP, hostname, manufacturer
  *       - in: query
+ *         name: ids
+ *         schema: { type: string }
+ *         description: >
+ *           Comma-separated asset ids to resolve, max 500 (400 above that, never a
+ *           silent short answer). For naming the far end of a connection without
+ *           fetching the whole list. An empty value returns nothing, not everything.
+ *       - in: query
+ *         name: connected_to
+ *         schema: { type: string }
+ *         description: >
+ *           Assets whose connections point at this asset id. Only one-way links show
+ *           up here — bidirectional ones are already mirrored onto both assets.
+ *       - in: query
  *         name: page
  *         schema: { type: integer, default: 1 }
  *       - in: query

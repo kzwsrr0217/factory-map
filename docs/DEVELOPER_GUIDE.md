@@ -388,7 +388,7 @@ Similar CRUD, filtered by `section_id`.
 
 | Method | Path | Query params | Notes |
 |--------|------|-------------|-------|
-| GET | `/` | `floor_id, building_id, workarea_id, section_id, status, type, is_placed, q, page, limit, include_connections, include_master, orphaned` | Full-text search on display_name, serial, asset_tag, manufacturer, model, IP, hostname, person. `orphaned=true` filters to assets with a `master_ifs_id` that no longer resolves to a `MasterAsset` row |
+| GET | `/` | `floor_id, building_id, workarea_id, section_id, status, type, is_placed, q, page, limit, include_connections, include_master, orphaned, ids, connected_to` | Full-text search on display_name, serial, asset_tag, manufacturer, model, IP, hostname, person. `orphaned=true` filters to assets with a `master_ifs_id` that no longer resolves to a `MasterAsset` row |
 | GET | `/lookups` | — | Distinct values for all autocomplete fields |
 | GET | `/maintenance-counts` | — | `{ overdue, due_soon }` — excludes replaced assets (`successor_id` set) |
 | GET | `/:id` | — | Single asset with software + connections; always resolves `master` (`null` if orphaned) |
@@ -402,6 +402,8 @@ Similar CRUD, filtered by `section_id`.
 | PATCH | `/:id/connections/:connId` | — | Update connection (by connection `id`, not target asset — supports multiple distinct connections to the same pair) |
 | DELETE | `/:id/connections/:connId` | — | Remove connection (also removes reverse, if bidirectional) |
 | POST | `/:id/work-items/:taskId/notify` | — | Send immediate alert for one work item; sets `alert_sent=true` |
+
+**Id lookup**: `ids=a,b,c` returns just those assets — for naming the far end of a connection without fetching the list. Max 500 per request (400 above that, deliberately not a short answer); an empty value returns nothing, not everything. `connected_to=<id>` returns assets whose connections point at that asset; only one-way links appear, since bidirectional ones are mirrored onto both assets.
 
 **Pagination**: when `page` and `limit` are provided, the response includes `{ data, meta: { page, limit, total, totalPages } }`. Without them, the response includes `{ data, meta: { limit: 1000, truncated: boolean } }` — up to 1000 assets are returned and `meta.truncated` is `true` if there are more. Explicit `limit` is capped at 500.
 
