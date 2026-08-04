@@ -20,6 +20,7 @@
  *  - `addConnection / updateConnection / removeConnection`: manage asset links
  *  - `getAssetsWithConnections()`: all assets with connections joined (network graph/topology)
  *  - `getAssetsByBuilding(buildingId)`: assets in one building
+ *  - `getUnplacedAssets()`: everything not placed on a floor plan yet
  *  - `getAssetsByRack(rackId)`: devices mounted in one rack
  *  - `getAssetsByIds(ids)`: named assets only — for resolving a connection's far end
  *  - `getAssetsConnectedTo(id)`: assets whose one-way links point at this asset
@@ -291,11 +292,22 @@ const normalizeAsset = (a: Asset): Asset => ({
 });
 
 /**
- * Every asset matching `params`, fetched page by page — the shared body behind
- * getAssets() and getAssetsWithConnections(). See getAssets for why paging rather
- * than one unpaginated call, and what the ceiling means.
+ * Every asset matching `params`, fetched page by page.
+ *
+ * Used by every "give me this whole set" call, filtered or not, because the
+ * unpaginated form of GET /assets stops at 1000 rows and says so only in a `meta`
+ * field nothing read. A filter does not make that safe: a floor or a building can
+ * hold more than a thousand devices, and losing the overflow shows up as devices
+ * missing from a map rather than as an error.
+ *
+ * `trackTruncation` is only set by the full-estate sweep, whose result the Dashboard
+ * checks before presenting a list as complete. A smaller filtered sweep finishing
+ * afterwards must not clear that warning.
  */
-const sweepAllPages = async (params: Record<string, string | number>): Promise<Asset[]> => {
+const sweepAllPages = async (
+  params: Record<string, string | number>,
+  trackTruncation = false,
+): Promise<Asset[]> => {
   const all: Asset[] = [];
   let page = 1;
   let totalPages = 1;
@@ -309,7 +321,7 @@ const sweepAllPages = async (params: Record<string, string | number>): Promise<A
     page++;
   } while (page <= totalPages && page <= PAGE_CEILING);
 
-  assetService.lastFetchWasTruncated = totalPages > PAGE_CEILING;
+  if (trackTruncation) assetService.lastFetchWasTruncated = totalPages > PAGE_CEILING;
   return all;
 };
 
@@ -337,7 +349,7 @@ export const assetService = {
    * list, not a bigger ceiling.
    */
   getAssets: async (opts?: { include_master?: boolean }): Promise<Asset[]> =>
-    sweepAllPages(opts?.include_master ? { include_master: 'true' } : {}),
+    sweepAllPages(opts?.include_master ? { include_master: 'true' } : {}, true),
 
   /**
    * Whether the last getAssets() stopped at the ceiling rather than the end of the
@@ -365,24 +377,27 @@ export const assetService = {
    * ids with getAssetsByIds instead.
    */
   getAssetsWithConnections: async (): Promise<Asset[]> =>
-    sweepAllPages({ include_connections: 'true' }),
+    sweepAllPages({ include_connections: 'true' }, true),
 
   /** Assets in one building. Server-filtered, for the pickers that only need one. */
-  getAssetsByBuilding: async (buildingId: string): Promise<Asset[]> => {
-    const response = await api.get('/assets', { params: { building_id: buildingId } });
-    return (response.data.data as Asset[]).map(normalizeAsset);
-  },
+  getAssetsByBuilding: async (buildingId: string): Promise<Asset[]> =>
+    sweepAllPages({ building_id: buildingId }),
+
+  /**
+   * Devices not standing anywhere on a floor plan yet — the survey backlog, and the
+   * one list that is currently bigger than the server's unpaginated cap (1054 of
+   * 1057 rows). Superseded rows are filtered by the caller, since the list endpoint
+   * keeps them.
+   */
+  getUnplacedAssets: async (): Promise<Asset[]> =>
+    sweepAllPages({ is_placed: 'false' }),
 
   /**
    * Devices mounted in one rack. Server-filtered: the rack view used to fetch every
    * asset with its connections to find the handful in one cabinet.
    */
-  getAssetsByRack: async (rackId: string): Promise<Asset[]> => {
-    const response = await api.get('/assets', {
-      params: { rack_id: rackId, include_connections: 'true' },
-    });
-    return (response.data.data as Asset[]).map(normalizeAsset);
-  },
+  getAssetsByRack: async (rackId: string): Promise<Asset[]> =>
+    sweepAllPages({ rack_id: rackId, include_connections: 'true' }),
 
   /**
    * Specific assets by id, chunked. For resolving connection peers — the asset on
@@ -417,12 +432,12 @@ export const assetService = {
   // Get assets filtered by floor ID (includes connections for map rendering,
   // and optionally the resolved master-data join so the map can flag
   // orphaned assets — see getOrphanedAssets)
-  getAssetsByFloor: async (floorId: string, opts?: { include_master?: boolean }): Promise<Asset[]> => {
-    const response = await api.get('/assets', {
-      params: { floor_id: floorId, include_connections: 'true', ...(opts?.include_master ? { include_master: 'true' } : {}) },
-    });
-    return (response.data.data as Asset[]).map(normalizeAsset);
-  },
+  getAssetsByFloor: async (floorId: string, opts?: { include_master?: boolean }): Promise<Asset[]> =>
+    sweepAllPages({
+      floor_id: floorId,
+      include_connections: 'true',
+      ...(opts?.include_master ? { include_master: 'true' } : {}),
+    }),
 
   // IT-managed devices (IPCs, etc.) mounted on the physical machine this
   // asset represents — see backend/src/entities/MasterAsset.entity.ts

@@ -13,10 +13,11 @@
  * live search box for large inventories. The "Before → After" row previews
  * both asset names before confirming.
  */
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { ArrowRight } from 'lucide-react';
 import Modal from '../common/Modal';
 import Button from '../common/Button';
+import { useAssetSearch } from '../../hooks/useAssetSearch';
 import { assetService, Asset } from '../../services/asset.service';
 import { getAssetIcon } from '../../utils/assetTypes';
 import { useToast } from '../../contexts/ToastContext';
@@ -36,7 +37,6 @@ const ReplaceAssetModal: React.FC<ReplaceAssetModalProps> = ({
   currentAsset,
 }) => {
   const toast = useToast();
-  const [allAssets, setAllAssets] = useState<Asset[]>([]);
   const [search, setSearch] = useState('');
   const [selectedId, setSelectedId] = useState('');
   const [saving, setSaving] = useState(false);
@@ -45,22 +45,20 @@ const ReplaceAssetModal: React.FC<ReplaceAssetModalProps> = ({
     if (!isOpen) return;
     setSearch('');
     setSelectedId('');
-    assetService.getAssets()
-      .then(assets => setAllAssets(assets.filter(a => a._id !== currentAsset._id)))
-      .catch(() => toast.error('Failed to load assets'));
-  }, [isOpen, currentAsset._id, toast]);
+  }, [isOpen]);
 
-  const filtered = allAssets.filter(a => {
-    if (!search) return true;
-    const q = search.toLowerCase();
-    return (
-      a.basic_info.display_name.toLowerCase().includes(q) ||
-      (a.custom_fields?.object_id ?? '').toLowerCase().includes(q) ||
-      (a.basic_info.asset_tag ?? '').toLowerCase().includes(q)
-    );
-  });
+  /**
+   * Candidates come from the server's own search rather than a download of every
+   * asset filtered in the browser: the replacement is one specific device whose name
+   * or tag the person already has in hand.
+   */
+  const { results, loading: searching, active } = useAssetSearch(search);
+  const filtered = useMemo(
+    () => results.filter(a => a._id !== currentAsset._id),
+    [results, currentAsset._id],
+  );
 
-  const selectedAsset = allAssets.find(a => a._id === selectedId) ?? null;
+  const selectedAsset = filtered.find(a => a._id === selectedId) ?? null;
 
   const handleConfirm = async () => {
     if (!selectedId) return;
@@ -136,7 +134,13 @@ const ReplaceAssetModal: React.FC<ReplaceAssetModalProps> = ({
 
         <div className={styles.list}>
           {filtered.length === 0 && (
-            <div className={styles.empty}>No assets found</div>
+            <div className={styles.empty}>
+              {!active
+                ? 'Type at least two characters to find the replacement.'
+                : searching
+                  ? 'Searching…'
+                  : `No asset matches “${search.trim()}”.`}
+            </div>
           )}
           {filtered.map(a => (
             <div

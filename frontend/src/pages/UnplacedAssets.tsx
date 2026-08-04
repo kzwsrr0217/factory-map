@@ -19,7 +19,7 @@ import { Asset } from '../services/asset.service';
 import { Building } from '../services/hierarchy.service';
 import { Floor } from '../services/floor.service';
 import { getAssetIcon } from '../utils/assetTypes';
-import { useAssets } from '../hooks/queries/useAssets';
+import { useUnplacedAssets } from '../hooks/queries/useAssets';
 import { useBuildings } from '../hooks/queries/useBuildings';
 import { useFloors } from '../hooks/queries/useFloors';
 import { isAwaitingPlacement } from '../utils/assetPlacement';
@@ -33,11 +33,13 @@ interface GroupedEntry {
 
 const UnplacedAssets: React.FC = () => {
   const navigate = useNavigate();
-  const { data: allAssets = [], isLoading: loadingAssets, refetch } = useAssets();
+  // Server-filtered to the unplaced ones; superseded rows are still dropped here
+  // because the list endpoint keeps them (only the stats exclude them).
+  const { data: unplacedFromServer = [], isLoading: loadingAssets, refetch } = useUnplacedAssets();
   const { data: buildings = [], isLoading: loadingBuildings } = useBuildings();
   const { data: allFloors = [], isLoading: loadingFloors } = useFloors();
   const loading = loadingAssets || loadingBuildings || loadingFloors;
-  const assets = allAssets.filter(isAwaitingPlacement);
+  const assets = unplacedFromServer.filter(isAwaitingPlacement);
   const floors: Floor[] = allFloors;
 
   const grouped: GroupedEntry[] = React.useMemo(() => {

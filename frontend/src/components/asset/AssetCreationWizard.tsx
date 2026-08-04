@@ -12,7 +12,7 @@
  * final Review step (or when "Save now" is clicked from any step). Connections
  * are posted after the asset is created.
  */
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import Modal from '../common/Modal';
 import Button from '../common/Button';
 import Input from '../common/Input';
@@ -27,6 +27,7 @@ import { networkService, WallPort, NetworkRack } from '../../services/network.se
 import { ASSET_TYPE_OPTIONS } from '../../utils/assetTypes';
 import { ASSET_TEMPLATES } from '../../utils/assetTemplates';
 import { usePersonSuggestions, invalidatePersonSuggestions } from '../../hooks/usePersonSuggestions';
+import { useAssetSearch } from '../../hooks/useAssetSearch';
 import { useAssetLookups, invalidateLookupCache } from '../../hooks/useAssetLookups';
 import { useToast } from '../../contexts/ToastContext';
 import styles from '../../styles/components/AssetCreationWizard.module.css';
@@ -170,7 +171,6 @@ const AssetCreationWizard: React.FC<AssetCreationWizardProps> = ({
   const [workareas, setWorkareas]   = useState<WorkArea[]>([]);
   const [sections, setSections]     = useState<Section[]>([]);
   const [wallPorts, setWallPorts]   = useState<WallPort[]>([]);
-  const [allAssets, setAllAssets]   = useState<AssetOption[]>([]);
   const [racks,     setRacks]       = useState<NetworkRack[]>([]);
 
   // ── Connection draft inputs ─────────────────────────────────────────────────
@@ -180,6 +180,20 @@ const AssetCreationWizard: React.FC<AssetCreationWizardProps> = ({
   const [connBidi,        setConnBidi]        = useState(true);
   const [connSourcePort,  setConnSourcePort]  = useState('');
   const [connTargetPort,  setConnTargetPort]  = useState('');
+  /**
+   * Connection candidates, searched server-side on what has been typed. This was the
+   * whole asset list downloaded when the wizard opened, to fill a datalist — and
+   * capped at 1000 rows, so the newest devices could not be picked at all.
+   */
+  const connCandidates = useAssetSearch(connSearch);
+  const connOptions: AssetOption[] = useMemo(
+    () => connCandidates.results.map(a => ({
+      _id: a._id,
+      label: a.basic_info.display_name +
+        (a.custom_fields?.object_id ? ` [${a.custom_fields.object_id}]` : ''),
+    })),
+    [connCandidates.results],
+  );
 
   const personSuggestions = usePersonSuggestions();
   const lookups = useAssetLookups();
@@ -200,13 +214,6 @@ const AssetCreationWizard: React.FC<AssetCreationWizardProps> = ({
     setWallPorts([]);
 
     hierarchyService.getBuildings().then(setBuildings).catch(() => {});
-    assetService.getAssets().then(assets =>
-      setAllAssets(assets.map(a => ({
-        _id: a._id,
-        label: a.basic_info.display_name +
-          (a.custom_fields?.object_id ? ` [${a.custom_fields.object_id}]` : ''),
-      })))
-    ).catch(() => {});
 
     // Pre-load floors if a default building is provided
     if (defaultBuildingId) {
@@ -389,8 +396,8 @@ const AssetCreationWizard: React.FC<AssetCreationWizardProps> = ({
 
   // ── Add connection draft ──────────────────────────────────────────────────
   const handleAddConnection = () => {
-    const matched = allAssets.find(a => a.label === connSearch);
-    if (!matched) { toast.error('Select an asset from the list first'); return; }
+    const matched = connOptions.find(a => a.label === connSearch);
+    if (!matched) { toast.error('Pick an asset from the suggestions first'); return; }
     setConnections(cs => [...cs, {
       tempId: Date.now().toString(),
       connected_asset_id:    matched._id,
@@ -638,11 +645,11 @@ const AssetCreationWizard: React.FC<AssetCreationWizardProps> = ({
         <div className={styles.addConnRow}>
           <Select value={connType} onChange={setConnType} options={CONN_TYPE_OPTIONS} placeholder="Type" />
           <datalist id="wiz-asset-list">
-            {allAssets.map(a => <option key={a._id} value={a.label} />)}
+            {connOptions.map(a => <option key={a._id} value={a.label} />)}
           </datalist>
           <input list="wiz-asset-list" className={styles.assetSearch}
             value={connSearch} onChange={e => setConnSearch(e.target.value)}
-            placeholder="Search asset…" />
+            placeholder="Type 2+ characters to find an asset…" />
           <input className={styles.labelInput} value={connSourcePort}
             onChange={e => setConnSourcePort(e.target.value)} placeholder="My port (e.g. Gi0/1)" />
           <input className={styles.labelInput} value={connTargetPort}

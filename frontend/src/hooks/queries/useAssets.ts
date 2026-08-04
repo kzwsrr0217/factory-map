@@ -5,6 +5,8 @@ export const assetKeys = {
   all: ['assets'] as const,
   stats: ['assets', 'stats'] as const,
   byFloor: (floorId: string) => ['assets', 'floor', floorId] as const,
+  byBuilding: (buildingId: string) => ['assets', 'building', buildingId] as const,
+  unplaced: ['assets', 'unplaced'] as const,
   detail: (id: string) => ['assets', id] as const,
   history: (id: string) => ['assets', id, 'history'] as const,
 };
@@ -13,6 +15,27 @@ export function useAssets() {
   return useQuery({
     queryKey: assetKeys.all,
     queryFn: () => assetService.getAssets(),
+  });
+}
+
+/**
+ * The survey backlog: devices not standing on any floor plan yet. Filtered by the
+ * server — the Unplaced Assets page used to fetch every asset and keep the unplaced
+ * ones, which today is 1054 rows out of 1057 but will not stay that way.
+ */
+export function useUnplacedAssets() {
+  return useQuery({
+    queryKey: ['assets', 'unplaced'] as const,
+    queryFn: () => assetService.getUnplacedAssets(),
+  });
+}
+
+/** One building's devices, filtered by the server rather than in the browser. */
+export function useAssetsByBuilding(buildingId: string | undefined) {
+  return useQuery({
+    queryKey: ['assets', 'building', buildingId] as const,
+    queryFn: () => assetService.getAssetsByBuilding(buildingId!),
+    enabled: !!buildingId,
   });
 }
 

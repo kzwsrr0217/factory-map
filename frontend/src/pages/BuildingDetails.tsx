@@ -28,7 +28,7 @@ import { Floor } from '../services/floor.service';
 import { useToast } from '../contexts/ToastContext';
 import { useBuilding, useDeleteBuilding } from '../hooks/queries/useBuildings';
 import { useFloors, useDeleteFloor } from '../hooks/queries/useFloors';
-import { useAssets } from '../hooks/queries/useAssets';
+import { useAssetsByBuilding } from '../hooks/queries/useAssets';
 import { getApiErrorMessage } from '../utils/apiError';
 import styles from '../styles/pages/BuildingDetails.module.css';
 
@@ -39,11 +39,11 @@ const BuildingDetails: React.FC = () => {
 
   const { data: building, isLoading: loadingBuilding, isError } = useBuilding(id);
   const { data: floors = [], refetch: refetchFloors } = useFloors(id);
-  const { data: allAssets = [] } = useAssets();
+  // Filtered by the server; this page used to fetch every asset in the database and
+  // keep the ones in this building.
+  const { data: buildingAssets = [] } = useAssetsByBuilding(id);
 
-  const assets = allAssets.filter(
-    a => a.hierarchy.building_id === id && a.basic_info && a.itsm
-  );
+  const assets = buildingAssets.filter(a => a.basic_info && a.itsm);
 
   const deleteBuilding = useDeleteBuilding();
   const deleteFloor = useDeleteFloor();

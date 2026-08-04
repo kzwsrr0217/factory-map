@@ -59,63 +59,54 @@ const AssetRelationships: React.FC<AssetRelationshipsProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, assetId]);
 
+  /**
+   * Both directions of this asset's parent-child and dependency links.
+   *
+   * The direction convention here is the one the existing view already used: an edge
+   * runs child → parent, so a link pointing AT this asset makes the other end a
+   * child (or, for `dependency`, something that depends on this asset), and a link
+   * FROM this asset points at its parent.
+   *
+   * Inbound links used to be found by downloading every asset and scanning each
+   * one's connection list. `GET /assets?connected_to=` answers the same question in
+   * the database, which is also the only version that stays correct: the download
+   * was capped at 1000 rows, so a dependant past that cap was silently invisible
+   * here — on the panel whose whole job is "what breaks if I touch this".
+   */
   const loadRelationships = async () => {
     try {
       setLoading(true);
-      const allAssets = await assetService.getAssets();
-      const currentAsset = allAssets.find(a => a._id === assetId);
-      
+      const [currentAsset, inboundAssets] = await Promise.all([
+        assetService.getAsset(assetId),
+        assetService.getAssetsConnectedTo(assetId),
+      ]);
       if (!currentAsset) return;
 
       const parents: RelationshipNode[] = [];
       const children: RelationshipNode[] = [];
       const dependencies: RelationshipNode[] = [];
 
-      // Find parent-child relationships
-      allAssets.forEach(asset => {
-        if (asset.connections) {
-          asset.connections.forEach(connection => {
-            if (connection.connection_type === 'parent-child') {
-              if (connection.connected_asset_id === assetId) {
-                // This asset is a child of current asset
-                const parentAsset = allAssets.find(a => a._id === asset._id);
-                if (parentAsset) {
-                  children.push({
-                    asset: parentAsset,
-                    level: 1,
-                    type: 'child',
-                  });
-                }
-              } else if (asset._id === assetId) {
-                // Current asset has a parent
-                const childAsset = allAssets.find(a => a._id === connection.connected_asset_id);
-                if (childAsset) {
-                  parents.push({
-                    asset: childAsset,
-                    level: 1,
-                    type: 'parent',
-                  });
-                }
-              }
-            } else if (connection.connection_type === 'dependency') {
-              if (connection.connected_asset_id === assetId) {
-                // This asset depends on current asset
-                const dependentAsset = allAssets.find(a => a._id === asset._id);
-                if (dependentAsset) {
-                  dependencies.push({
-                    asset: dependentAsset,
-                    level: 1,
-                    type: 'dependency',
-                  });
-                }
-              }
-            }
-          });
+      for (const other of inboundAssets) {
+        for (const c of other.connections ?? []) {
+          if (c.connected_asset_id !== assetId) continue;
+          if (c.connection_type === 'parent-child') children.push({ asset: other, level: 1, type: 'child' });
+          else if (c.connection_type === 'dependency') dependencies.push({ asset: other, level: 1, type: 'dependency' });
         }
-      });
+      }
+
+      // Outbound parent-child links name this asset's parents; resolve just those ids.
+      const parentIds = [...new Set(
+        (currentAsset.connections ?? [])
+          .filter(c => c.connection_type === 'parent-child')
+          .map(c => c.connected_asset_id),
+      )];
+      if (parentIds.length > 0) {
+        const parentAssets = await assetService.getAssetsByIds(parentIds);
+        parentAssets.forEach(a => parents.push({ asset: a, level: 1, type: 'parent' }));
+      }
 
       setRelationships({ parents, children, dependencies });
-      analyzeImpact(currentAsset, allAssets);
+      analyzeImpact(currentAsset, inboundAssets);
     } catch (error) {
       console.error('Error loading relationships:', error);
     } finally {
@@ -123,21 +114,17 @@ const AssetRelationships: React.FC<AssetRelationshipsProps> = ({
     }
   };
 
-  const analyzeImpact = (_asset: Asset, allAssets: Asset[]) => {
-    const affectedAssets: Asset[] = [];
+  /**
+   * `inboundAssets` are exactly the assets with a link pointing at this one, so the
+   * affected set is that list filtered to the two types that mean "breaks with it".
+   */
+  const analyzeImpact = (_asset: Asset, inboundAssets: Asset[]) => {
+    const affectedAssets: Asset[] = inboundAssets.filter(other =>
+      (other.connections ?? []).some(c =>
+        c.connected_asset_id === assetId &&
+        (c.connection_type === 'dependency' || c.connection_type === 'parent-child')),
+    );
     let riskLevel: 'low' | 'medium' | 'high' = 'low';
-
-    // Find assets that depend on this asset
-    allAssets.forEach(otherAsset => {
-      if (otherAsset.connections) {
-        otherAsset.connections.forEach(connection => {
-          if (connection.connected_asset_id === assetId && 
-              (connection.connection_type === 'dependency' || connection.connection_type === 'parent-child')) {
-            affectedAssets.push(otherAsset);
-          }
-        });
-      }
-    });
 
     // Determine risk level based on number of affected assets and their criticality
     if (affectedAssets.length > 10) {

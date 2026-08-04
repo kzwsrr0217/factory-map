@@ -6,7 +6,7 @@
  * causes the backend to also create the reverse link.
  *
  * Connection fields:
- *   connected_asset_id — target asset UUID (selected from dropdown).
+ *   connected_asset_id — target asset UUID (found by typing; see useAssetSearch).
  *   connection_type    — one of CONNECTION_TYPES (network, power, USB, etc.).
  *   strength           — weak / normal / strong (STRENGTH_LEVELS).
  *   bidirectional      — if true the backend creates both A→B and B→A.
@@ -17,11 +17,12 @@
  *
  * Remove uses a ConfirmDialog to prevent accidental deletions.
  */
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import Modal from '../common/Modal';
 import Button from '../common/Button';
 import ConfirmDialog from '../common/ConfirmDialog';
 import { assetService, Asset } from '../../services/asset.service';
+import { useAssetSearch } from '../../hooks/useAssetSearch';
 import { useToast } from '../../contexts/ToastContext';
 import { getApiErrorMessage } from '../../utils/apiError';
 import styles from '../../styles/components/ConnectionManager.module.css';
@@ -77,8 +78,14 @@ const ConnectionManager: React.FC<ConnectionManagerProps> = ({
   assetName,
 }) => {
   const [connections, setConnections] = useState<AssetConnection[]>([]);
-  const [allAssets, setAllAssets] = useState<any[]>([]);
-  const [availableAssets, setAvailableAssets] = useState<any[]>([]);
+  /**
+   * Names for the assets on the far end of the existing connections, keyed by id.
+   * Fetched by id — this used to come from a download of every asset in the
+   * database, which is a lot of JSON to render a handful of names.
+   */
+  const [peerNames, setPeerNames] = useState<Record<string, string>>({});
+  /** What the user is typing to find the asset to connect to. */
+  const [peerQuery, setPeerQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingConnection, setEditingConnection] = useState<AssetConnection | null>(null);
@@ -98,10 +105,7 @@ const ConnectionManager: React.FC<ConnectionManagerProps> = ({
   });
 
   useEffect(() => {
-    if (isOpen) {
-      loadConnections();
-      loadAvailableAssets();
-    }
+    if (isOpen) loadConnections();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, assetId]);
 
@@ -109,7 +113,16 @@ const ConnectionManager: React.FC<ConnectionManagerProps> = ({
     try {
       setLoading(true);
       const asset = await assetService.getAsset(assetId);
-      setConnections(asset.connections || []);
+      const rows = asset.connections || [];
+      setConnections(rows);
+      // Just the far ends referenced here, by id.
+      const peerIds = [...new Set(rows.map((c) => c.connected_asset_id))];
+      if (peerIds.length > 0) {
+        const peers = await assetService.getAssetsByIds(peerIds);
+        setPeerNames(Object.fromEntries(peers.map((p) => [p._id, p.basic_info.display_name])));
+      } else {
+        setPeerNames({});
+      }
     } catch (error) {
       console.error('Error loading connections:', error);
     } finally {
@@ -117,18 +130,19 @@ const ConnectionManager: React.FC<ConnectionManagerProps> = ({
     }
   };
 
-  const loadAvailableAssets = async () => {
-    try {
-      const assets = await assetService.getAssets();
-      setAllAssets(assets);
-      // Deliberately does NOT exclude assets already connected to — a pair
-      // can have several distinct connections (e.g. two physical cables),
-      // so already being connected must not remove a peer from this list.
-      setAvailableAssets(assets.filter(asset => asset._id !== assetId));
-    } catch (error) {
-      console.error('Error loading available assets:', error);
-    }
-  };
+  /**
+   * Candidates for a new connection: whatever the typed query matches, minus this
+   * asset itself.
+   *
+   * Deliberately does NOT exclude assets already connected to — a pair can have
+   * several distinct connections (e.g. two physical cables), so already being
+   * connected must not remove a peer from the list.
+   */
+  const peerSearch = useAssetSearch(peerQuery);
+  const peerCandidates = useMemo(
+    () => peerSearch.results.filter((a) => a._id !== assetId),
+    [peerSearch.results, assetId],
+  );
 
   const buildPatchPanel = (fd: ConnectionFormData) => {
     const pp = { panel_name: fd.patch_panel_name || undefined, panel_port: fd.patch_panel_port || undefined, switch_name: fd.switch_name || undefined, switch_port: fd.switch_port || undefined };
@@ -140,7 +154,6 @@ const ConnectionManager: React.FC<ConnectionManagerProps> = ({
       setLoading(true);
       await assetService.addConnection(assetId, { ...formData, patch_panel: buildPatchPanel(formData) });
       await loadConnections();
-      await loadAvailableAssets();
       setShowAddForm(false);
       resetForm();
     } catch (err) {
@@ -179,7 +192,6 @@ const ConnectionManager: React.FC<ConnectionManagerProps> = ({
       setLoading(true);
       await assetService.removeConnection(assetId, deleteTargetId);
       await loadConnections();
-      await loadAvailableAssets();
       toast.success('Connection removed');
     } catch (err) {
       console.error('Error deleting connection:', err);
@@ -221,10 +233,7 @@ const ConnectionManager: React.FC<ConnectionManagerProps> = ({
     });
   };
 
-  const getConnectedAssetName = (assetId: string) => {
-    const asset = allAssets.find(a => a._id === assetId);
-    return asset ? asset.basic_info.display_name : 'Unknown Asset';
-  };
+  const getConnectedAssetName = (peerId: string) => peerNames[peerId] ?? 'Unknown Asset';
 
   return (
     <>
@@ -303,15 +312,35 @@ const ConnectionManager: React.FC<ConnectionManagerProps> = ({
               {!editingConnection && (
                 <div className={styles.formGroup}>
                   <label>Connected Asset:</label>
+                  {/* Typed, not a dropdown of the whole estate: at 1057 devices — and
+                      far more after the survey — a select is both a big download and
+                      unusable to scroll. */}
+                  <input
+                    type="text"
+                    value={peerQuery}
+                    onChange={(e) => { setPeerQuery(e.target.value); setFormData({ ...formData, connected_asset_id: '' }); }}
+                    placeholder="Type a name, serial or IP to find the device…"
+                    aria-label="Find the device to connect to"
+                  />
                   <select
                     value={formData.connected_asset_id}
                     onChange={(e) => setFormData({ ...formData, connected_asset_id: e.target.value })}
                     required
+                    disabled={peerCandidates.length === 0}
                   >
-                    <option value="">Select an asset...</option>
-                    {availableAssets.map(asset => (
+                    <option value="">
+                      {!peerSearch.active
+                        ? 'Type at least two characters…'
+                        : peerSearch.loading
+                          ? 'Searching…'
+                          : peerCandidates.length === 0
+                            ? 'No device matches'
+                            : `Select one of ${peerCandidates.length} matches…`}
+                    </option>
+                    {peerCandidates.map(asset => (
                       <option key={asset._id} value={asset._id}>
                         {asset.basic_info.display_name}
+                        {asset.basic_info.serial_number ? ` — ${asset.basic_info.serial_number}` : ''}
                       </option>
                     ))}
                   </select>

@@ -4,6 +4,7 @@ import QRCode from 'qrcode';
 import { RefreshCw, QrCode, Tag, AlertTriangle, MoreVertical, CheckCircle, MapPin, History, UserRoundCog } from 'lucide-react';
 import Card from '../components/common/Card';
 import PhysicalPathTrace from '../components/network/PhysicalPathTrace';
+import { useAssetSearch } from '../hooks/useAssetSearch';
 import SwitchImpactPanel from '../components/network/SwitchImpactPanel';
 import Button from '../components/common/Button';
 import Badge from '../components/common/Badge';
@@ -73,7 +74,7 @@ const AssetDetails: React.FC = () => {
   const toast = useToast();
 
   // Connections management
-  const [allAssets, setAllAssets]         = useState<{ _id: string; label: string }[]>([]);
+  const [peerNames, setPeerNames]         = useState<Record<string, string>>({});
   const [connSearch, setConnSearch]       = useState('');
   const [connType, setConnType]           = useState('ethernet');
   const [connSourcePort, setConnSourcePort] = useState('');
@@ -136,11 +137,24 @@ const AssetDetails: React.FC = () => {
     if (id) loadAssetDetails(id);
   }, [id, loadAssetDetails]);
 
+  /**
+   * Names for the far ends of this asset's own connections, fetched by id. This was a
+   * download of every asset in the database, used for two things: naming these few
+   * peers, and feeding the "connect to" typeahead. Both are now asked for by need —
+   * and the download was capped at 1000 rows, so a peer past the cap showed as "…".
+   */
   useEffect(() => {
-    assetService.getAssets().then(all => {
-      setAllAssets(all.map(a => ({ _id: a._id!, label: a.basic_info?.display_name ?? a._id! })));
-    }).catch(() => {});
-  }, []);
+    const peerIds = [...new Set((asset?.connections ?? []).map(c => c.connected_asset_id))];
+    if (peerIds.length === 0) { setPeerNames({}); return; }
+    assetService.getAssetsByIds(peerIds)
+      .then(peers => setPeerNames(Object.fromEntries(
+        peers.map(p => [p._id, p.basic_info?.display_name ?? p._id]),
+      )))
+      .catch(() => {});
+  }, [asset?.connections]);
+
+  /** Candidates for a new connection — server-side, on what has been typed. */
+  const connCandidates = useAssetSearch(connSearch);
 
   // Close overflow menu on outside click
   useEffect(() => {
@@ -173,8 +187,10 @@ const AssetDetails: React.FC = () => {
 
   const handleAddConnection = async () => {
     if (!asset || !id) return;
-    const matched = allAssets.find(a => a.label === connSearch || a._id === connSearch);
-    if (!matched) { toast.error('Select an asset from the list first'); return; }
+    const matched = connCandidates.results.find(
+      a => a.basic_info.display_name === connSearch || a._id === connSearch,
+    );
+    if (!matched) { toast.error('Pick an asset from the suggestions first'); return; }
     setAddingConn(true);
     try {
       const updated = await assetService.addConnection(id, {
@@ -1040,13 +1056,15 @@ const AssetDetails: React.FC = () => {
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: 1, minWidth: '180px' }}>
                     <label style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)' }}>Connected asset</label>
                     <datalist id="detail-asset-list">
-                      {allAssets.filter(a => a._id !== id).map(a => <option key={a._id} value={a.label} />)}
+                      {connCandidates.results
+                        .filter(a => a._id !== id)
+                        .map(a => <option key={a._id} value={a.basic_info.display_name} />)}
                     </datalist>
                     <input
                       list="detail-asset-list"
                       style={{ height: '36px', padding: '0 8px', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', background: 'var(--color-bg-primary)', color: 'var(--color-text-primary)', fontSize: '0.875rem' }}
                       value={connSearch} onChange={e => setConnSearch(e.target.value)}
-                      placeholder="Search asset…"
+                      placeholder="Type 2+ characters to find an asset…"
                     />
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', width: '120px' }}>
@@ -1101,8 +1119,7 @@ const AssetDetails: React.FC = () => {
                 </thead>
                 <tbody>
                   {asset.connections.map(c => {
-                    const peer = allAssets.find(a => a._id === c.connected_asset_id);
-                    const peerName = peer?.label ?? '…';
+                    const peerName = peerNames[c.connected_asset_id] ?? '…';
                     return (
                       <tr key={c.id} style={{ borderBottom: '1px solid var(--color-gray-100)' }}>
                         <td style={{ padding: '6px 8px' }}>
