@@ -70,22 +70,26 @@ After 5 failed login attempts, your account is locked for 30 minutes. The login 
 
 ## Navigation
 
-The left **sidebar** is the main navigation menu:
+The left **sidebar** is the main navigation menu, in groups:
 
-| Section | Description |
-|---------|-------------|
-| Dashboard | Overview statistics, asset list, bulk actions |
-| Buildings | Browse buildings and floors |
-| Map View | Interactive floor plan map |
-| Unplaced | Assets not yet positioned on any floor plan |
-| Reports | Asset statistics and ITSM sync |
-| Network | Force-directed graph of all asset connections |
-| Infra | Physical network infrastructure — rooms, racks, patch panels, wall ports |
-| Maintenance | Monthly calendar of scheduled maintenance |
-| ITSM Reconcile | Compare assets against the ITSM system (read-only) and resolve differences per field |
-| Audit Log | Immutable history of all changes |
-| Alerts | Maintenance alert configuration *(admin only)* |
-| Settings | Personal preferences, map settings, user management |
+| Group | Section | Description |
+|-------|---------|-------------|
+| — | Dashboard | Overview statistics, asset list, bulk actions |
+| Places | Buildings | Browse buildings and floors |
+| Places | Map View | Interactive floor plan map |
+| Devices | Unplaced Assets | Assets not yet positioned on any floor plan |
+| Devices | Orphaned Assets | Assets whose IFS/CMDB master row no longer resolves |
+| Devices | Maintenance | Monthly calendar of scheduled maintenance |
+| Network | Infrastructure | Physical network infrastructure — rooms, racks, patch panels, sockets |
+| Network | Connections | Force-directed graph of all asset connections |
+| Data & admin | ITSM Reconcile | Compare assets against the ITSM system (read-only) and resolve differences per field |
+| Data & admin | Reports | Asset statistics and ITSM sync |
+| Data & admin | Alerts | Maintenance alert configuration *(admin only)* |
+| Data & admin | Audit Log | Immutable history of all changes |
+| Data & admin | Settings | Personal preferences, map settings, user management |
+
+Collapsing the sidebar (the toggle in the header) hides the labels and group
+headings; the icons keep their tooltips and the groups stay visible as spacing.
 
 The **header** at the top shows:
 - Current page title

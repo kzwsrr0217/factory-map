@@ -21,6 +21,29 @@
   gap: 2px;
 }
 
+/* Grouping — see menuGroups in Sidebar.tsx. Collapsed, the headings go away but the
+   gap between groups stays, so the icon rail keeps the same shape. */
+.navGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.navGroup + .navGroup {
+  margin-top: var(--spacing-md);
+}
+
+.navGroupTitle {
+  padding: 0 var(--spacing-sm) 4px;
+  font-size: 10px;
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
 .navItem {
   display: flex;
   align-items: center;
