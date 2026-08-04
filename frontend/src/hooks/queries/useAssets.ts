@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { assetService, Asset } from '../../services/asset.service';
+import { assetService, Asset, AssetQuery } from '../../services/asset.service';
 
 export const assetKeys = {
   all: ['assets'] as const,
@@ -15,6 +15,21 @@ export function useAssets() {
   return useQuery({
     queryKey: assetKeys.all,
     queryFn: () => assetService.getAssets(),
+  });
+}
+
+/**
+ * One page of the asset list, filtered and sorted by the server.
+ *
+ * `keepPreviousData` is deliberate: without it, paging or re-sorting blanks the table
+ * for the length of a round trip, which reads as "the list is empty" rather than
+ * "loading".
+ */
+export function useAssetPage(query: AssetQuery) {
+  return useQuery({
+    queryKey: ['assets', 'page', query] as const,
+    queryFn: () => assetService.getAssetPage(query),
+    placeholderData: (previous) => previous,
   });
 }
 

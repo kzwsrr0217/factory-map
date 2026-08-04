@@ -398,6 +398,27 @@
   margin-right: var(--spacing-xs);
 }
 
+/* "Select all N matching" — a named action rather than a checkbox, because with the
+   list paged a checkbox that quietly meant the whole estate would be a bulk edit
+   nobody asked for. See the selection block in Dashboard.tsx. */
+.bulkSelectAll {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  padding: 4px 10px;
+  border: 1px solid var(--color-primary);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-primary);
+  cursor: pointer;
+}
+
+.bulkSelectAll:hover:not(:disabled) {
+  background: var(--color-primary);
+  color: #fff;
+}
+
+.bulkSelectAll:disabled { opacity: 0.6; cursor: default; }
+
 .bulkStatusBtn {
   font-size: var(--font-size-xs);
   padding: 4px 10px;

@@ -534,10 +534,28 @@ export const getAssetLookups = async (_req: Request, res: Response, next: NextFu
  */
 const ID_LOOKUP_MAX = 500;
 
+/**
+ * Sort keys the list endpoint accepts, mapped to columns. A whitelist because the key
+ * arrives in a query string. The keys are the names the dashboard's column headers
+ * already use, so the UI needs no translation table of its own.
+ */
+const SORTABLE_COLUMNS: Record<string, string> = {
+  name: 'a.display_name',
+  type: 'a.asset_type',
+  status: 'a.status',
+  manufacturer: 'a.manufacturer',
+  maintenance: 'a.maint_next_date',
+};
+
 export const getAllAssets = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const { page, limit, floor_id, building_id, workarea_id, section_id, rack_id, status, type, is_placed, q, include_connections, include_master, orphaned, ids, connected_to } =
-      req.query as Record<string, string | undefined>;
+    const {
+      page, limit, sort, dir,
+      floor_id, building_id, workarea_id, section_id, rack_id, status, type, is_placed, q,
+      manufacturer, model, serial_number, asset_tag, person, itsm_managed,
+      maintenance, conflicts,
+      include_connections, include_master, orphaned, ids, connected_to, ids_only, include_superseded,
+    } = req.query as Record<string, string | undefined>;
 
     const qb = repo().createQueryBuilder('a');
 
@@ -583,6 +601,19 @@ export const getAllAssets = async (req: Request, res: Response, next: NextFuncti
       );
     }
 
+    /**
+     * Superseded rows — the old half of a replacement — are history. Every summary in
+     * the app excludes them (stats, the reports, auto-place candidates), so a list
+     * that included them showed the same device twice and disagreed with the tiles
+     * above it: 1057 rows under a "1054 assets" total.
+     *
+     * Named ids are the exception: a predecessor is superseded by definition, and
+     * looking one up by id is exactly how the UI resolves its name.
+     */
+    if (ids === undefined && include_superseded !== 'true') {
+      qb.andWhere('a.successor_id IS NULL');
+    }
+
     if (floor_id)    qb.andWhere('a.floor_id = :floor_id', { floor_id });
     if (building_id) qb.andWhere('a.building_id = :building_id', { building_id });
     if (workarea_id) qb.andWhere('a.workarea_id = :workarea_id', { workarea_id });
@@ -602,6 +633,35 @@ export const getAllAssets = async (req: Request, res: Response, next: NextFuncti
         .andWhere('NOT EXISTS (SELECT 1 FROM master_assets ma WHERE ma.ifs_id = a.master_ifs_id)');
     }
 
+    // The dashboard's own filter panel, moved server-side. Each is a partial match on
+    // the field the panel names. This is the only version that can be right once the
+    // list is paged: a filter applied to one page of rows would report a page count
+    // for a set it never saw.
+    if (manufacturer)  qb.andWhere('a.manufacturer LIKE :manufacturer', { manufacturer: `%${manufacturer}%` });
+    if (model)         qb.andWhere('a.model LIKE :model', { model: `%${model}%` });
+    if (serial_number) qb.andWhere('a.serial_number LIKE :serial_number', { serial_number: `%${serial_number}%` });
+    if (asset_tag)     qb.andWhere('a.asset_tag LIKE :asset_tag', { asset_tag: `%${asset_tag}%` });
+    if (person)        qb.andWhere('a.person_full_name LIKE :person', { person: `%${person}%` });
+    if (itsm_managed === 'true')  qb.andWhere('a.is_managed = 1');
+    if (itsm_managed === 'false') qb.andWhere('a.is_managed = 0');
+
+    // GETDATE() rather than a JS timestamp, so the comparison happens in the clock the
+    // dates were stored with — same reasoning as getAssetStats.
+    if (maintenance === 'overdue') {
+      qb.andWhere('a.maint_next_date IS NOT NULL').andWhere('a.maint_next_date < GETDATE()');
+    } else if (maintenance === 'upcoming') {
+      qb.andWhere('a.maint_next_date IS NOT NULL')
+        .andWhere('a.maint_next_date >= GETDATE()')
+        .andWhere('a.maint_next_date < DATEADD(day, 30, GETDATE())');
+    }
+
+    // An asset the app owns locally that also carries a pending ITSM snapshot: the two
+    // disagree and someone has to decide. Same definition as the stats tile.
+    if (conflicts === 'true') {
+      qb.andWhere('a.source_of_truth = :localSot', { localSot: 'local' })
+        .andWhere('a.itsm_snapshot IS NOT NULL');
+    }
+
     if (q) {
       const like = `%${q}%`;
       qb.andWhere(
@@ -612,7 +672,26 @@ export const getAllAssets = async (req: Request, res: Response, next: NextFuncti
       );
     }
 
-    qb.orderBy('a.display_name', 'ASC');
+    // Sorting belongs here for the same reason as the filters: page 2 of a
+    // browser-sorted list is page 2 of the wrong list. Whitelisted rather than
+    // interpolated — `sort` arrives from a query string.
+    const direction: 'ASC' | 'DESC' = dir?.toLowerCase() === 'desc' ? 'DESC' : 'ASC';
+    const sortColumn = SORTABLE_COLUMNS[sort ?? ''] ?? 'a.display_name';
+    qb.orderBy(sortColumn, direction);
+    // Display name as the tiebreaker, so paging is stable: rows that sort equal on the
+    // chosen column would otherwise be free to swap places between two requests and
+    // show up twice, or not at all.
+    if (sortColumn !== 'a.display_name') qb.addOrderBy('a.display_name', 'ASC');
+
+    // Just the ids for the current filter — what "select everything that matches" needs.
+    // The bulk edit sends ids, so this keeps it on the same audited per-asset path
+    // rather than teaching that endpoint to re-parse filters, and selecting a thousand
+    // assets doesn't ship a thousand rows to do it.
+    if (ids_only === 'true') {
+      const rows = await qb.select('a.id', 'id').getRawMany<{ id: string }>();
+      res.json({ success: true, data: rows.map((r) => r.id), meta: { total: rows.length } });
+      return;
+    }
 
     if (page && limit) {
       const p = Math.max(1, parseInt(page, 10));

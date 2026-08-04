@@ -389,7 +389,7 @@ Similar CRUD, filtered by `section_id`.
 
 | Method | Path | Query params | Notes |
 |--------|------|-------------|-------|
-| GET | `/` | `floor_id, building_id, workarea_id, section_id, rack_id, status, type, is_placed, q, page, limit, include_connections, include_master, orphaned, ids, connected_to` | Full-text search on display_name, serial, asset_tag, manufacturer, model, IP, hostname, person. `orphaned=true` filters to assets with a `master_ifs_id` that no longer resolves to a `MasterAsset` row |
+| GET | `/` | `floor_id, building_id, workarea_id, section_id, rack_id, status, type, is_placed, q, manufacturer, model, serial_number, asset_tag, person, itsm_managed, maintenance, conflicts, sort, dir, page, limit, include_connections, include_master, include_superseded, orphaned, ids, connected_to, ids_only` | Full-text search on display_name, serial, asset_tag, manufacturer, model, IP, hostname, person. `orphaned=true` filters to assets with a `master_ifs_id` that no longer resolves to a `MasterAsset` row |
 | GET | `/lookups` | — | Distinct values for all autocomplete fields |
 | GET | `/maintenance-counts` | — | `{ overdue, due_soon }` — excludes replaced assets (`successor_id` set) |
 | GET | `/:id` | — | Single asset with software + connections; always resolves `master` (`null` if orphaned) |
@@ -403,6 +403,14 @@ Similar CRUD, filtered by `section_id`.
 | PATCH | `/:id/connections/:connId` | — | Update connection (by connection `id`, not target asset — supports multiple distinct connections to the same pair) |
 | DELETE | `/:id/connections/:connId` | — | Remove connection (also removes reverse, if bidirectional) |
 | POST | `/:id/work-items/:taskId/notify` | — | Send immediate alert for one work item; sets `alert_sent=true` |
+
+**Sorting**: `sort` accepts `name | type | status | manufacturer | maintenance` (whitelisted — the key comes from a query string) with `dir=asc|desc`, and always adds display_name as a tiebreaker so paging can't show a row twice or skip it. Unknown keys fall back to name.
+
+**Superseded rows** — the replaced half of a lifecycle pair — are excluded unless `include_superseded=true`. They are history, and every count in the app leaves them out; a list that included them showed a device twice and disagreed with the tiles above it (1057 rows under a "1054 assets" total). The exception is `ids=`: a predecessor is superseded by definition, so an explicit id lookup always finds it.
+
+**`ids_only=true`** returns `data: string[]` — the ids matching the filter, uncapped, without the rows. This is what the dashboard's "select all N matching" uses: the bulk edit takes ids, so the selection stays on the audited per-asset path without shipping a thousand rows to build it.
+
+**Dashboard filters** (`manufacturer`, `model`, `serial_number`, `asset_tag`, `person`) are partial matches; `itsm_managed=true|false`, `maintenance=overdue|upcoming` (non-overlapping windows, compared with `GETDATE()`), `conflicts=true` (local source of truth plus a pending ITSM snapshot — the same definition as the stats tile).
 
 **Id lookup**: `ids=a,b,c` returns just those assets — for naming the far end of a connection without fetching the list. Max 500 per request (400 above that, deliberately not a short answer); an empty value returns nothing, not everything. `connected_to=<id>` returns assets whose connections point at that asset; only one-way links appear, since bidirectional ones are mirrored onto both assets.
 

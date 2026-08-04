@@ -10,6 +10,8 @@
  *   - GET /api/assets?type=IPC               — filters by asset type
  *   - GET /api/assets?ids=a,b                — resolves specific assets by id
  *   - GET /api/assets?connected_to=X         — assets whose one-way links point at X
+ *   - GET /api/assets?sort=&dir=              — server-side ordering, whitelisted
+ *   - GET /api/assets?ids_only=true           — ids for the filter, for "select all"
  *   - Filter combinations (status + search)
  *   - Unauthenticated request → 401
  */
@@ -307,5 +309,125 @@ describe('GET /api/assets — inbound links (connected_to param)', () => {
       .set('Authorization', `Bearer ${token}`);
     expect(res.status).toBe(200);
     expect(res.body.data).toEqual([]);
+  });
+});
+
+
+describe('GET /api/assets — server-side sorting', () => {
+  /**
+   * Sorting has to happen in the database once the list is paged: page 2 of a
+   * browser-sorted list is page 2 of the wrong list.
+   */
+  it('orders by name in both directions', async () => {
+    const asc = await request(app)
+      .get('/api/assets?page=1&limit=200&q=__filter_&sort=name&dir=asc')
+      .set('Authorization', `Bearer ${token}`);
+    const desc = await request(app)
+      .get('/api/assets?page=1&limit=200&q=__filter_&sort=name&dir=desc')
+      .set('Authorization', `Bearer ${token}`);
+    const ascNames = asc.body.data.map((a: any) => a.basic_info.display_name);
+    const descNames = desc.body.data.map((a: any) => a.basic_info.display_name);
+    expect(ascNames.length).toBeGreaterThan(1);
+    expect(descNames).toEqual([...ascNames].reverse());
+  });
+
+  it('falls back to name order for an unknown or hostile sort key', async () => {
+    // The key arrives in a query string, so it is whitelisted rather than interpolated.
+    const res = await request(app)
+      .get('/api/assets?page=1&limit=200&q=__filter_&sort=;DROP TABLE assets--')
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    const names = res.body.data.map((a: any) => a.basic_info.display_name);
+    expect(names).toEqual([...names].sort());
+  });
+
+  it('keeps paging stable when the sort column ties', async () => {
+    // Every test asset shares a null maintenance date, so without the display-name
+    // tiebreaker the pages could overlap or skip rows between two requests.
+    const first = await request(app)
+      .get('/api/assets?page=1&limit=2&q=__filter_&sort=maintenance')
+      .set('Authorization', `Bearer ${token}`);
+    const second = await request(app)
+      .get('/api/assets?page=2&limit=2&q=__filter_&sort=maintenance')
+      .set('Authorization', `Bearer ${token}`);
+    const ids = [...first.body.data, ...second.body.data].map((a: any) => a._id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+});
+
+describe('GET /api/assets — dashboard filters', () => {
+  it('filters by manufacturer, model and person as partial matches', async () => {
+    const [first] = cleanupIds;
+    await request(app).patch(`/api/assets/${first}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        basic_info: { display_name: '__filter_active_1__', manufacturer: 'ACME Robotics', model: 'ZX-9' },
+        assigned_person: { full_name: 'Test Person' },
+      })
+      .expect(200);
+
+    const byManufacturer = await request(app)
+      .get('/api/assets?manufacturer=acme&page=1&limit=50')
+      .set('Authorization', `Bearer ${token}`);
+    expect(byManufacturer.body.data.map((a: any) => a._id)).toContain(first);
+
+    const byModel = await request(app)
+      .get('/api/assets?model=zx&page=1&limit=50')
+      .set('Authorization', `Bearer ${token}`);
+    expect(byModel.body.data.map((a: any) => a._id)).toContain(first);
+
+    const byPerson = await request(app)
+      .get('/api/assets?person=test%20per&page=1&limit=50')
+      .set('Authorization', `Bearer ${token}`);
+    expect(byPerson.body.data.map((a: any) => a._id)).toContain(first);
+
+    const missing = await request(app)
+      .get('/api/assets?manufacturer=nothing_matches_this&page=1&limit=50')
+      .set('Authorization', `Bearer ${token}`);
+    expect(missing.body.data).toEqual([]);
+  });
+
+  it('splits maintenance into overdue and upcoming', async () => {
+    const [, second] = cleanupIds;
+    const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+    await request(app).patch(`/api/assets/${second}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ basic_info: { display_name: '__filter_active_2__' }, maintenance: { next_date: yesterday } })
+      .expect(200);
+
+    const overdue = await request(app)
+      .get('/api/assets?maintenance=overdue&page=1&limit=200')
+      .set('Authorization', `Bearer ${token}`);
+    expect(overdue.body.data.map((a: any) => a._id)).toContain(second);
+
+    // Overdue is not upcoming: the two windows must not overlap, or the dashboard's
+    // two tiles would double-count the same asset.
+    const upcoming = await request(app)
+      .get('/api/assets?maintenance=upcoming&page=1&limit=200')
+      .set('Authorization', `Bearer ${token}`);
+    expect(upcoming.body.data.map((a: any) => a._id)).not.toContain(second);
+  });
+});
+
+describe('GET /api/assets?ids_only=true', () => {
+  it('returns ids for the whole filtered set, not one page of them', async () => {
+    // What "select everything that matches" needs: the ids, uncapped, without the rows.
+    const res = await request(app)
+      .get('/api/assets?ids_only=true&q=__filter_')
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.length).toBeGreaterThanOrEqual(4);
+    expect(typeof res.body.data[0]).toBe('string');
+    expect(res.body.meta.total).toBe(res.body.data.length);
+  });
+
+  it('honours the same filters as the list itself', async () => {
+    const res = await request(app)
+      .get('/api/assets?ids_only=true&q=__filter_&status=maintenance')
+      .set('Authorization', `Bearer ${token}`);
+    const list = await request(app)
+      .get('/api/assets?q=__filter_&status=maintenance&page=1&limit=200')
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.body.data.sort()).toEqual(list.body.data.map((a: any) => a._id).sort());
   });
 });

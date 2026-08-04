@@ -9,6 +9,9 @@
  * errors in components that assume these objects are always present.
  *
  * Methods:
+ *  - `getAssetPage(query)`: one filtered, sorted page — what the dashboard list uses
+ *  - `getAssetIds(query)`: the ids matching a query, for "select everything that matches"
+ *  - `getAllMatching(query)`: every row matching a query, paged — for the exports
  *  - `getAssets()`: all assets (no filter)
  *  - `getAssetsByFloor(floorId)`: assets on a specific floor
  *  - `getAsset(id)`: single asset with software and connections
@@ -326,6 +329,60 @@ const sweepAllPages = async (
 };
 
 /**
+ * The dashboard list's query, in the app's own vocabulary. Mapped to query params by
+ * `assetQueryParams` so the field names live in one place rather than in every caller.
+ */
+export interface AssetQuery {
+  page?: number;
+  limit?: number;
+  /** One of the server's whitelisted sort keys — see SORTABLE_COLUMNS. */
+  sort?: string;
+  dir?: 'asc' | 'desc';
+  q?: string;
+  status?: string;
+  type?: string;
+  manufacturer?: string;
+  model?: string;
+  serial_number?: string;
+  asset_tag?: string;
+  person?: string;
+  building_id?: string;
+  floor_id?: string;
+  workarea_id?: string;
+  /** 'itsm' → managed, 'manual' → not; undefined → both. */
+  itsm_managed?: 'itsm' | 'manual';
+  maintenance?: 'overdue' | 'upcoming';
+  conflicts?: boolean;
+}
+
+/** Drops empty values, so an untouched filter field doesn't become `?model=`. */
+function assetQueryParams(query: AssetQuery): Record<string, string | number> {
+  const out: Record<string, string | number> = {};
+  const put = (key: string, value: string | number | undefined) => {
+    if (value !== undefined && value !== '' ) out[key] = value;
+  };
+  put('page', query.page);
+  put('limit', query.limit);
+  put('sort', query.sort);
+  put('dir', query.dir);
+  put('q', query.q?.trim());
+  put('status', query.status);
+  put('type', query.type);
+  put('manufacturer', query.manufacturer);
+  put('model', query.model);
+  put('serial_number', query.serial_number);
+  put('asset_tag', query.asset_tag);
+  put('person', query.person);
+  put('building_id', query.building_id);
+  put('floor_id', query.floor_id);
+  put('workarea_id', query.workarea_id);
+  put('maintenance', query.maintenance);
+  if (query.itsm_managed) out.itsm_managed = query.itsm_managed === 'itsm' ? 'true' : 'false';
+  if (query.conflicts) out.conflicts = 'true';
+  return out;
+}
+
+/**
  * Ids per `?ids=` request. Well under the server's 500 so the URL stays a sane
  * length; peer lookups are normally a handful of ids and never hit this.
  */
@@ -356,6 +413,42 @@ export const assetService = {
    * data. Read by the Dashboard so a partial list is never presented as complete.
    */
   lastFetchWasTruncated: false,
+
+  /**
+   * One page of the asset list, filtered and sorted by the server.
+   *
+   * This is what the dashboard list runs on. It used to hold the whole estate in the
+   * browser and filter, sort and slice it there — correct once the sweep was paged,
+   * but it means every visit ships every asset, and it puts the definition of each
+   * filter in two places.
+   */
+  getAssetPage: async (params: AssetQuery): Promise<{ assets: Asset[]; total: number; totalPages: number }> => {
+    const response = await api.get('/assets', { params: assetQueryParams(params) });
+    return {
+      assets: (response.data.data as Asset[]).map(normalizeAsset),
+      total: response.data.meta?.total ?? 0,
+      totalPages: response.data.meta?.totalPages ?? 1,
+    };
+  },
+
+  /**
+   * Every id matching a query, without the rows. For "select everything that matches":
+   * the bulk edit takes ids, and 1054 ids are a few tens of kB where 1054 assets are
+   * megabytes.
+   */
+  getAssetIds: async (params: Omit<AssetQuery, 'page' | 'limit' | 'sort' | 'dir'>): Promise<string[]> => {
+    const response = await api.get('/assets', {
+      params: { ...assetQueryParams(params), ids_only: 'true' },
+    });
+    return response.data.data as string[];
+  },
+
+  /**
+   * Every row matching a query, paged through. For the exports, which have always
+   * covered the whole filtered set rather than the visible page.
+   */
+  getAllMatching: async (params: Omit<AssetQuery, 'page' | 'limit'>): Promise<Asset[]> =>
+    sweepAllPages(assetQueryParams(params)),
 
   // Assets whose master_ifs_id points at a MasterAsset row that no longer
   // resolves (see MasterAsset.entity.ts / attachMasterData) — filtered

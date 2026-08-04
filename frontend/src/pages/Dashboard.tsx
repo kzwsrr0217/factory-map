@@ -36,11 +36,12 @@ import { loadSettings } from '../utils/settings';
 import { useToast } from '../contexts/ToastContext';
 import { useSocket } from '../hooks/useSocket';
 import AssetCreationWizard from '../components/asset/AssetCreationWizard';
-import { useAssets, useAssetStats, assetKeys } from '../hooks/queries/useAssets';
+import { useAssetPage, useAssetStats, assetKeys } from '../hooks/queries/useAssets';
 import { useBuildings } from '../hooks/queries/useBuildings';
 import { useFloors } from '../hooks/queries/useFloors';
 import { useWorkareas } from '../hooks/queries/useWorkareas';
 import { getApiErrorMessage } from '../utils/apiError';
+import { usePersonSuggestions } from '../hooks/usePersonSuggestions';
 import { useAuditLog } from '../hooks/queries/useAuditLog';
 import styles from '../styles/pages/Dashboard.module.css';
 
@@ -59,29 +60,20 @@ type ColumnKey = typeof COLUMN_DEFS[number]['key'];
 const Dashboard: React.FC = () => {
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const { data: rawAssets = [], isLoading, isError } = useAssets();
-  // Every count and chart comes from here, not from `assets.length`. The list
-  // endpoint caps at 1000 rows, so with 1057 assets in the database the tiles read
-  // "1000 Total Assets" and every breakdown was short by the same 57 — 941 active
-  // shown as 894, and so on. See GET /assets/stats.
+  /**
+   * Every tile and chart comes from the stats endpoint, which counts the whole table.
+   * They must not be derived from the list: the list is one page now (and before that
+   * it was capped at 1000 rows, which had the tiles reading "1000 Total Assets" while
+   * the database held 1057, with every breakdown short by the same 57).
+   */
   const { data: assetStats } = useAssetStats();
 
-  /**
-   * Search results from the server, used instead of filtering the cached list.
-   *
-   * Filtering the cache can only ever find assets inside the 1000 rows it holds,
-   * so anything past the cap was unreachable — present in the database and absent
-   * from the UI, including from search, which is the one place you'd go looking.
-   * Debounced because it fires per keystroke.
-   */
-  const [serverSearchResults, setServerSearchResults] = useState<Asset[] | null>(null);
-  const [searching, setSearching] = useState(false);
   const { data: buildings = [] } = useBuildings();
   const { data: floors = [] } = useFloors();
   const { data: workareas = [] } = useWorkareas();
   const { data: recentActivity } = useAuditLog({ limit: 8, offset: 0 });
-  const assets = useMemo(() => rawAssets.filter((a: Asset) => a.basic_info && a.itsm), [rawAssets]);
   const [searchQuery, setSearchQuery] = useState(() => localStorage.getItem('db_search') ?? '');
+  const [debouncedSearch, setDebouncedSearch] = useState(() => (localStorage.getItem('db_search') ?? '').trim());
   const [filterOpen, setFilterOpen] = useState(false);
   const [filters, setFilters] = useState<FilterCriteria>(() => {
     try { return JSON.parse(localStorage.getItem('db_filters') ?? ''); } catch { return { itsmManaged: 'all' }; }
@@ -166,58 +158,67 @@ const Dashboard: React.FC = () => {
   // Live updates via WebSocket — update React Query cache directly
   useSocket('asset:created', () => { qc.invalidateQueries({ queryKey: assetKeys.all }); });
   useSocket('asset:updated', (updated) => {
-    qc.setQueryData(assetKeys.all, (prev: Asset[] | undefined) =>
-      prev ? prev.map(a => a._id === updated._id ? { ...a, ...updated } : a) : prev
-    );
+    qc.invalidateQueries({ queryKey: assetKeys.all });
   });
   useSocket('asset:deleted', ({ _id }: { _id: string }) => {
-    qc.setQueryData(assetKeys.all, (prev: Asset[] | undefined) =>
-      prev ? prev.filter(a => a._id !== _id) : prev
-    );
+    qc.invalidateQueries({ queryKey: assetKeys.all });
   });
 
   const now = Date.now();
   const sevenDays = 7 * 86400000;
   const thirtyDays = 30 * 86400000;
 
-  const filteredAssets = useMemo(() => {
-    const t = Date.now();
-    const td = 30 * 86400000;
-    // When the server answered, start from its results: they cover the whole
-    // table, where the cached list stops at 1000 rows. The remaining filters below
-    // then narrow that set client-side exactly as before.
-    let filtered = serverSearchResults ? [...serverSearchResults] : [...assets];
-    if (searchQuery && !serverSearchResults) {
-      const query = searchQuery.toLowerCase();
-      filtered = filtered.filter(
-        (asset) =>
-          asset.basic_info?.display_name?.toLowerCase().includes(query) ||
-          asset.basic_info?.asset_tag?.toLowerCase().includes(query) ||
-          asset.basic_info?.serial_number?.toLowerCase().includes(query) ||
-          asset.basic_info?.manufacturer?.toLowerCase().includes(query) ||
-          asset.basic_info?.model?.toLowerCase().includes(query)
-      );
-    }
-    if (filters.assetName) filtered = filtered.filter((a) => a.basic_info?.display_name?.toLowerCase().includes(filters.assetName!.toLowerCase()));
-    if (filters.manufacturer) filtered = filtered.filter((a) => a.basic_info?.manufacturer?.toLowerCase().includes(filters.manufacturer!.toLowerCase()));
-    if (filters.model) filtered = filtered.filter((a) => a.basic_info?.model?.toLowerCase().includes(filters.model!.toLowerCase()));
-    if (filters.serialNumber) filtered = filtered.filter((a) => a.basic_info?.serial_number?.toLowerCase().includes(filters.serialNumber!.toLowerCase()));
-    if (filters.assetTag) filtered = filtered.filter((a) => a.basic_info?.asset_tag?.toLowerCase().includes(filters.assetTag!.toLowerCase()));
-    if (filters.assignedPerson) filtered = filtered.filter((a) => a.assigned_person?.full_name?.toLowerCase().includes(filters.assignedPerson!.toLowerCase()));
-    if (filters.status) filtered = filtered.filter((a) => a.basic_info?.status?.toLowerCase().includes(filters.status!.toLowerCase()));
-    if (filters.itsmManaged && filters.itsmManaged !== 'all') filtered = filtered.filter((a) => filters.itsmManaged === 'itsm' ? a.itsm?.is_managed : !a.itsm?.is_managed);
-    if (filters.buildingId) filtered = filtered.filter((a) => a.hierarchy.building_id === filters.buildingId);
-    if (filters.floorId) filtered = filtered.filter((a) => a.hierarchy.floor_id === filters.floorId);
-    if (filters.workareaId) filtered = filtered.filter((a) => a.hierarchy.workarea_id === filters.workareaId);
-    if (maintenanceFilter === 'overdue') filtered = filtered.filter(a => a.maintenance?.next_date && new Date(a.maintenance.next_date).getTime() < t);
-    else if (maintenanceFilter === 'upcoming') filtered = filtered.filter(a => { if (!a.maintenance?.next_date) return false; const ts = new Date(a.maintenance.next_date).getTime(); return ts >= t && ts - t < td; });
-    if (conflictFilter) filtered = filtered.filter(a => a.itsm?.source_of_truth === 'local' && !!(a as any).itsm_snapshot?.display_name);
-    if (quickStatusFilter) filtered = filtered.filter(a => a.basic_info?.status === quickStatusFilter);
-    if (assignedToFilter) filtered = filtered.filter(a => a.assigned_person?.full_name === assignedToFilter);
-    return filtered;
-  }, [assets, serverSearchResults, searchQuery, filters, maintenanceFilter, conflictFilter, quickStatusFilter, assignedToFilter]);
+  /**
+   * The list query, in one place, sent to the server.
+   *
+   * Every one of these used to be a `.filter()` over a downloaded copy of the estate.
+   * That worked, but it meant each visit shipped every asset, and it put the meaning
+   * of each filter in two places — the browser's and (for search) the server's. With
+   * the list paged, filtering in the browser is not just wasteful but wrong: the page
+   * count would describe a set the server never selected.
+   */
+  const listQuery = useMemo(() => ({
+    page,
+    limit: itemsPerPage,
+    sort: sortField,
+    dir: sortDir,
+    // The quick pills win over the panel where they overlap, which is what clicking a
+    // tile visibly does; the panel's own status field is left for finer matches.
+    // The panel's "asset name" and the search box both narrow by name; the server's
+    // `q` covers name, serial, tag, manufacturer, model, IP, hostname and person, so
+    // whichever was typed goes there. Both at once is a contradiction the panel
+    // cannot express, so the box wins.
+    q: debouncedSearch || filters.assetName || undefined,
+    status: quickStatusFilter ?? filters.status ?? undefined,
+    manufacturer: filters.manufacturer || undefined,
+    model: filters.model || undefined,
+    serial_number: filters.serialNumber || undefined,
+    asset_tag: filters.assetTag || undefined,
+    person: assignedToFilter || filters.assignedPerson || undefined,
+    building_id: filters.buildingId || undefined,
+    floor_id: filters.floorId || undefined,
+    workarea_id: filters.workareaId || undefined,
+    itsm_managed: filters.itsmManaged && filters.itsmManaged !== 'all' ? filters.itsmManaged : undefined,
+    maintenance: maintenanceFilter ?? undefined,
+    conflicts: conflictFilter || undefined,
+  }), [page, itemsPerPage, sortField, sortDir, debouncedSearch, filters,
+       maintenanceFilter, conflictFilter, quickStatusFilter, assignedToFilter]);
 
-  useEffect(() => { setPage(1); }, [searchQuery, filters, maintenanceFilter, conflictFilter, quickStatusFilter, assignedToFilter]);
+  const { data: pageData, isLoading, isError, isFetching } = useAssetPage(listQuery);
+  const pageAssets = pageData?.assets ?? [];
+  const matchingTotal = pageData?.total ?? 0;
+  const totalPages = pageData?.totalPages ?? 1;
+  /** True when anything narrows the list — used for the empty state's wording. */
+  const filterActive = !!(
+    listQuery.q || listQuery.status || listQuery.manufacturer || listQuery.model ||
+    listQuery.serial_number || listQuery.asset_tag || listQuery.person ||
+    listQuery.building_id || listQuery.floor_id || listQuery.workarea_id ||
+    listQuery.itsm_managed || listQuery.maintenance || listQuery.conflicts
+  );
+
+  // Any change to what is being asked for resets to page 1: page 7 of a narrower
+  // result set is usually empty, and an empty page reads as "nothing matches".
+  useEffect(() => { setPage(1); }, [debouncedSearch, filters, maintenanceFilter, conflictFilter, quickStatusFilter, assignedToFilter, sortField, sortDir]);
 
   const handleApplyFilters = (newFilters: FilterCriteria) => {
     setFilters(newFilters);
@@ -252,7 +253,21 @@ const Dashboard: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
-  const handleExportCSV = () => {
+  /**
+   * Every row the current filter matches, for the exports.
+   *
+   * The exports have always covered the filter rather than the visible page, which
+   * used to be free because the whole estate sat in memory. It now costs a paged
+   * sweep — worth it for an explicit action, and the alternative (exporting only the
+   * page) would silently change what the button means.
+   */
+  const fetchMatching = async (): Promise<Asset[]> => {
+    const { page: _p, limit: _l, ...rest } = listQuery;
+    return assetService.getAllMatching(rest);
+  };
+
+  const handleExportCSV = async () => {
+    const filteredAssets = await fetchMatching();
     const rows = [
       ['Name', 'Type', 'Manufacturer', 'Model', 'Serial', 'Asset Tag', 'Status',
        'IP Address', 'Hostname', 'MAC', 'Assigned Person',
@@ -286,7 +301,8 @@ const Dashboard: React.FC = () => {
     toast.success(`Exported ${filteredAssets.length} assets to CSV`);
   };
 
-  const handleExportJSON = () => {
+  const handleExportJSON = async () => {
+    const filteredAssets = await fetchMatching();
     const data = filteredAssets.map((a) => ({
       id: a._id,
       name: a.basic_info?.display_name,
@@ -315,6 +331,7 @@ const Dashboard: React.FC = () => {
   };
 
   const handleExportPDF = async () => {
+    const filteredAssets = await fetchMatching();
     const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
       import('jspdf'),
       import('jspdf-autotable'),
@@ -373,9 +390,9 @@ const Dashboard: React.FC = () => {
       // PATCHes, which on a 200-row selection meant 200 round-trips and a partial
       // result if any of them failed.
       await assetService.bulkUpdate(Array.from(selectedAssetIds), { status });
-      qc.setQueryData(assetKeys.all, (prev: Asset[] | undefined) =>
-        prev ? prev.map(a => selectedAssetIds.has(a._id) ? { ...a, basic_info: { ...a.basic_info, status: status as any } } : a) : prev
-      );
+      // The table is a server page now, so there is no local list to patch:
+      // invalidate and let the query refetch what the server actually holds.
+      qc.invalidateQueries({ queryKey: assetKeys.all });
       toast.success(`${selectedAssetIds.size} asset${selectedAssetIds.size !== 1 ? 's' : ''} set to ${status}`);
       setSelectedAssetIds(new Set());
     } catch {
@@ -390,9 +407,9 @@ const Dashboard: React.FC = () => {
     setBulkUpdating(true);
     try {
       await Promise.all(Array.from(selectedAssetIds).map(id => assetService.deleteAsset(id)));
-      qc.setQueryData(assetKeys.all, (prev: Asset[] | undefined) =>
-        prev ? prev.filter(a => !selectedAssetIds.has(a._id)) : prev
-      );
+      // The table is a server page now, so there is no local list to patch:
+      // invalidate and let the query refetch what the server actually holds.
+      qc.invalidateQueries({ queryKey: assetKeys.all });
       toast.success(`${selectedAssetIds.size} asset${selectedAssetIds.size !== 1 ? 's' : ''} deleted`);
       setSelectedAssetIds(new Set());
     } catch {
@@ -441,26 +458,16 @@ const Dashboard: React.FC = () => {
   // ── Persist filters + view state ────────────────────────────
   useEffect(() => { localStorage.setItem('db_search', searchQuery); }, [searchQuery]);
 
+  /**
+   * The search box is debounced into the query rather than into a second request:
+   * `searchQuery` is what the box holds, `debouncedSearch` is what the server is asked
+   * for, so typing doesn't fire a request per keystroke.
+   */
   useEffect(() => {
-    const term = searchQuery.trim();
-    if (term.length < 2) {
-      // One character matches most of the estate; not worth a round trip, and the
-      // cached list handles it acceptably.
-      setServerSearchResults(null);
-      setSearching(false);
-      return;
-    }
-    setSearching(true);
-    const timer = setTimeout(() => {
-      assetService.searchAssets(term, 200)
-        .then(setServerSearchResults)
-        // On failure the cached list still filters, so the box keeps working —
-        // it just can't reach past the cap.
-        .catch(() => setServerSearchResults(null))
-        .finally(() => setSearching(false));
-    }, 350);
+    const timer = setTimeout(() => setDebouncedSearch(searchQuery.trim()), 300);
     return () => clearTimeout(timer);
   }, [searchQuery]);
+
   useEffect(() => { localStorage.setItem('db_filters', JSON.stringify(filters)); }, [filters]);
   useEffect(() => {
     if (maintenanceFilter) localStorage.setItem('db_maint', maintenanceFilter);
@@ -487,30 +494,10 @@ const Dashboard: React.FC = () => {
     setPage(1);
   };
 
-  const sortedAssets = useMemo(() => {
-    const arr = [...filteredAssets];
-    arr.sort((a, b) => {
-      if (sortField === 'maintenance') {
-        const at = a.maintenance?.next_date ? new Date(a.maintenance.next_date).getTime() : Infinity;
-        const bt = b.maintenance?.next_date ? new Date(b.maintenance.next_date).getTime() : Infinity;
-        return sortDir === 'asc' ? at - bt : bt - at;
-      }
-      const vals: Record<string, [string, string]> = {
-        name:         [a.basic_info?.display_name ?? '', b.basic_info?.display_name ?? ''],
-        type:         [a.basic_info?.type ?? '', b.basic_info?.type ?? ''],
-        status:       [a.basic_info?.status ?? '', b.basic_info?.status ?? ''],
-        manufacturer: [a.basic_info?.manufacturer ?? '', b.basic_info?.manufacturer ?? ''],
-      };
-      const [av, bv] = vals[sortField] ?? ['', ''];
-      return sortDir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
-    });
-    return arr;
-  }, [filteredAssets, sortField, sortDir]);
-
-  const pageAssets = sortedAssets.slice((page - 1) * itemsPerPage, page * itemsPerPage);
-  const totalPages = Math.ceil(sortedAssets.length / itemsPerPage);
-
-  // ── Select all on page ────────────────────────────────────────
+  // ── Selection ─────────────────────────────────────────────────
+  // The header checkbox is explicitly "this page": with the list paged, a checkbox
+  // that silently meant "all 1054 matching" would be a bulk edit nobody asked for.
+  // Everything matching is a separate, named action below.
   const allPageSelected = pageAssets.length > 0 && pageAssets.every(a => selectedAssetIds.has(a._id));
   const toggleSelectAllPage = () => {
     setSelectedAssetIds(prev => {
@@ -521,13 +508,31 @@ const Dashboard: React.FC = () => {
     });
   };
 
+  const [selectingAll, setSelectingAll] = useState(false);
+  /**
+   * Select every asset the current filter matches, not just the loaded page. Asks the
+   * server for the ids — the bulk edit takes ids, so this keeps it on the same audited
+   * path, and it means selecting a thousand assets doesn't fetch a thousand rows.
+   */
+  const selectAllMatching = async () => {
+    setSelectingAll(true);
+    try {
+      const { page: _p, limit: _l, sort: _s, dir: _d, ...filterOnly } = listQuery;
+      setSelectedAssetIds(new Set(await assetService.getAssetIds(filterOnly)));
+    } catch {
+      toast.error('Could not select everything that matches');
+    } finally {
+      setSelectingAll(false);
+    }
+  };
+
   // ── Inline status change ─────────────────────────────────────
   const handleInlineStatusChange = async (assetId: string, status: string) => {
     try {
       await assetService.updateAsset(assetId, { 'basic_info.status': status } as any);
-      qc.setQueryData(assetKeys.all, (prev: Asset[] | undefined) =>
-        prev ? prev.map(a => a._id === assetId ? { ...a, basic_info: { ...a.basic_info, status: status as any } } : a) : prev
-      );
+      // The table is a server page now, so there is no local list to patch:
+      // invalidate and let the query refetch what the server actually holds.
+      qc.invalidateQueries({ queryKey: assetKeys.all });
     } catch {
       toast.error('Failed to update status');
     }
@@ -549,20 +554,15 @@ const Dashboard: React.FC = () => {
   };
 
   /**
-   * How many assets are missing from the loaded list.
-   *
-   * Normally zero — getAssets() pages through the whole set. It only becomes
-   * non-zero if the sweep hit its page ceiling, and then it must be visible:
-   * presenting a partial list as complete is the failure this whole change is
-   * about.
+   * Names for the "assigned to" quick filter. From the persons endpoint rather than
+   * scraped off the loaded list — that list is one page now, so it would only ever
+   * offer the names that happen to be visible.
    */
-  const notLoaded = Math.max(0, (assetStats?.total ?? 0) - assets.length);
-
-  const assignedPersons = useMemo(() => {
-    const names = new Set<string>();
-    assets.forEach(a => { if (a.assigned_person?.full_name) names.add(a.assigned_person.full_name); });
-    return Array.from(names).sort();
-  }, [assets]);
+  const personSuggestions = usePersonSuggestions();
+  const assignedPersons = useMemo(
+    () => personSuggestions.map((p) => p.full_name).sort(),
+    [personSuggestions],
+  );
 
   const maintenanceStats = {
     overdue: assetStats?.maintenance_overdue ?? 0,
@@ -927,21 +927,16 @@ const Dashboard: React.FC = () => {
                 onChange={toggleSelectAllPage}
                 title="Select / deselect all on this page"
               />
-              <h3>Assets ({sortedAssets.length})</h3>
-              {searching && <span className={styles.listNote}>searching…</span>}
-              {serverSearchResults && (
+              <h3>Assets ({matchingTotal})</h3>
+              {/* The count is the whole matching set, not the page; and it comes from
+                  the same query that produced the rows, so the two cannot disagree.
+                  The old "N more not shown" warning is gone with the cap it described. */}
+              {filterActive && (
                 <span className={styles.listNote}>
-                  searched all {assetStats?.total ?? '?'} assets
+                  of {assetStats?.total ?? '?'} · filtered
                 </span>
               )}
-              {/* Says out loud what the endpoint has always reported and the UI
-                  never showed: rows past the cap are missing from this list.
-                  Hidden while searching, since search does cover everything. */}
-              {!serverSearchResults && notLoaded > 0 && (
-                <span className={styles.listNoteWarn} title="The list endpoint returns at most 1000 rows. Use the search box to reach the rest.">
-                  ⚠ {notLoaded} more not shown — search to reach them
-                </span>
-              )}
+              {isFetching && <span className={styles.listNote}>loading…</span>}
             </div>
             <div className={styles.assetsHeaderRight}>
               {viewMode === 'table' && (
@@ -986,6 +981,15 @@ const Dashboard: React.FC = () => {
             {selectedAssetIds.size > 0 && (
               <div className={styles.bulkBar}>
                 <span className={styles.bulkCount}>{selectedAssetIds.size} selected</span>
+                {selectedAssetIds.size < matchingTotal && (
+                  <button
+                    className={styles.bulkSelectAll}
+                    onClick={selectAllMatching}
+                    disabled={selectingAll}
+                  >
+                    {selectingAll ? 'Selecting…' : `Select all ${matchingTotal} matching`}
+                  </button>
+                )}
                 {(['active', 'maintenance', 'inactive', 'retired'] as const).map(s => (
                   <button
                     key={s}
@@ -1008,8 +1012,10 @@ const Dashboard: React.FC = () => {
                 ))}
                 <button
                   className={styles.bulkExportBtn}
-                  onClick={() => {
-                    const selected = filteredAssets.filter(a => selectedAssetIds.has(a._id));
+                  onClick={async () => {
+                    // Fetched by id: a selection can span pages, so its rows are not
+                    // necessarily the ones on screen.
+                    const selected = await assetService.getAssetsByIds([...selectedAssetIds]);
                     const rows = [
                       ['Name', 'Type', 'Status', 'Serial', 'IP Address', 'Assigned Person', 'Building', 'Floor', 'Next Maintenance'],
                       ...selected.map(a => [
@@ -1115,7 +1121,7 @@ const Dashboard: React.FC = () => {
             )}
           </div>
 
-          {sortedAssets.length > 0 ? (
+          {pageAssets.length > 0 ? (
             <>
               {/* ── Card view ──────────────────────────────── */}
               {viewMode === 'card' && (
@@ -1290,10 +1296,10 @@ const Dashboard: React.FC = () => {
               )}
 
               {/* ── Pagination ─────────────────────────────── */}
-              {sortedAssets.length > itemsPerPage && (
+              {totalPages > 1 && (
                 <div className={styles.pagination}>
                   <button className={styles.pageBtn} onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}>← Prev</button>
-                  <span className={styles.pageInfo}>Page {page} of {totalPages} · {sortedAssets.length} assets</span>
+                  <span className={styles.pageInfo}>Page {page} of {totalPages} · {matchingTotal} assets</span>
                   <div className={styles.pageJump}>
                     <span>Go to</span>
                     <input
@@ -1321,16 +1327,30 @@ const Dashboard: React.FC = () => {
             </>
           ) : (
             <div className={styles.emptyState}>
-              <p>No assets found matching your criteria</p>
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setSearchQuery('');
-                  setFilters({ itsmManaged: 'all' });
-                }}
-              >
-                Clear Filters
-              </Button>
+              {/* Two different situations, and they used to read the same. */}
+              {filterActive ? (
+                <>
+                  <p>No assets match the current search and filters.</p>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setSearchQuery('');
+                      setFilters({ itsmManaged: 'all' });
+                      setMaintenanceFilter(null);
+                      setQuickStatusFilter(null);
+                      setAssignedToFilter('');
+                      setConflictFilter(false);
+                    }}
+                  >
+                    Clear search and filters
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <p>No assets recorded yet.</p>
+                  <Button variant="primary" onClick={() => setCreateOpen(true)}>Add the first asset</Button>
+                </>
+              )}
             </div>
           )}
         </div>
@@ -1359,7 +1379,6 @@ const Dashboard: React.FC = () => {
         asset={viewAsset}
         isOpen={!!viewAsset}
         onClose={() => setViewAsset(null)}
-        allAssets={assets}
       />
 
       <AssetCreationWizard

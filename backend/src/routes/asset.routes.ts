@@ -59,6 +59,13 @@
  *         schema: { type: string }
  *         description: Search across name, serial, IP, hostname, manufacturer
  *       - in: query
+ *         name: include_superseded
+ *         schema: { type: boolean }
+ *         description: >
+ *           Include the replaced half of a lifecycle pair. Excluded by default: those
+ *           rows are history, and every count in the app leaves them out. Ignored when
+ *           `ids` is given — a predecessor is superseded by definition.
+ *       - in: query
  *         name: rack_id
  *         schema: { type: string }
  *         description: Assets mounted in this rack

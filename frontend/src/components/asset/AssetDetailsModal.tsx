@@ -20,8 +20,13 @@
  *   asset       — The asset to display; null when the modal is closed.
  *   isOpen      — Controls Modal visibility.
  *   onClose     — Called on backdrop click or explicit close.
- *   allAssets   — Full asset list, passed through to ConnectionManager for
- *                 peer selection.
+ *
+ * Names for the assets this one points at — its predecessor, its successor, and the
+ * far end of each connection — are fetched by id when the modal opens. They used to be
+ * looked up in a copy of the whole estate the parent passed in; the dashboard list is
+ * a server page now, so no such copy exists, and a predecessor is superseded by
+ * definition, which the list endpoint leaves out on purpose. Only an id lookup finds
+ * one.
  */
 import React, { useState, useCallback, useEffect } from 'react';
 import Modal from '../common/Modal';
@@ -39,14 +44,12 @@ interface AssetDetailsModalProps {
   asset: Asset | null;
   isOpen: boolean;
   onClose: () => void;
-  allAssets?: Asset[];
 }
 
 const AssetDetailsModal: React.FC<AssetDetailsModalProps> = ({
   asset,
   isOpen,
   onClose,
-  allAssets = [],
 }) => {
   const [syncing, setSyncing] = useState(false);
   const [acceptingSnapshot, setAcceptingSnapshot] = useState(false);
@@ -66,6 +69,8 @@ const AssetDetailsModal: React.FC<AssetDetailsModalProps> = ({
   const [savingWorkItems, setSavingWorkItems] = useState(false);
   const [notifyingTaskId, setNotifyingTaskId] = useState<string | null>(null);
   const [otChildren, setOtChildren] = useState<AssetMasterData[]>([]);
+  /** display_name by id, for every asset this one references — see the file header. */
+  const [relatedNames, setRelatedNames] = useState<Record<string, string>>({});
   const toast = useToast();
 
   const loadHistory = useCallback(async () => {
@@ -114,6 +119,32 @@ const AssetDetailsModal: React.FC<AssetDetailsModalProps> = ({
   // MasterAsset.entity.ts ifs_machine_id / asset.controller.ts
   // getAssetOtChildren). Cleared eagerly on asset switch so a stale list
   // from the previous asset never flashes before the new one resolves.
+  /**
+   * Names for the predecessor, the successor and each connection's far end, by id.
+   * See the file header for why an id lookup is the only thing that works here.
+   */
+  useEffect(() => {
+    const target = currentAsset ?? asset;
+    const ids = [
+      target?.predecessor_id,
+      target?.successor_id,
+      ...(target?.connections ?? []).map((c) => c.connected_asset_id),
+    ].filter((id): id is string => !!id);
+    if (ids.length === 0) { setRelatedNames({}); return; }
+    let cancelled = false;
+    assetService.getAssetsByIds(ids)
+      .then((rows) => {
+        if (cancelled) return;
+        setRelatedNames(Object.fromEntries(
+          rows.map((r) => [r._id, r.basic_info?.display_name ?? r._id]),
+        ));
+      })
+      // Unresolved names fall back to a shortened id, which is what the connections
+      // list already did for a peer it couldn't find.
+      .catch(() => { /* leave them unresolved */ });
+    return () => { cancelled = true; };
+  }, [asset, currentAsset]);
+
   useEffect(() => {
     setOtChildren([]);
     if (!asset?.master_ifs_id) return;
@@ -501,12 +532,9 @@ const AssetDetailsModal: React.FC<AssetDetailsModalProps> = ({
 
         {/* Lifecycle — predecessor / successor */}
         {(displayAsset.predecessor_id || displayAsset.successor_id) && (() => {
-          const predecessor = displayAsset.predecessor_id
-            ? allAssets.find(a => a._id === displayAsset.predecessor_id)
-            : null;
-          const successor = displayAsset.successor_id
-            ? allAssets.find(a => a._id === displayAsset.successor_id)
-            : null;
+          // Resolved by id (see the effect above); the raw id is shown until it is.
+          const predecessor = relatedNames[displayAsset.predecessor_id ?? ''] ?? null;
+          const successor = relatedNames[displayAsset.successor_id ?? ''] ?? null;
           return (
             <section className={styles.section}>
               <h3 className={styles.sectionTitle}>Lifecycle</h3>
@@ -516,9 +544,7 @@ const AssetDetailsModal: React.FC<AssetDetailsModalProps> = ({
                     <div className={styles.field}>
                       <label>Replaces</label>
                       <p className={styles.lifecycleLink}>
-                        ← {predecessor
-                          ? `${predecessor.basic_info.display_name}${predecessor.custom_fields?.object_id ? ` (${predecessor.custom_fields.object_id})` : ''}`
-                          : displayAsset.predecessor_id}
+                        ← {predecessor ?? displayAsset.predecessor_id}
                       </p>
                     </div>
                   )}
@@ -526,9 +552,7 @@ const AssetDetailsModal: React.FC<AssetDetailsModalProps> = ({
                     <div className={styles.field}>
                       <label>Replaced by</label>
                       <p className={styles.lifecycleLink + ' ' + styles.lifecycleSuccessor}>
-                        → {successor
-                          ? `${successor.basic_info.display_name}${successor.custom_fields?.object_id ? ` (${successor.custom_fields.object_id})` : ''}`
-                          : displayAsset.successor_id}
+                        → {successor ?? displayAsset.successor_id}
                       </p>
                     </div>
                   )}
@@ -811,7 +835,7 @@ const AssetDetailsModal: React.FC<AssetDetailsModalProps> = ({
             {displayAsset.connections && displayAsset.connections.length > 0 ? (
               <div className={styles.connectionsList}>
                 {displayAsset.connections.map((connection) => {
-                  const peer = allAssets.find(a => a._id === connection.connected_asset_id);
+                  const peerName = relatedNames[connection.connected_asset_id];
                   const typeColor =
                     connection.connection_type === 'ethernet' || connection.connection_type === 'network' ? '#3b82f6' :
                     connection.connection_type === 'fiber' ? '#8b5cf6' :
@@ -825,8 +849,8 @@ const AssetDetailsModal: React.FC<AssetDetailsModalProps> = ({
                       <div className={styles.connectionTypeDot} style={{ background: typeColor }} />
                       <div className={styles.connectionInfo}>
                         <span className={styles.connectionType}>{connection.connection_type}</span>
-                        {peer ? (
-                          <span className={styles.connectionPeer}>→ {peer.basic_info.display_name}</span>
+                        {peerName ? (
+                          <span className={styles.connectionPeer}>→ {peerName}</span>
                         ) : (
                           <span className={styles.connectionPeer} style={{ opacity: 0.5 }}>→ {connection.connected_asset_id.slice(-6)}</span>
                         )}
