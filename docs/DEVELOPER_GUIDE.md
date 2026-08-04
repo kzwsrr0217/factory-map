@@ -471,7 +471,7 @@ All write operations require operator or admin role.
 
 | Method | Path | Query | Description |
 |--------|------|-------|-------------|
-| GET | `/wall-ports` | `floor_id?`, `patch_panel_id?` | List wall ports with resolved path info |
+| GET | `/wall-ports` | `floor_id?`, `patch_panel_id?`, `workarea_id?`, `q?`, `limit?` | List wall ports with resolved path info, `patch_status` and `occupied_by`. `q` is a substring match on the label ("R1/001") for the global search box; `limit` (max 200) is honoured only when given — the floor page needs every socket on its floor |
 | GET | `/wall-ports/:id` | — | Single wall port with full path |
 | POST | `/wall-ports` | — | Create (`label`, `floor_id` required; `pos_x/y`, `patch_panel_id`, `patch_port`, `switch_asset_id`, `switch_port` optional); 409 if the `(patch_panel_id, patch_port)` or `(switch_asset_id, switch_port)` pair is already assigned to another wall port |
 | PATCH | `/wall-ports/:id` | — | Update (reposition or re-cable); same 409 collision check as create, excluding itself |

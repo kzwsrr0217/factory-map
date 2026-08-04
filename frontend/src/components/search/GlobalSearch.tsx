@@ -1,38 +1,37 @@
 /**
  * GlobalSearch.tsx — Full-screen search overlay (Ctrl+K).
  *
- * Provides instant prefix-search across all six entity types: buildings,
- * floors, zones, workareas, and assets.
+ * Searches two kinds of thing two different ways, because they differ by orders of
+ * magnitude in count:
  *
- * Architecture:
- *   Module-level cache (`cachedIndex`, `cachedResults`, `indexBuilding`) —
- *     the inverted prefix index is built once and survives across open/close
- *     cycles. Call `invalidateSearchCache()` after any create/delete mutation
- *     to force a rebuild on the next open.
+ *   The hierarchy — buildings, floors, zones, work areas — is small, static and
+ *     cheap to hold, so it stays in a module-level prefix index built once per
+ *     session (`cachedIndex`, invalidated by `invalidateSearchCache()`).
  *
- *   `buildRecords()` — flattens all API responses into flat `IndexRecord`
- *     objects suitable for `buildSearchIndex`. Extra searchable text (tags,
- *     serial number, asset_tag) is appended to each record's `text` field.
+ *   Devices and sockets are asked of the server on each query. Devices used to be
+ *     in the index too, fetched with one unpaginated `GET /assets` — which the
+ *     server caps at 1000 rows, so with 1057 devices the last 57 could not be found
+ *     here at all, silently. Sockets were not searchable in any form, even though
+ *     their label ("R1/001") is exactly what someone types when a user reports a
+ *     dead network point; a surveyed factory has thousands of them, far past what is
+ *     worth indexing in a browser.
  *
- *   `ensureIndex()` — parallel-fetches all entity endpoints and calls
- *     `buildSearchIndex`; idempotent via `indexBuilding` guard.
+ * Both server searches are capped and debounced (120 ms), and late responses are
+ * dropped by sequence number so a slow request can't overwrite a newer answer.
  *
- *   Keyboard navigation — ArrowUp/ArrowDown moves the selection cursor;
- *     Enter navigates to the selected result; Escape closes the overlay.
- *
- *   120 ms debounce on query input prevents index queries on every keystroke.
- *
- * Results are capped at 12 hits via `queryIndex(cachedIndex, trimmed, 12)`.
+ * Keyboard: ArrowUp/Down moves the cursor, Enter opens, Escape closes.
  */
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../../services/api';
+import { assetService } from '../../services/asset.service';
+import { networkService } from '../../services/network.service';
 import { buildSearchIndex, queryIndex, IndexRecord, SearchIndex } from '../../utils/searchIndex';
 import styles from '../../styles/components/GlobalSearch.module.css';
 
 interface SearchResult {
   id: string;
-  type: 'building' | 'floor' | 'zone' | 'workarea' | 'asset';
+  type: 'building' | 'floor' | 'zone' | 'workarea' | 'asset' | 'socket';
   title: string;
   subtitle?: string;
   icon: string;
@@ -50,7 +49,7 @@ let cachedResults: SearchResult[] = [];
 let indexBuilding = false;
 
 function buildRecords(
-  buildings: any[], floors: any[], zones: any[], workareas: any[], assets: any[]
+  buildings: any[], floors: any[], zones: any[], workareas: any[]
 ): { records: IndexRecord[]; results: SearchResult[] } {
   const results: SearchResult[] = [];
   const records: IndexRecord[] = [];
@@ -81,33 +80,52 @@ function buildRecords(
   zones.forEach((z: any) =>
     add(z._id, 'zone', z.name, z.description, '🗺️', `/floors/${z.floor_id}`, '')
   );
-  assets.forEach((a: any) => {
-    const name = a.basic_info?.display_name ?? '';
-    const sub = [a.basic_info?.manufacturer, a.basic_info?.model].filter(Boolean).join(' ');
-    const extra = [
-      a.basic_info?.asset_tag,
-      a.basic_info?.serial_number,
-      a.basic_info?.type,
-      a.basic_info?.status,
-    ].filter(Boolean).join(' ');
-    add(a._id, 'asset', name, sub || undefined, '💻', `/assets/${a._id}`, extra);
-  });
 
   return { records, results };
+}
+
+/** A device hit, straight from the server's own `q` search. */
+function assetResult(a: any): SearchResult {
+  const sub = [a.basic_info?.manufacturer, a.basic_info?.model].filter(Boolean).join(' ');
+  return {
+    id: a._id,
+    type: 'asset',
+    title: a.basic_info?.display_name ?? '(unnamed)',
+    subtitle: sub || a.basic_info?.serial_number || undefined,
+    icon: '💻',
+    path: `/assets/${a._id}`,
+  };
+}
+
+/**
+ * A socket hit. Goes to the floor's socket list with the label pre-filtered —
+ * landing on a floor with 500 sockets and no hint which one was meant would answer
+ * the question with a haystack.
+ */
+function socketResult(p: any): SearchResult {
+  const where = [p.workarea?.name, p.rack_name && `rack ${p.rack_name}`].filter(Boolean).join(' · ');
+  const state = p.occupied_by ? `used by ${p.occupied_by.display_name}` : 'free';
+  return {
+    id: p._id,
+    type: 'socket',
+    title: p.label,
+    subtitle: [where, state].filter(Boolean).join(' — '),
+    icon: '🔌',
+    path: `/floors/${p.floor_id}?socket=${encodeURIComponent(p.label)}`,
+  };
 }
 
 async function ensureIndex(): Promise<void> {
   if (cachedIndex || indexBuilding) return;
   indexBuilding = true;
   try {
-    const [b, f, z, wa, a] = await Promise.all([
+    const [b, f, z, wa] = await Promise.all([
       api.get('/buildings').then(r => r.data.data ?? []),
       api.get('/floors').then(r => r.data.data ?? []),
       api.get('/zones').then(r => r.data.data ?? []),
       api.get('/workareas').then(r => r.data.data ?? []),
-      api.get('/assets').then(r => r.data.data ?? []),
     ]);
-    const { records, results } = buildRecords(b, f, z, wa, a);
+    const { records, results } = buildRecords(b, f, z, wa);
     cachedResults = results;
     cachedIndex = buildSearchIndex(records);
   } finally {
@@ -125,6 +143,8 @@ const GlobalSearch: React.FC<GlobalSearchProps> = ({ isOpen, onClose }) => {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
+  /** A server search is in flight; separate from `loading` (the one-off index build). */
+  const [searching, setSearching] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
@@ -143,14 +163,37 @@ const GlobalSearch: React.FC<GlobalSearchProps> = ({ isOpen, onClose }) => {
     }
   }, [isOpen]);
 
-  const runSearch = useCallback((q: string) => {
-    const trimmed = q.trim();
-    if (!trimmed) { setResults([]); return; }
-    if (!cachedIndex) return;
+  /**
+   * Sequence number of the newest query. A server search started earlier can answer
+   * later; without this, typing "R1/0" then "R1/001" could end up showing the wider
+   * result set.
+   */
+  const querySeq = useRef(0);
 
-    const hits = queryIndex(cachedIndex, trimmed, 12);
-    setResults(hits.map((r) => r.payload as SearchResult));
+  const runSearch = useCallback(async (q: string) => {
+    const trimmed = q.trim();
+    if (!trimmed) { setResults([]); setSearching(false); return; }
+
+    const seq = ++querySeq.current;
+
+    // The hierarchy answers instantly from the index; show it rather than an empty
+    // list while the two server searches are in flight.
+    const local = cachedIndex
+      ? queryIndex(cachedIndex, trimmed, 6).map((r) => r.payload as SearchResult)
+      : [];
+    setResults(local);
     setSelectedIndex(0);
+    setSearching(true);
+
+    const [assets, sockets] = await Promise.all([
+      assetService.searchAssets(trimmed, 6).catch(() => []),
+      networkService.searchWallPorts(trimmed, 6).catch(() => []),
+    ]);
+    if (seq !== querySeq.current) return;
+
+    setResults([...local, ...assets.map(assetResult), ...sockets.map(socketResult)]);
+    setSelectedIndex(0);
+    setSearching(false);
   }, []);
 
   useEffect(() => {
@@ -188,13 +231,13 @@ const GlobalSearch: React.FC<GlobalSearchProps> = ({ isOpen, onClose }) => {
           <input
             ref={inputRef}
             type="text"
-            placeholder="Search buildings, floors, assets..."
+            placeholder="Search devices, sockets (R1/001), rooms, floors…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
             className={styles.searchInput}
           />
-          {loading && <span className={styles.loader}>⏳</span>}
+          {(loading || searching) && <span className={styles.loader}>⏳</span>}
           {!loading && query && (
             <button className={styles.clearBtn} onClick={() => setQuery('')}>✕</button>
           )}
@@ -222,7 +265,7 @@ const GlobalSearch: React.FC<GlobalSearchProps> = ({ isOpen, onClose }) => {
           </div>
         )}
 
-        {query.trim() && !loading && results.length === 0 && (
+        {query.trim() && !loading && !searching && results.length === 0 && (
           <div className={styles.noResults}>
             <p>No results for &ldquo;{query}&rdquo;</p>
           </div>
@@ -231,7 +274,7 @@ const GlobalSearch: React.FC<GlobalSearchProps> = ({ isOpen, onClose }) => {
         {!query && !loading && (
           <div className={styles.hint}>
             {cachedIndex
-              ? `${cachedResults.length} items indexed — start typing to search`
+              ? `${cachedResults.length} places indexed — devices and sockets are searched as you type`
               : 'Loading search index…'}
           </div>
         )}

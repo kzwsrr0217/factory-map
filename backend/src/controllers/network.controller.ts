@@ -332,7 +332,7 @@ async function occupantsOf(ports: WallPort[]): Promise<Map<string, { _id: string
 
 export const listWallPorts = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const { floor_id, patch_panel_id, workarea_id } = req.query as Record<string, string | undefined>;
+    const { floor_id, patch_panel_id, workarea_id, q, limit } = req.query as Record<string, string | undefined>;
     const qb = wpRepo().createQueryBuilder('w')
       .leftJoinAndSelect('w.patch_panel', 'pp')
       .leftJoinAndSelect('pp.rack', 'rack')
@@ -343,6 +343,13 @@ export const listWallPorts = async (req: Request, res: Response, next: NextFunct
     if (floor_id)       qb.andWhere('w.floor_id = :floor_id', { floor_id });
     if (patch_panel_id) qb.andWhere('w.patch_panel_id = :patch_panel_id', { patch_panel_id });
     if (workarea_id)    qb.andWhere('w.workarea_id = :workarea_id', { workarea_id });
+    // Label search, for the global search box: a socket's label ("R1/001") is its
+    // identity, and there are far too many sockets in a surveyed factory to ship
+    // them all to the browser so it can filter locally.
+    if (q) qb.andWhere('w.label LIKE :q', { q: `%${q}%` });
+    // Only honoured with an explicit value — the floor page needs every socket on
+    // its floor, and silently capping that would drop sockets from the room lists.
+    if (limit) qb.take(Math.min(200, Math.max(1, parseInt(limit, 10))));
     const ports = await qb.getMany();
     await withWorkAreas(ports);
     const occupants = await occupantsOf(ports);

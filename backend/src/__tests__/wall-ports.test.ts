@@ -273,6 +273,29 @@ describe('GET /api/network/wall-ports — status and occupancy', () => {
     const inRoom = await listSockets(`?workarea_id=${workareaId}`);
     expect(inRoom.map((p) => p.label)).toEqual(['R1/010']);
   });
+
+  it('searches by label substring, for the global search box', async () => {
+    // A caller reads "R1/012" off the faceplate; that label is the only thing they
+    // have, and a surveyed factory has far too many sockets to filter in the browser.
+    await createSocket({ label: 'R1/012', floor_id: floorId });
+    await createSocket({ label: 'R2/012', floor_id: floorId });
+    await createSocket({ label: 'R1/013', floor_id: floorId });
+
+    expect((await listSockets('?q=R1/01')).map((p) => p.label)).toEqual(['R1/012', 'R1/013']);
+    expect((await listSockets('?q=/012')).map((p) => p.label)).toEqual(['R1/012', 'R2/012']);
+    expect(await listSockets('?q=R9')).toEqual([]);
+  });
+
+  it('caps only when asked, so a floor never loses sockets to a silent limit', async () => {
+    await createSocket({ label: 'R1/020', floor_id: floorId });
+    await createSocket({ label: 'R1/021', floor_id: floorId });
+    await createSocket({ label: 'R1/022', floor_id: floorId });
+
+    expect(await listSockets(`?floor_id=${floorId}&limit=2`)).toHaveLength(2);
+    // No limit param: every socket on the floor, because the floor page lists them
+    // grouped by room and a missing one reads as "that room has no socket there".
+    expect((await listSockets(`?floor_id=${floorId}`)).length).toBeGreaterThanOrEqual(3);
+  });
 });
 
 // ── One physical port, one socket ─────────────────────────────────────────────

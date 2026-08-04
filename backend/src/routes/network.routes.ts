@@ -246,6 +246,17 @@
  *         name: workarea_id
  *         schema: { type: string }
  *         description: Filter to the sockets in one room
+ *       - in: query
+ *         name: q
+ *         schema: { type: string }
+ *         description: Substring match on the label ("R1/001") — for the global search box
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer }
+ *         description: >
+ *           Cap the number of rows (max 200). Omitted means no cap: the floor page
+ *           needs every socket on its floor, and a silent cap would drop sockets
+ *           from the room lists.
  *     responses:
  *       200:
  *         description: |

@@ -21,6 +21,12 @@ import styles from '../../styles/components/FloorWallPortList.module.css';
 interface FloorWallPortListProps {
   ports: WallPort[];
   onPortClick?: (port: WallPort) => void;
+  /**
+   * Label to start filtered on, from the global search box's `?socket=` link. A
+   * search hit that dropped you on a floor with 500 sockets and no hint which one it
+   * meant answered the question with a haystack.
+   */
+  initialFilter?: string;
 }
 
 const STATUS_LABEL: Record<WallPortPatchStatus, string> = {
@@ -60,15 +66,20 @@ function groupByRoom(ports: WallPort[]): RoomGroup[] {
   });
 }
 
-const FloorWallPortList: React.FC<FloorWallPortListProps> = ({ ports, onPortClick }) => {
+const FloorWallPortList: React.FC<FloorWallPortListProps> = ({ ports, onPortClick, initialFilter = '' }) => {
   // Default off: on a fully surveyed floor the live-and-occupied sockets are the
   // bulk of the list and the interesting ones are the gaps.
   const [onlyFree, setOnlyFree] = useState(false);
+  const [labelFilter, setLabelFilter] = useState(initialFilter);
 
-  const visible = useMemo(
-    () => (onlyFree ? ports.filter((p) => !p.occupied_by) : ports),
-    [ports, onlyFree],
-  );
+  const visible = useMemo(() => {
+    const needle = labelFilter.trim().toLowerCase();
+    return ports.filter((p) => {
+      if (onlyFree && p.occupied_by) return false;
+      if (needle && !p.label.toLowerCase().includes(needle)) return false;
+      return true;
+    });
+  }, [ports, onlyFree, labelFilter]);
   const groups = useMemo(() => groupByRoom(visible), [visible]);
 
   const counts = useMemo(() => ({
@@ -89,6 +100,13 @@ const FloorWallPortList: React.FC<FloorWallPortListProps> = ({ ports, onPortClic
   return (
     <div>
       <div className={styles.summary}>
+        <input
+          className={styles.filterInput}
+          value={labelFilter}
+          onChange={(e) => setLabelFilter(e.target.value)}
+          placeholder="Find a label, e.g. R1/001"
+          aria-label="Filter sockets by label"
+        />
         <span><strong>{counts.total}</strong> sockets</span>
         <span><strong>{counts.free}</strong> free</span>
         <span><strong>{counts.live}</strong> live</span>
@@ -134,7 +152,18 @@ const FloorWallPortList: React.FC<FloorWallPortListProps> = ({ ports, onPortClic
       ))}
 
       {visible.length === 0 && (
-        <div className={styles.empty}><p>Every socket on this floor is in use.</p></div>
+        <div className={styles.empty}>
+          {/* Which of the two filters emptied the list matters: one is a dead end, the
+              other just needs different text. */}
+          <p>
+            {labelFilter.trim()
+              ? `No socket on this floor matches “${labelFilter.trim()}”.`
+              : 'Every socket on this floor is in use.'}
+          </p>
+          {labelFilter.trim() && (
+            <Button variant="outline" size="sm" onClick={() => setLabelFilter('')}>Clear the label filter</Button>
+          )}
+        </div>
       )}
     </div>
   );

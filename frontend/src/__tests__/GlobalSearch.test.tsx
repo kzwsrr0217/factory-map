@@ -5,8 +5,9 @@
  *   - Renders when isOpen=true; absent when isOpen=false
  *   - Shows a search input with placeholder text
  *   - Displays a loading indicator while the index is being built
- *   - After index loads, shows an "items indexed" hint when query is empty
+ *   - After the place index loads, shows the "places indexed" hint when query is empty
  *   - Shows results when a query matches a seeded item
+ *   - Devices and sockets come from the server's own `q` search, not the index
  *   - Shows "No results" message when query has no matches
  *   - Clicking a result calls navigate and onClose
  *   - Pressing Escape calls onClose
@@ -31,13 +32,33 @@ jest.mock('react-router-dom', () => ({
 const SEED_BUILDING = { _id: 'bld-test', name: 'WERK1 Factory', address: 'Test St 1' };
 const SEED_ASSET    = { _id: 'ast-test', basic_info: { display_name: 'IPC-001', type: 'IPC', status: 'active', manufacturer: 'Beckhoff', model: 'CX9020', asset_tag: 'TAG-001', serial_number: 'SN-001' }, hierarchy: {}, location: {}, connections: [], work_items: [] };
 
+const SEED_SOCKET = {
+  _id: 'wp-test', label: 'R1/001', floor_id: 'flr-test',
+  workarea: { _id: 'wa-1', name: 'Assembly 1' }, rack_name: 'R1',
+  patch_status: 'live', occupied_by: null,
+};
+
+/**
+ * Devices and sockets are searched server-side now, so their handlers answer the
+ * `q` param rather than returning a fixed list to be indexed. A handler that ignored
+ * `q` would make every query "match" and hide real filtering bugs.
+ */
 function seedHandlers() {
   return [
     rest.get(`${API}/buildings`,    (_req, res, ctx) => res(ctx.json({ success: true, data: [SEED_BUILDING] }))),
     rest.get(`${API}/floors`,       (_req, res, ctx) => res(ctx.json({ success: true, data: [] }))),
     rest.get(`${API}/zones`,        (_req, res, ctx) => res(ctx.json({ success: true, data: [] }))),
     rest.get(`${API}/workareas`,    (_req, res, ctx) => res(ctx.json({ success: true, data: [] }))),
-    rest.get(`${API}/assets`,       (_req, res, ctx) => res(ctx.json({ success: true, data: [SEED_ASSET] }))),
+    rest.get(`${API}/assets`,       (req, res, ctx) => {
+      const q = (req.url.searchParams.get('q') ?? '').toLowerCase();
+      const hit = q && SEED_ASSET.basic_info.display_name.toLowerCase().includes(q);
+      return res(ctx.json({ success: true, data: hit ? [SEED_ASSET] : [], meta: { total: hit ? 1 : 0 } }));
+    }),
+    rest.get(`${API}/network/wall-ports`, (req, res, ctx) => {
+      const q = (req.url.searchParams.get('q') ?? '').toLowerCase();
+      const hit = q && SEED_SOCKET.label.toLowerCase().includes(q);
+      return res(ctx.json({ success: true, data: hit ? [SEED_SOCKET] : [] }));
+    }),
   ];
 }
 
@@ -78,13 +99,13 @@ describe('GlobalSearch — visibility', () => {
 // ── Index loading ─────────────────────────────────────────────────────────────
 
 describe('GlobalSearch — index loading', () => {
-  it('shows indexed items hint after the index loads', async () => {
+  it('shows the places-indexed hint once the index loads', async () => {
     server.use(...seedHandlers());
     renderSearch({ isOpen: true });
 
     await waitFor(() => {
-      // The hint text changes from "Loading…" to "N items indexed"
-      expect(screen.getByText(/items indexed/i)).toBeInTheDocument();
+      // The hint text changes from "Loading…" to "N places indexed"
+      expect(screen.getByText(/places indexed/i)).toBeInTheDocument();
     }, { timeout: 3000 });
   });
 });
@@ -97,7 +118,7 @@ describe('GlobalSearch — search results', () => {
     renderSearch({ isOpen: true });
 
     // Wait for index to load
-    await waitFor(() => screen.getByText(/items indexed/i), { timeout: 3000 });
+    await waitFor(() => screen.getByText(/places indexed/i), { timeout: 3000 });
 
     const input = screen.getByPlaceholderText(/search/i);
     act(() => { fireEvent.change(input, { target: { value: 'WERK1' } }); });
@@ -107,25 +128,45 @@ describe('GlobalSearch — search results', () => {
     }, { timeout: 1000 });
   });
 
-  it('shows asset results by display_name', async () => {
+  it('finds a device through the server search, not the index', async () => {
+    // The index holds places only; devices were dropped from it because one
+    // unpaginated GET /assets silently stopped at 1000 rows.
     server.use(...seedHandlers());
     renderSearch({ isOpen: true });
 
-    await waitFor(() => screen.getByText(/items indexed/i), { timeout: 3000 });
+    await waitFor(() => screen.getByText(/places indexed/i), { timeout: 3000 });
 
     const input = screen.getByPlaceholderText(/search/i);
     act(() => { fireEvent.change(input, { target: { value: 'IPC-001' } }); });
 
     await waitFor(() => {
       expect(screen.getByText('IPC-001')).toBeInTheDocument();
-    }, { timeout: 1000 });
+    }, { timeout: 2000 });
+  });
+
+  it('finds a socket by its label and links to the floor filtered to it', async () => {
+    // "R1/001" is what a caller reads off the faceplate; it was not searchable at all.
+    server.use(...seedHandlers());
+    const { onClose } = renderSearch({ isOpen: true });
+
+    await waitFor(() => screen.getByText(/places indexed/i), { timeout: 3000 });
+
+    const input = screen.getByPlaceholderText(/search/i);
+    act(() => { fireEvent.change(input, { target: { value: 'R1/001' } }); });
+
+    await waitFor(() => expect(screen.getByText('R1/001')).toBeInTheDocument(), { timeout: 2000 });
+    expect(screen.getByText(/Assembly 1/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('R1/001'));
+    expect(mockNavigate).toHaveBeenCalledWith('/floors/flr-test?socket=R1%2F001');
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it('shows "No results" when query matches nothing', async () => {
     server.use(...seedHandlers());
     renderSearch({ isOpen: true });
 
-    await waitFor(() => screen.getByText(/items indexed/i), { timeout: 3000 });
+    await waitFor(() => screen.getByText(/places indexed/i), { timeout: 3000 });
 
     const input = screen.getByPlaceholderText(/search/i);
     act(() => { fireEvent.change(input, { target: { value: 'xyzzy_no_match_ever' } }); });
@@ -139,7 +180,7 @@ describe('GlobalSearch — search results', () => {
     server.use(...seedHandlers());
     renderSearch({ isOpen: true });
 
-    await waitFor(() => screen.getByText(/items indexed/i), { timeout: 3000 });
+    await waitFor(() => screen.getByText(/places indexed/i), { timeout: 3000 });
 
     const input = screen.getByPlaceholderText(/search/i);
     act(() => { fireEvent.change(input, { target: { value: 'WERK1' } }); });
@@ -167,7 +208,7 @@ describe('GlobalSearch — keyboard interaction', () => {
     server.use(...seedHandlers());
     const { onClose } = renderSearch({ isOpen: true });
 
-    await waitFor(() => screen.getByText(/items indexed/i), { timeout: 3000 });
+    await waitFor(() => screen.getByText(/places indexed/i), { timeout: 3000 });
 
     const input = screen.getByPlaceholderText(/search/i);
     act(() => { fireEvent.change(input, { target: { value: 'WERK1' } }); });
@@ -192,7 +233,7 @@ describe('GlobalSearch — keyboard interaction', () => {
     );
     renderSearch({ isOpen: true });
 
-    await waitFor(() => screen.getByText(/items indexed/i), { timeout: 3000 });
+    await waitFor(() => screen.getByText(/places indexed/i), { timeout: 3000 });
 
     const input = screen.getByPlaceholderText(/search/i);
     act(() => { fireEvent.change(input, { target: { value: 'Alpha' } }); });
@@ -213,7 +254,7 @@ describe('GlobalSearch — click navigation', () => {
     server.use(...seedHandlers());
     const { onClose } = renderSearch({ isOpen: true });
 
-    await waitFor(() => screen.getByText(/items indexed/i), { timeout: 3000 });
+    await waitFor(() => screen.getByText(/places indexed/i), { timeout: 3000 });
 
     const input = screen.getByPlaceholderText(/search/i);
     act(() => { fireEvent.change(input, { target: { value: 'WERK1' } }); });
@@ -233,7 +274,7 @@ describe('GlobalSearch — cache invalidation', () => {
     server.use(...seedHandlers());
     // First open — builds the index
     const { unmount } = renderSearch({ isOpen: true });
-    await waitFor(() => screen.getByText(/items indexed/i), { timeout: 3000 });
+    await waitFor(() => screen.getByText(/places indexed/i), { timeout: 3000 });
     unmount();
 
     // Invalidate
@@ -247,7 +288,7 @@ describe('GlobalSearch — cache invalidation', () => {
     );
     renderSearch({ isOpen: true });
 
-    await waitFor(() => screen.getByText(/items indexed/i), { timeout: 3000 });
+    await waitFor(() => screen.getByText(/places indexed/i), { timeout: 3000 });
 
     const input = screen.getByPlaceholderText(/search/i);
     act(() => { fireEvent.change(input, { target: { value: 'NewFactory' } }); });

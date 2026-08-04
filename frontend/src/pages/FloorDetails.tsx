@@ -17,7 +17,7 @@
  * FloorMap's `connectionMode` + `selectedAssetsForConnection` props.
  */
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { LayoutGrid, Monitor, Factory, Upload, Pencil, Check, AlertTriangle, FileSpreadsheet, Cable, X, Undo2, Redo2 } from 'lucide-react';
 import CsvImportModal from '../components/asset/CsvImportModal';
 import AddConnectionModal from '../components/asset/AddConnectionModal';
@@ -49,6 +49,7 @@ import { getApiErrorMessage } from '../utils/apiError';
 import styles from '../styles/pages/FloorDetails.module.css';
 
 const FloorDetails: React.FC = () => {
+  const [searchParams] = useSearchParams();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
@@ -808,7 +809,9 @@ const FloorDetails: React.FC = () => {
             + Add Sockets
           </Button>
         </div>
-        <FloorWallPortList ports={wallPorts} />
+        {/* `?socket=R1/001` comes from a global-search hit — the list opens filtered
+            to that label instead of leaving the reader to scan hundreds. */}
+        <FloorWallPortList ports={wallPorts} initialFilter={searchParams.get('socket') ?? ''} />
       </Card>
 
       {/* Assets Section */}

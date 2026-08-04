@@ -191,6 +191,15 @@ export const networkService = {
     const res = await api.get('/network/wall-ports', { params });
     return res.data.data;
   },
+  /**
+   * Sockets whose label contains `q`, for the global search box. Server-side, and
+   * capped: a surveyed factory has thousands of sockets, so neither an index in the
+   * browser nor an unbounded answer would hold up.
+   */
+  searchWallPorts: async (q: string, limit = 6): Promise<WallPort[]> => {
+    const res = await api.get('/network/wall-ports', { params: { q, limit } });
+    return res.data.data;
+  },
   createWallPort: async (data: Partial<WallPort>): Promise<WallPort> => {
     const res = await api.post('/network/wall-ports', data);
     return res.data.data;
