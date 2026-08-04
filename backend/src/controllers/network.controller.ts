@@ -308,6 +308,9 @@ function patchStatusOf(port: WallPort): WallPortPatchStatus {
  * relation (see WallPort.entity.ts), so it's resolved in one extra query rather
  * than per row — same shape as workarea.controller.ts's withZones().
  */
+/** Shape check only — whether such a rack exists is the query's business. */
+const UUID_SHAPE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
 async function withWorkAreas(ports: WallPort[]): Promise<void> {
   const ids = [...new Set(ports.map((p) => p.workarea_id).filter((id): id is string => !!id))];
   if (ids.length === 0) return;
@@ -548,6 +551,13 @@ export const suggestWallPortPatches = async (req: Request, res: Response, next: 
   try {
     const { rack_id } = req.query as { rack_id?: string };
     if (!rack_id) { res.status(400).json({ success: false, error: 'rack_id is required' }); return; }
+    // Rack ids are uniqueidentifier columns, so anything else makes the driver throw
+    // "Invalid GUID" and the caller sees a 500 with a stack trace for what is plainly
+    // a bad request. A caller that sent `rack_id=undefined` should be told that.
+    if (!UUID_SHAPE.test(rack_id)) {
+      res.status(400).json({ success: false, error: `rack_id is not an id: "${rack_id}"` });
+      return;
+    }
 
     const rack = await rackRepo().findOne({ where: { id: rack_id }, relations: ['patch_panels', 'room'] });
     if (!rack) { notFound(res); return; }

@@ -1075,6 +1075,25 @@ docking station and the laptop docked in it. The consequence for the planned
 switch-port join is that a MAC does **not** identify one asset — the join has to
 cope with two hits rather than assume uniqueness.
 
+**Rehearsing the cabling workflow**: `seed-network-demo.ts`
+(`npm run seed:network-demo [-- --floor=<id>] [-- --remove]`) adds one network room,
+one rack, two 24-port panels, 48 sockets `DEMO-R1/001..048`, a rack-mounted switch and
+one workstation plugged into a live socket. The sockets are deliberately in all three
+states — 1-16 unpatched, 17-32 patched with no switch port, 33-48 live — because the
+difference between them is the point of the workflow.
+
+Unlike `npm run seed` (which deletes everything, see its header) this one only adds,
+and `--remove` deletes exactly what it created, matched on the `DEMO` prefix. A demo
+socket someone has plugged a real device into is kept, with its patching intact,
+rather than silently changing that device's recorded path.
+
+It exists because the network side had never run against data: the database holds no
+sockets until the survey happens, so the socket search, the physical-path chain, the
+rack view and the progress page's socket columns were only ever covered by tests. The
+first run with it turned up a real defect — a malformed `rack_id` on
+`patch-suggestions` reached the driver and came back as a 500 "Invalid GUID" instead
+of a 400.
+
 **For the cabling survey**, `network-gaps-report.ts`
 (`npm run report:network -- [--csv=<path>]`) is the equivalent view — kept as its
 own script rather than folded into the reconcile report, because it shares no

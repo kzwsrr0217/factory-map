@@ -346,6 +346,16 @@ describe('port collision guards', () => {
 // ── Patching derived from labels ──────────────────────────────────────────────
 
 describe('GET /api/network/wall-ports/patch-suggestions', () => {
+  it('answers a malformed rack_id with 400 rather than a driver error', async () => {
+    // Rack ids are uniqueidentifier columns, so a non-id reached the driver and came
+    // back as a 500 with "Invalid GUID" - a server error for a plainly bad request.
+    const res = await request(app)
+      .get('/api/network/wall-ports/patch-suggestions?rack_id=undefined')
+      .set(auth());
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/not an id/);
+  });
+
   beforeEach(wipeSockets);
 
   it('derives panel and port from the label, rolling over between panels', async () => {
