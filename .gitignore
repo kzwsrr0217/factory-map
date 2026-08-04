@@ -57,6 +57,11 @@ ops/itsm/*.json
 ops/results/
 ops/**/*.csv
 
+# Throwaway patch scripts used while editing (ops/tmp_*.py and friends). One
+# leaked into a commit once; ignoring the pattern is cheaper than remembering.
+ops/tmp_*
+ops/.form_blocks*
+
 # Physical inventory survey tool + its exports (Internal/Confidential — real
 # HWA/serial numbers, informal employee names; never belongs in a public repo).
 # import-inventory-survey.ts itself is tracked, its input data never is.
