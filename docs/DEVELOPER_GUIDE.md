@@ -998,6 +998,23 @@ Recommended order, which is also why the dry run comes first:
 4. Per work area, use **Arrange N unplaced** on the floor page to give the assets
    coordinates (`POST /workareas/:id/auto-place`).
 
+**For the asset data itself**, `data-quality-report.ts`
+(`npm run report:quality -- [--csv=<path>]`) finds the mistakes a bulk import
+makes — the ones invisible one asset at a time, because they only show up when
+rows are compared against each other: the same serial or asset tag on several
+assets, an HWA typed in twice, rows with nothing to identify them by, a missing
+serial where the type implies one, references to a building/floor/work area that
+no longer exists, and an asset whose work area sits on a different floor than the
+asset does.
+
+Superseded rows (`successor_id` set) are skipped throughout: their duplicate
+serial *is* the point of a replacement, and flagging them would drown the real
+findings. Monitors, phones and cameras are excluded from the missing-serial
+section for the same reason — they routinely arrive without one recorded. On the
+current ITSM-sourced data it reports 6 duplicate serials, 3 duplicate asset tags
+and 85 devices missing a serial, which is the kind of thing the reconcile pass
+exists to work through.
+
 **For the cabling survey**, `network-gaps-report.ts`
 (`npm run report:network -- [--csv=<path>]`) is the equivalent view — kept as its
 own script rather than folded into the reconcile report, because it shares no
