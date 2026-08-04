@@ -840,7 +840,23 @@ const FloorDetails: React.FC = () => {
           </div>
         ) : (
           <div className={styles.emptyAssets}>
-            <p>No assets found on this floor</p>
+            {/* The commonest state during the survey, so it says where devices come
+                from rather than only that there are none. Both routes are real: the
+                map's tray searches every device with no floor yet, and the import
+                creates them from a spreadsheet. */}
+            <p>No devices on this floor yet</p>
+            <p className={styles.emptyHint}>
+              Search the map's 📦 tray above for a device with no floor yet and click the plan to place it,
+              or import a list.
+            </p>
+            <div className={styles.emptyActions}>
+              <Button variant="primary" onClick={() => navigate('/unplaced')}>
+                See all unplaced devices
+              </Button>
+              <Button variant="outline" onClick={() => setCsvImportOpen(true)}>
+                Import CSV
+              </Button>
+            </div>
           </div>
         )}
       </Card>

@@ -190,6 +190,13 @@ const MapView: React.FC = () => {
 
   const filterActive = !!(searchQuery || statusFilter !== 'all' || typeFilter !== 'all' || workareaFilter !== 'all');
 
+  const clearFilters = useCallback(() => {
+    setSearchQuery('');
+    setStatusFilter('all');
+    setTypeFilter('all');
+    setWorkareaFilter('all');
+  }, []);
+
   // When a filter/search is active, keep every asset on the map for spatial
   // context but fade the non-matching ones instead of hiding them.
   const dimmedAssetIds = useMemo(() => {
@@ -977,17 +984,8 @@ const MapView: React.FC = () => {
                   placeholder="Work Area"
                 />
               </div>
-              {(searchQuery || statusFilter !== 'all' || typeFilter !== 'all' || workareaFilter !== 'all') && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setSearchQuery('');
-                    setStatusFilter('all');
-                    setTypeFilter('all');
-                    setWorkareaFilter('all');
-                  }}
-                >
+              {filterActive && (
+                <Button variant="outline" size="sm" onClick={clearFilters}>
                   Clear Filters
                 </Button>
               )}
@@ -1282,7 +1280,7 @@ const MapView: React.FC = () => {
                       </div>
                       <div className={styles.sidePanelList}>
                         {zoneAssets.length === 0 ? (
-                          <div style={{ padding: 16, color: 'var(--color-text-secondary)', fontSize: 13 }}>No assets in this zone</div>
+                          <div className={styles.sidePanelEmpty}><p>No devices in this zone yet</p></div>
                         ) : zoneAssets.map(asset => {
                           const statusColor =
                             asset.basic_info?.status === 'active' ? '#10b981' :
@@ -1343,8 +1341,24 @@ const MapView: React.FC = () => {
                     )}
                     <div className={styles.sidePanelList}>
                       {filteredAssets.length === 0 ? (
-                        <div style={{ padding: 16, color: 'var(--color-text-secondary)', fontSize: 13 }}>
-                          No assets on this floor
+                        /* An empty list has two very different causes and used to read
+                           the same either way: the floor really is empty, or the
+                           filters hid everything on it. */
+                        <div className={styles.sidePanelEmpty}>
+                          {filterActive ? (
+                            <>
+                              <p>No devices match the filters — {assets.length} on this floor</p>
+                              <Button variant="outline" size="sm" onClick={clearFilters}>Clear filters</Button>
+                            </>
+                          ) : (
+                            <>
+                              <p>No devices on this floor yet</p>
+                              <p>Open the 📦 tray on the map to place one that has no floor yet.</p>
+                              <Button variant="outline" size="sm" onClick={handleDeployToggle} disabled={!selectedFloorId}>
+                                + Deploy Device
+                              </Button>
+                            </>
+                          )}
                         </div>
                       ) : (
                         filteredAssets.map(asset => {

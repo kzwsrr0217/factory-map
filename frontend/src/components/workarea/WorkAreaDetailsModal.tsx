@@ -335,7 +335,13 @@ const WorkAreaDetailsModal: React.FC<WorkAreaDetailsModalProps> = ({
                   </div>
                 ) : (
                   <div className={styles.empty}>
-                    <p>No assets in this work area</p>
+                    {/* Assignment happens elsewhere (the asset form, bulk edit, or the
+                        import), so say where rather than only that it is empty. */}
+                    <p>No devices in this work area yet</p>
+                    <p className={styles.emptyHint}>
+                      A device lands here when its work area is set — on the device itself,
+                      through bulk edit on the dashboard, or from the inventory import.
+                    </p>
                   </div>
                 )}
               </div>

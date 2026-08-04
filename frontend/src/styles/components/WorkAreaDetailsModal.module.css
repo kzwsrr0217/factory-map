@@ -204,5 +204,12 @@
 }
 
 .empty p {
-  margin-bottom: var(--spacing-lg);
+  margin-bottom: var(--spacing-sm);
+}
+
+/* Where the entries come from — see the empty branch in WorkAreaDetailsModal.tsx. */
+.emptyHint {
+  max-width: 44ch;
+  font-size: var(--font-size-sm);
+  font-style: normal;
 }

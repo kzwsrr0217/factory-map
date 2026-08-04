@@ -40,7 +40,7 @@ import { assetService, Asset, AssetStatus } from '../../services/asset.service';
 import { hierarchyService, Building } from '../../services/hierarchy.service';
 import { floorService, Floor } from '../../services/floor.service';
 import { workareaService, WorkArea } from '../../services/workarea.service';
-import { networkService, WallPort } from '../../services/network.service';
+import { networkService, WallPort, NetworkRack } from '../../services/network.service';
 import { ASSET_TYPE_OPTIONS } from '../../utils/assetTypes';
 import { ASSET_TEMPLATES } from '../../utils/assetTemplates';
 import { usePersonSuggestions, invalidatePersonSuggestions } from '../../hooks/usePersonSuggestions';
@@ -81,6 +81,13 @@ const AssetFormModal: React.FC<AssetFormModalProps> = ({
   const [workareas, setWorkareas] = useState<WorkArea[]>([]);
   const [allAssets, setAllAssets] = useState<AssetOption[]>([]);
   const [wallPorts, setWallPorts] = useState<WallPort[]>([]);
+  /**
+   * Racks, for mounting a device in a cabinet. This was only possible in the
+   * creation wizard, so an existing switch could never be moved into a rack from the
+   * app at all — the rack view's own empty state told people to "set rack_id", which
+   * is a database column, not something the UI offered.
+   */
+  const [racks, setRacks] = useState<NetworkRack[]>([]);
   const [wallPortId, setWallPortId] = useState<string>('');
   const [predecessorSearch, setPredecessorSearch] = useState('');
   const [successorSearch, setSuccessorSearch] = useState('');
@@ -106,6 +113,10 @@ const AssetFormModal: React.FC<AssetFormModalProps> = ({
     building_id: string;
     floor_id: string;
     workarea_id: string;
+    /** Rack mount — kept as strings like every other field here; converted on submit. */
+    rack_id: string;
+    u_position: string;
+    rack_u_size: string;
     coordinates_x: string;
     coordinates_y: string;
     location_description: string;
@@ -158,6 +169,9 @@ const AssetFormModal: React.FC<AssetFormModalProps> = ({
     building_id: defaultBuildingId || '',
     floor_id: defaultFloorId || '',
     workarea_id: '',
+    rack_id: '',
+    u_position: '',
+    rack_u_size: '',
     coordinates_x: (defaultCoordinates?.x ?? 0).toString(),
     coordinates_y: (defaultCoordinates?.y ?? 0).toString(),
     location_description: '',
@@ -249,6 +263,14 @@ const AssetFormModal: React.FC<AssetFormModalProps> = ({
     networkService.getWallPorts({ floor_id: floorId }).then(setWallPorts).catch(() => {});
   }, [formData.floor_id]);
 
+  // Racks are per network room, not per floor, so they are loaded once with the form
+  // rather than in the floor cascade. Empty list = no rooms recorded yet, and the
+  // rack section then says so instead of offering an empty picker.
+  useEffect(() => {
+    if (!isOpen) return;
+    networkService.getRacks().then(setRacks).catch(() => {});
+  }, [isOpen]);
+
   useEffect(() => {
     if (asset) {
       setFormData({
@@ -265,6 +287,9 @@ const AssetFormModal: React.FC<AssetFormModalProps> = ({
         building_id: asset.hierarchy.building_id || '',
         floor_id: asset.hierarchy.floor_id || defaultFloorId || '',
         workarea_id: asset.hierarchy.workarea_id || '',
+        rack_id: asset.hierarchy.rack_id || '',
+        u_position: asset.hierarchy.u_position != null ? String(asset.hierarchy.u_position) : '',
+        rack_u_size: asset.hierarchy.rack_u_size != null ? String(asset.hierarchy.rack_u_size) : '',
         coordinates_x: asset.location.coordinates.x.toString(),
         coordinates_y: asset.location.coordinates.y.toString(),
         location_description: asset.location.description || '',
@@ -323,6 +348,9 @@ const AssetFormModal: React.FC<AssetFormModalProps> = ({
         building_id: defaultBuildingId || '',
         floor_id: defaultFloorId || '',
         workarea_id: '',
+        rack_id: '',
+        u_position: '',
+        rack_u_size: '',
         coordinates_x: (defaultCoordinates?.x ?? 0).toString(),
         coordinates_y: (defaultCoordinates?.y ?? 0).toString(),
         location_description: '',
@@ -481,6 +509,11 @@ const AssetFormModal: React.FC<AssetFormModalProps> = ({
           // different floor entirely.
           section_id: floorChanged ? null : (asset?.hierarchy?.section_id || null),
           workstation_id: floorChanged ? null : (asset?.hierarchy?.workstation_id || null),
+          // Rack mount. u_position is what the server checks for collisions, so it is
+          // sent as a number or explicitly null — never an empty string.
+          rack_id: formData.rack_id || null,
+          u_position: formData.rack_id && formData.u_position ? Number(formData.u_position) : null,
+          rack_u_size: formData.rack_id && formData.rack_u_size ? Number(formData.rack_u_size) : 1,
         },
         location: {
           coordinates,
@@ -852,7 +885,11 @@ const AssetFormModal: React.FC<AssetFormModalProps> = ({
             )}
             {!wallPortId && formData.floor_id && wallPorts.length === 0 && (
               <span className={styles.wallPortHint}>
-                No wall ports recorded on this floor — add them from the floor page.
+                No sockets recorded on this floor yet —{' '}
+                <a href={`/floors/${formData.floor_id}`} target="_blank" rel="noreferrer">
+                  add them on the floor page
+                </a>{' '}
+                (they can be entered as a numbered range, e.g. R1/001–R1/048).
               </span>
             )}
           </div>
@@ -1212,6 +1249,63 @@ const AssetFormModal: React.FC<AssetFormModalProps> = ({
             </div>
           </div>
         </div>
+
+        {/* Rack mount — collapsed, because it applies to switches and servers rather
+            than to the desks that make up most of the estate. Until now it existed
+            only in the creation wizard, so a device already in the database could not
+            be put into a rack at all. */}
+        <details className={styles.sectionCollapsed}>
+          <summary className={styles.sectionSummary}>Rack mount</summary>
+
+          {racks.length === 0 ? (
+            <p className={styles.helperText}>
+              No racks recorded yet — add a network room and a rack under Network
+              Infrastructure first.
+            </p>
+          ) : (
+            <>
+              <Select
+                value={formData.rack_id}
+                onChange={(value) => setField({
+                  rack_id: value,
+                  // Leaving the rack clears its position; keeping stale U numbers on an
+                  // unmounted device is how the rack diagram ends up with ghosts.
+                  ...(value ? {} : { u_position: '', rack_u_size: '' }),
+                })}
+                options={[
+                  { value: '', label: '— Not rack-mounted —' },
+                  ...racks.map(r => ({ value: r._id, label: r.name })),
+                ]}
+                placeholder="Rack"
+              />
+              {formData.rack_id && (
+                <>
+                  <div className={styles.row}>
+                    <Input
+                      label="U Position"
+                      type="number"
+                      placeholder="e.g. 12"
+                      value={formData.u_position}
+                      onChange={(e) => setField({ u_position: e.target.value })}
+                    />
+                    <Input
+                      label="Height (U)"
+                      type="number"
+                      placeholder="1"
+                      value={formData.rack_u_size}
+                      onChange={(e) => setField({ rack_u_size: e.target.value })}
+                    />
+                  </div>
+                  <p className={styles.helperText}>
+                    Rack-mounted devices appear in the rack diagram and are left off the
+                    floor map. The server rejects a position that overlaps another device
+                    in the same rack.
+                  </p>
+                </>
+              )}
+            </>
+          )}
+        </details>
 
         {/* Operational Section */}
         <details className={styles.sectionCollapsed}>

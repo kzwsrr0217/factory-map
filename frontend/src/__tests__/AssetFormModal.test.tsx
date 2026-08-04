@@ -7,6 +7,7 @@
  *   - Filling Display Name and submitting calls createAsset and invokes onSuccess
  *   - Section headings are visible (Basic Information, Network, Technical Specifications)
  *   - Edit mode pre-populates the Display Name field
+ *   - Rack mount: picker appears only when racks exist, and reaches the PATCH body
  */
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
@@ -222,5 +223,61 @@ describe('AssetFormModal — edit mode', () => {
     fireEvent.click(screen.getByRole('button', { name: /update asset/i }));
 
     await waitFor(() => expect(onSuccess).toHaveBeenCalledTimes(1), { timeout: 3000 });
+  });
+});
+
+
+describe('AssetFormModal — rack mount', () => {
+  /**
+   * Mounting a device in a rack used to be possible only in the creation wizard, so
+   * an existing switch could not be put in a cabinet from the app at all. These pin
+   * down that the section is offered when there are racks, says so when there are
+   * none, and that what is picked actually reaches the server.
+   */
+  const withRacks = () => server.use(
+    rest.get(`${API}/network/racks`, (_req, res, ctx) => res(ctx.json({
+      success: true,
+      data: [{ _id: 'rack-1', name: 'R1', network_room_id: 'room-1', u_count: 42 }],
+    }))),
+  );
+
+  it('says where racks come from when none are recorded', async () => {
+    server.use(rest.get(`${API}/network/racks`, (_req, res, ctx) => res(ctx.json({ success: true, data: [] }))));
+    renderModal({});
+    expect(await screen.findByText(/No racks recorded yet/)).toBeInTheDocument();
+  });
+
+  it('offers the rack picker once a rack exists', async () => {
+    withRacks();
+    renderModal({});
+    expect(await screen.findByText('— Not rack-mounted —')).toBeInTheDocument();
+    // U position only matters once a rack is chosen.
+    expect(screen.queryByLabelText(/U Position/i)).not.toBeInTheDocument();
+  });
+
+  it('sends the rack and its U position on save', async () => {
+    withRacks();
+    let body: any;
+    server.use(rest.patch(`${API}/assets/asset-1`, async (req, res, ctx) => {
+      body = await req.json();
+      return res(ctx.json({ success: true, data: { ...MOCK_ASSET } }));
+    }));
+
+    const onSuccess = jest.fn();
+    renderModal({ asset: MOCK_ASSET, onSuccess });
+
+    const rackSelect = await screen.findByText('— Not rack-mounted —');
+    fireEvent.change(rackSelect.closest('select')!, { target: { value: 'rack-1' } });
+
+    const uPos = await screen.findByPlaceholderText('e.g. 12');
+    fireEvent.change(uPos, { target: { value: '12' } });
+
+    fireEvent.click(screen.getByRole('button', { name: /Update Asset/i }));
+    await waitFor(() => expect(onSuccess).toHaveBeenCalled());
+
+    expect(body.hierarchy.rack_id).toBe('rack-1');
+    expect(body.hierarchy.u_position).toBe(12);
+    // Never an empty string: the server compares it numerically for collisions.
+    expect(body.hierarchy.rack_u_size).toBe(1);
   });
 });

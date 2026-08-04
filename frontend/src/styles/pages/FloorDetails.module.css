@@ -301,3 +301,17 @@
   text-align: center;
   color: var(--color-text-secondary);
 }
+
+/* An empty list should say where the entries come from — see FloorDetails.tsx. */
+.emptyHint {
+  max-width: 46ch;
+  margin: var(--spacing-xs) auto var(--spacing-lg);
+  font-size: var(--font-size-sm);
+}
+
+.emptyActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-sm);
+  justify-content: center;
+}

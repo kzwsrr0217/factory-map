@@ -513,7 +513,14 @@ const NetworkInfrastructure: React.FC = () => {
                 <h2>{selectedRoom.name}</h2>
                 <Button variant="secondary" size="sm" onClick={() => openModal({ kind: 'rack', room: selectedRoom })}>+ Add Rack</Button>
               </div>
-              {selectedRoom.racks.length === 0 && <div className={styles.empty}>No racks. Add the first rack.</div>}
+              {selectedRoom.racks.length === 0 && (
+                <div className={styles.empty}>
+                  <p>No racks in this room yet.</p>
+                  <Button variant="secondary" size="sm" onClick={() => openModal({ kind: 'rack', room: selectedRoom })}>
+                    + Add the first rack
+                  </Button>
+                </div>
+              )}
               <div className={styles.racks}>
                 {selectedRoom.racks.map(rack => (
                   <div
@@ -556,7 +563,14 @@ const NetworkInfrastructure: React.FC = () => {
                   <h2>{selectedRack.name} — Patch Panels</h2>
                   <Button variant="secondary" size="sm" onClick={() => openModal({ kind: 'panel', rack: selectedRack })}>+ Add Panel</Button>
                 </div>
-                {selectedRack.patch_panels.length === 0 && <div className={styles.empty}>No patch panels in this rack.</div>}
+                {selectedRack.patch_panels.length === 0 && (
+                  <div className={styles.empty}>
+                    <p>No patch panels in this rack yet — sockets are patched onto panel ports.</p>
+                    <Button variant="secondary" size="sm" onClick={() => openModal({ kind: 'panel', rack: selectedRack })}>
+                      + Add the first panel
+                    </Button>
+                  </div>
+                )}
                 <div className={styles.panelList}>
                   {selectedRack.patch_panels.map(panel => {
                     const ports = panelPorts[panel._id] ?? [];
@@ -643,7 +657,10 @@ const NetworkInfrastructure: React.FC = () => {
                 <div className={styles.rackDiagramWrap}>
                   {rackAssets.length === 0 ? (
                     <div className={styles.empty}>
-                      No rack-mounted assets yet. Set <strong>rack_id</strong> on an asset to place it here.
+                      {/* Named the database column and the page it is not on. The form
+                          now has a Rack mount section, so this can point at it. */}
+                      No devices mounted in this rack yet. Open a device, edit it, and
+                      pick this rack under <strong>Rack mount</strong>.
                     </div>
                   ) : (
                     <RackDiagram

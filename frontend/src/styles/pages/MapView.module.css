@@ -580,3 +580,20 @@
     grid-column: 1 / -1;
   }
 }
+
+
+/* Empty side-panel list. Says which of the two reasons applies and offers the way
+   out of it — see the sidePanelList branch in MapView.tsx. */
+.sidePanelEmpty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-md);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.sidePanelEmpty p {
+  margin: 0;
+}
