@@ -745,6 +745,7 @@ export async function driftSummary(): Promise<IReconcileSummary> {
     missing: 0,
     error: 0,
     generated_at: new Date(),
+    itsm_mode: config.itsm.mode,
   };
   for (const a of linked) {
     if (!a.reconcile_last_at) { summary.never_checked++; continue; }

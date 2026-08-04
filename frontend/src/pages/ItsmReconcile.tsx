@@ -243,6 +243,19 @@ const ItsmReconcile: React.FC = () => {
         </div>
       )}
 
+      {/* Which source produced those verdicts. Without this the page reads the same
+          whether the server talks to real ITSM or to the built-in mock — and in mock
+          mode every real asset comes back "missing", so the red count is about the
+          configuration, not the data. */}
+      {summary?.itsm_mode && summary.itsm_mode !== 'real' && (
+        <p className={styles.sourceNote}>
+          <AlertTriangle size={14} />{' '}
+          {summary.itsm_mode === 'mock'
+            ? 'Checked against the built-in mock ITSM — these verdicts are not real. "Missing" here means the mock has no such hardware.'
+            : 'Checked against the imported ITSM snapshot, not live ITSM. Verdicts are as old as the last snapshot import.'}
+        </p>
+      )}
+
       <Card className={styles.assetCard}>
         <div className={styles.assetHead}>
           <div className={styles.assetTitle}>

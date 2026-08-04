@@ -34,6 +34,20 @@
   margin-bottom: var(--spacing-lg);
 }
 
+/* Which ITSM source the verdicts came from — see the note in ItsmReconcile.tsx. */
+.sourceNote {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  margin: calc(-1 * var(--spacing-sm)) 0 var(--spacing-lg);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-left: 3px solid var(--color-warning);
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
 .statCard {
   display: flex;
   flex-direction: column;

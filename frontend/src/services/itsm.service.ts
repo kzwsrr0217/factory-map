@@ -46,6 +46,12 @@ export interface ReconcileSummary {
   missing: number;
   error: number;
   generated_at: string;
+  /**
+   * The ITSM source the server reads. Shown on the page because the verdicts are
+   * only as meaningful as the source: a check run in `mock` mode marks every real
+   * asset missing, which is a configuration fact, not a data problem.
+   */
+  itsm_mode?: 'mock' | 'real' | 'snapshot';
 }
 
 /**

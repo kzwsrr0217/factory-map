@@ -158,6 +158,13 @@ export interface IReconcileSummary {
   missing: number;
   error: number;
   generated_at: Date;
+  /**
+   * Which ITSM source the app is configured to read. The stored verdicts say
+   * nothing about where they came from, and a run against the mock adapter marks
+   * every real asset `missing` — a number that means "wrong source", not "gone from
+   * ITSM". The UI needs to be able to say so.
+   */
+  itsm_mode: 'mock' | 'real' | 'snapshot';
 }
 
 export interface IReconcileReport {
