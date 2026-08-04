@@ -182,9 +182,12 @@ const Login: React.FC = () => {
           </button>
         </form>
 
-        {mode === 'local' && (
-          <p className={styles.hint}>Default: admin / admin123</p>
-        )}
+        {/* No credential hint for local sign-in, on purpose. This used to read
+            "Default: admin / admin123" — a login page reachable from the corporate
+            VLAN advertising an account name and password, and a stale pair at
+            that: the real seeded password is different, so it managed to be both
+            a disclosure and wrong. Anyone who needs an account gets one from an
+            admin; nobody needs to read it off the sign-in screen. */}
         {mode === 'ldap' && (
           <p className={styles.hint}>Use your Active Directory / LDAP credentials</p>
         )}

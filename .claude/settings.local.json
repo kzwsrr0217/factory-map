@@ -25,7 +25,9 @@
       "Bash(xxd \"/c/temporary/floor-patch.json\")",
       "Read(//tmp/**)",
       "Bash(python -c \"import sys,json;a=json.load\\(sys.stdin\\)['data'];print\\('asset reverted -> is_placed:',a['is_placed'],'| bld:',a['hierarchy']['building_id']\\)\")",
-      "Bash(rm -f /tmp/tok)"
+      "Bash(rm -f /tmp/tok)",
+      "Bash(podman start *)",
+      "Bash(podman ps *)"
     ]
   }
 }

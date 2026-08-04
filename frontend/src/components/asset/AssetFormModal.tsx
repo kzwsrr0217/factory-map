@@ -729,134 +729,21 @@ const AssetFormModal: React.FC<AssetFormModalProps> = ({
           </div>
         )}
 
-        {/* Basic Information Section */}
+        {/* ── The everyday fields, first ─────────────────────────────────
+            Where the device is, who has it, which socket it's in, and its
+            status. Those four are what actually changes between one visit to
+            this form and the next; everything below is set once at creation or
+            filled in by an ITSM sync.
+
+            They used to be scattered across four sections — status in Basic
+            Information, the room in Location, the socket in Network, the person
+            in its own section — so a routine edit meant scrolling past ten
+            sections to touch four fields. Moved here rather than duplicated:
+            rendering the same control twice would eventually let the two copies
+            disagree. */}
         <div className={styles.section}>
-          <h3 className={styles.sectionTitle}>Basic Information</h3>
+          <h3 className={styles.sectionTitle}>Where &amp; Who</h3>
 
-          <Input
-            label="Display Name *"
-            placeholder="e.g., John's Workstation"
-            value={formData.display_name}
-            onChange={(e) => {
-              setField({ display_name: e.target.value });
-              if (errors.display_name) setErrors({ ...errors, display_name: '' });
-            }}
-            error={errors.display_name}
-            helperText={formData.display_name ? `${formData.display_name.length} characters` : 'Unique identifier for this asset'}
-          />
-
-          <div className={styles.row}>
-            <Input
-              label="Manufacturer"
-              placeholder="e.g., Dell"
-              value={formData.manufacturer}
-              onChange={(e) => setField({ manufacturer: e.target.value })}
-              list="lookup-manufacturer"
-            />
-
-            <Input
-              label="Model"
-              placeholder="e.g., Optiplex 7090"
-              value={formData.model}
-              onChange={(e) => setField({ model: e.target.value })}
-              list="lookup-model"
-            />
-          </div>
-
-          <div className={styles.row}>
-            <Input
-              label="Serial Number"
-              placeholder="e.g., ABC123456"
-              value={formData.serial_number}
-              onChange={(e) => setField({ serial_number: e.target.value })}
-            />
-
-            <Input
-              label="Asset Tag"
-              placeholder="e.g., ASSET-001"
-              value={formData.asset_tag}
-              onChange={(e) => setField({ asset_tag: e.target.value })}
-            />
-          </div>
-
-          <div className={styles.row}>
-            <Select
-              value={formData.status}
-              onChange={(value) => setField({ status: value as AssetStatus })}
-              options={statusOptions}
-              placeholder="Select status"
-            />
-            <Select
-              value={formData.asset_type}
-              onChange={(value) => setField({ asset_type: value })}
-              options={ASSET_TYPE_OPTIONS}
-              placeholder="Asset Type"
-            />
-          </div>
-
-          <div className={styles.row}>
-            <Input
-              label="Station / Object ID"
-              placeholder="e.g., 518142-23"
-              value={formData.object_id}
-              onChange={(e) => setField({ object_id: e.target.value })}
-              helperText="Local machine/station identifier (not from ITSM)"
-            />
-            <Input
-              label="Serial Object"
-              placeholder="e.g., GEH12345"
-              value={formData.serial_object}
-              onChange={(e) => setField({ serial_object: e.target.value })}
-              helperText="Internal tracking / serial object number"
-              list="lookup-serial-object"
-            />
-          </div>
-
-          <div className={styles.row}>
-            <Input
-              label="Catalog Item"
-              placeholder="e.g., IPC 19&quot; Rack"
-              value={formData.catalog_item_display_name}
-              onChange={(e) => setField({ catalog_item_display_name: e.target.value })}
-              helperText="Hardware model / catalog entry from ITSM"
-              list="lookup-catalog-item"
-            />
-            <Input
-              label="Catalog Item ITSM ID"
-              placeholder="ITSM catalog GUID"
-              value={formData.catalog_item_itsm_id}
-              onChange={(e) => setField({ catalog_item_itsm_id: e.target.value })}
-            />
-          </div>
-        </div>
-
-        {/* Operating System Section */}
-        <div className={styles.section}>
-          <h3 className={styles.sectionTitle}>Operating System</h3>
-          
-          <div className={styles.row}>
-            <Input
-              label="OS Type"
-              placeholder="e.g., Windows, Linux, macOS"
-              value={formData.os_type}
-              onChange={(e) => setField({ os_type: e.target.value })}
-              list="lookup-os-type"
-            />
-
-            <Input
-              label="OS Version"
-              placeholder="e.g., Windows 11 Pro"
-              value={formData.os_version}
-              onChange={(e) => setField({ os_version: e.target.value })}
-              list="lookup-os-version"
-            />
-          </div>
-        </div>
-
-        {/* Location Section */}
-        <div className={styles.section}>
-          <h3 className={styles.sectionTitle}>Location</h3>
-          
           <Select
             value={formData.building_id}
             onChange={(value) => {
@@ -892,53 +779,49 @@ const AssetFormModal: React.FC<AssetFormModalProps> = ({
           {selectedWorkareaZone && (
             <p className={styles.helperText}>Zone: <strong>{selectedWorkareaZone}</strong></p>
           )}
+
           <p className={styles.helperText}>
-            Assigning a floor/area here does not place the asset on the map —
-            set coordinates below, or drag it from the floor map&apos;s unplaced tray.
+            Assigning a floor/area here does not place the asset on the map — set
+            coordinates under Location, or drag it from the floor map&apos;s
+            unplaced tray.
           </p>
 
-          <div className={styles.row}>
-            <Input
-              label="Coordinate X"
-              type="number"
-              placeholder="0"
-              value={formData.coordinates_x}
-              onChange={(e) => setField({ coordinates_x: e.target.value })}
-              error={errors.coordinates_x || validateCoordinate('coordinates_x')}
-              helperText={!errors.coordinates_x && !validateCoordinate('coordinates_x') && formData.coordinates_x ? `Position: ${formData.coordinates_x}px` : 'Horizontal position on floor'}
-            />
-
-            <Input
-              label="Coordinate Y"
-              type="number"
-              placeholder="0"
-              value={formData.coordinates_y}
-              onChange={(e) => setField({ coordinates_y: e.target.value })}
-              error={errors.coordinates_y || validateCoordinate('coordinates_y')}
-              helperText={!errors.coordinates_y && !validateCoordinate('coordinates_y') && formData.coordinates_y ? `Position: ${formData.coordinates_y}px` : 'Vertical position on floor'}
-            />
+          <div className={styles.inputWrapper}>
+            <label className={styles.inputLabel}>Physical Wall Port</label>
+            <select
+              className={styles.input}
+              value={wallPortId}
+              onChange={(e) => { setWallPortId(e.target.value); setIsDirty(true); }}
+            >
+              <option value="">— No wall port assigned —</option>
+              {wallPortOptions.map(o => (
+                <option key={o.value} value={o.value} disabled={o.disabled}>{o.label}</option>
+              ))}
+            </select>
+            {selectedWallPort?.patch_status === 'unpatched' && (
+              <span className={styles.wallPortWarning}>
+                ⚠ {selectedWallPort.label} is not patched to a panel yet — the device
+                will have no network until it is patched at the rack.
+              </span>
+            )}
+            {selectedWallPort?.patch_status === 'patched' && (
+              <span className={styles.wallPortWarning}>
+                ⚠ {selectedWallPort.label} is patched to a panel but no switch port is
+                recorded, so it may not be live.
+              </span>
+            )}
+            {wallPortId && wallPorts.length === 0 && (
+              <span className={styles.wallPortHint}>
+                Select a floor first to see available wall ports
+              </span>
+            )}
+            {!wallPortId && formData.floor_id && wallPorts.length === 0 && (
+              <span className={styles.wallPortHint}>
+                No wall ports recorded on this floor — add them from the floor page.
+              </span>
+            )}
           </div>
 
-          {!formData.floor_id && (Number(formData.coordinates_x) !== 0 || Number(formData.coordinates_y) !== 0) && (
-            <p className={styles.helperText}>
-              ⚠️ Coordinates need a floor to mean anything, so they&apos;ll be reset
-              on save and this asset will move to Unplaced Assets. Pick a floor
-              above to keep its position on the map.
-            </p>
-          )}
-
-          <Textarea
-            label="Location Description"
-            placeholder="Additional location details"
-            value={formData.location_description}
-            onChange={(e) => setField({ location_description: e.target.value })}
-            rows={2}
-          />
-        </div>
-
-        {/* Assigned Person Section */}
-        <div className={styles.section}>
-          <h3 className={styles.sectionTitle}>Assigned Person</h3>
 
           {personSuggestions.length > 0 && (
             <>
@@ -994,11 +877,184 @@ const AssetFormModal: React.FC<AssetFormModalProps> = ({
             onChange={(e) => setField({ person_itsm_id: e.target.value })}
             helperText="Populated automatically when syncing from ITSM"
           />
+
+          <div className={styles.inputWrapper}>
+            <label className={styles.inputLabel}>Status</label>
+            <Select
+              value={formData.status}
+              onChange={(value) => setField({ status: value as AssetStatus })}
+              options={statusOptions}
+              placeholder="Select status"
+            />
+          </div>
+        </div>
+
+        {/* Basic Information Section */}
+        <div className={styles.section}>
+          <h3 className={styles.sectionTitle}>Basic Information</h3>
+
+          <Input
+            label="Display Name *"
+            placeholder="e.g., John's Workstation"
+            value={formData.display_name}
+            onChange={(e) => {
+              setField({ display_name: e.target.value });
+              if (errors.display_name) setErrors({ ...errors, display_name: '' });
+            }}
+            error={errors.display_name}
+            helperText={formData.display_name ? `${formData.display_name.length} characters` : 'Unique identifier for this asset'}
+          />
+
+          <div className={styles.row}>
+            <Input
+              label="Manufacturer"
+              placeholder="e.g., Dell"
+              value={formData.manufacturer}
+              onChange={(e) => setField({ manufacturer: e.target.value })}
+              list="lookup-manufacturer"
+            />
+
+            <Input
+              label="Model"
+              placeholder="e.g., Optiplex 7090"
+              value={formData.model}
+              onChange={(e) => setField({ model: e.target.value })}
+              list="lookup-model"
+            />
+          </div>
+
+          <div className={styles.row}>
+            <Input
+              label="Serial Number"
+              placeholder="e.g., ABC123456"
+              value={formData.serial_number}
+              onChange={(e) => setField({ serial_number: e.target.value })}
+            />
+
+            <Input
+              label="Asset Tag"
+              placeholder="e.g., ASSET-001"
+              value={formData.asset_tag}
+              onChange={(e) => setField({ asset_tag: e.target.value })}
+            />
+          </div>
+
+
+          <div className={styles.inputWrapper}>
+            <label className={styles.inputLabel}>Asset Type</label>
+            <Select
+              value={formData.asset_type}
+              onChange={(value) => setField({ asset_type: value })}
+              options={ASSET_TYPE_OPTIONS}
+              placeholder="Asset Type"
+            />
+          </div>
+
+          <div className={styles.row}>
+            <Input
+              label="Station / Object ID"
+              placeholder="e.g., 518142-23"
+              value={formData.object_id}
+              onChange={(e) => setField({ object_id: e.target.value })}
+              helperText="Local machine/station identifier (not from ITSM)"
+            />
+            <Input
+              label="Serial Object"
+              placeholder="e.g., GEH12345"
+              value={formData.serial_object}
+              onChange={(e) => setField({ serial_object: e.target.value })}
+              helperText="Internal tracking / serial object number"
+              list="lookup-serial-object"
+            />
+          </div>
+
+          <div className={styles.row}>
+            <Input
+              label="Catalog Item"
+              placeholder="e.g., IPC 19&quot; Rack"
+              value={formData.catalog_item_display_name}
+              onChange={(e) => setField({ catalog_item_display_name: e.target.value })}
+              helperText="Hardware model / catalog entry from ITSM"
+              list="lookup-catalog-item"
+            />
+            <Input
+              label="Catalog Item ITSM ID"
+              placeholder="ITSM catalog GUID"
+              value={formData.catalog_item_itsm_id}
+              onChange={(e) => setField({ catalog_item_itsm_id: e.target.value })}
+            />
+          </div>
+        </div>
+
+        {/* Operating System Section */}
+        <details className={styles.sectionCollapsed}>
+          <summary className={styles.sectionSummary}>Operating System</summary>
+          
+          <div className={styles.row}>
+            <Input
+              label="OS Type"
+              placeholder="e.g., Windows, Linux, macOS"
+              value={formData.os_type}
+              onChange={(e) => setField({ os_type: e.target.value })}
+              list="lookup-os-type"
+            />
+
+            <Input
+              label="OS Version"
+              placeholder="e.g., Windows 11 Pro"
+              value={formData.os_version}
+              onChange={(e) => setField({ os_version: e.target.value })}
+              list="lookup-os-version"
+            />
+          </div>
+        </details>
+
+        {/* Location Section */}
+        <div className={styles.section}>
+          <h3 className={styles.sectionTitle}>Location</h3>
+          
+          <div className={styles.row}>
+            <Input
+              label="Coordinate X"
+              type="number"
+              placeholder="0"
+              value={formData.coordinates_x}
+              onChange={(e) => setField({ coordinates_x: e.target.value })}
+              error={errors.coordinates_x || validateCoordinate('coordinates_x')}
+              helperText={!errors.coordinates_x && !validateCoordinate('coordinates_x') && formData.coordinates_x ? `Position: ${formData.coordinates_x}px` : 'Horizontal position on floor'}
+            />
+
+            <Input
+              label="Coordinate Y"
+              type="number"
+              placeholder="0"
+              value={formData.coordinates_y}
+              onChange={(e) => setField({ coordinates_y: e.target.value })}
+              error={errors.coordinates_y || validateCoordinate('coordinates_y')}
+              helperText={!errors.coordinates_y && !validateCoordinate('coordinates_y') && formData.coordinates_y ? `Position: ${formData.coordinates_y}px` : 'Vertical position on floor'}
+            />
+          </div>
+
+          {!formData.floor_id && (Number(formData.coordinates_x) !== 0 || Number(formData.coordinates_y) !== 0) && (
+            <p className={styles.helperText}>
+              ⚠️ Coordinates need a floor to mean anything, so they&apos;ll be reset
+              on save and this asset will move to Unplaced Assets. Pick a floor
+              above to keep its position on the map.
+            </p>
+          )}
+
+          <Textarea
+            label="Location Description"
+            placeholder="Additional location details"
+            value={formData.location_description}
+            onChange={(e) => setField({ location_description: e.target.value })}
+            rows={2}
+          />
         </div>
 
         {/* Organization Section */}
-        <div className={styles.section}>
-          <h3 className={styles.sectionTitle}>Organization</h3>
+        <details className={styles.sectionCollapsed}>
+          <summary className={styles.sectionSummary}>Organization</summary>
           <div className={styles.row}>
             <Input
               label="Organization Name"
@@ -1014,11 +1070,11 @@ const AssetFormModal: React.FC<AssetFormModalProps> = ({
               onChange={(e) => setField({ organization_itsm_id: e.target.value })}
             />
           </div>
-        </div>
+        </details>
 
         {/* Technical Specifications Section */}
-        <div className={styles.section}>
-          <h3 className={styles.sectionTitle}>Technical Specifications</h3>
+        <details className={styles.sectionCollapsed}>
+          <summary className={styles.sectionSummary}>Technical Specifications</summary>
 
           <div className={styles.row}>
             <Input
@@ -1049,7 +1105,7 @@ const AssetFormModal: React.FC<AssetFormModalProps> = ({
               onChange={(e) => setField({ gpu: e.target.value })}
             />
           </div>
-        </div>
+        </details>
 
         {/* Network Section */}
         <div className={styles.section}>
@@ -1093,42 +1149,6 @@ const AssetFormModal: React.FC<AssetFormModalProps> = ({
             onChange={(e) => setField({ mac_address: e.target.value })}
           />
 
-          <div className={styles.inputWrapper}>
-            <label className={styles.inputLabel}>Physical Wall Port</label>
-            <select
-              className={styles.input}
-              value={wallPortId}
-              onChange={(e) => { setWallPortId(e.target.value); setIsDirty(true); }}
-            >
-              <option value="">— No wall port assigned —</option>
-              {wallPortOptions.map(o => (
-                <option key={o.value} value={o.value} disabled={o.disabled}>{o.label}</option>
-              ))}
-            </select>
-            {selectedWallPort?.patch_status === 'unpatched' && (
-              <span className={styles.wallPortWarning}>
-                ⚠ {selectedWallPort.label} is not patched to a panel yet — the device
-                will have no network until it is patched at the rack.
-              </span>
-            )}
-            {selectedWallPort?.patch_status === 'patched' && (
-              <span className={styles.wallPortWarning}>
-                ⚠ {selectedWallPort.label} is patched to a panel but no switch port is
-                recorded, so it may not be live.
-              </span>
-            )}
-            {wallPortId && wallPorts.length === 0 && (
-              <span className={styles.wallPortHint}>
-                Select a floor first to see available wall ports
-              </span>
-            )}
-            {!wallPortId && formData.floor_id && wallPorts.length === 0 && (
-              <span className={styles.wallPortHint}>
-                No wall ports recorded on this floor — add them from the floor page.
-              </span>
-            )}
-          </div>
-
           <div className={styles.row}>
             <div className={styles.inputWrapper}>
               <label className={styles.inputLabel}>IP Assignment</label>
@@ -1155,8 +1175,8 @@ const AssetFormModal: React.FC<AssetFormModalProps> = ({
         </div>
 
         {/* Operational Section */}
-        <div className={styles.section}>
-          <h3 className={styles.sectionTitle}>Operational</h3>
+        <details className={styles.sectionCollapsed}>
+          <summary className={styles.sectionSummary}>Operational</summary>
 
           <div className={styles.row}>
             <Input
@@ -1217,11 +1237,11 @@ const AssetFormModal: React.FC<AssetFormModalProps> = ({
             ]}
             placeholder="FortiEDR Active"
           />
-        </div>
+        </details>
 
         {/* Additional Info Section */}
-        <div className={styles.section}>
-          <h3 className={styles.sectionTitle}>Additional Info</h3>
+        <details className={styles.sectionCollapsed}>
+          <summary className={styles.sectionSummary}>Additional Info</summary>
 
           <div className={styles.row}>
             <Select
@@ -1258,11 +1278,11 @@ const AssetFormModal: React.FC<AssetFormModalProps> = ({
             onChange={(e) => setField({ notes: e.target.value })}
             rows={3}
           />
-        </div>
+        </details>
 
         {/* Maintenance Section */}
-        <div className={styles.section}>
-          <h3 className={styles.sectionTitle}>Maintenance</h3>
+        <details className={styles.sectionCollapsed}>
+          <summary className={styles.sectionSummary}>Maintenance</summary>
 
           <div className={styles.row}>
             <Input
@@ -1300,11 +1320,11 @@ const AssetFormModal: React.FC<AssetFormModalProps> = ({
             onChange={(e) => setField({ maintenance_notes: e.target.value })}
             rows={2}
           />
-        </div>
+        </details>
 
         {/* Lifecycle Section */}
-        <div className={styles.section}>
-          <h3 className={styles.sectionTitle}>Lifecycle</h3>
+        <details className={styles.sectionCollapsed}>
+          <summary className={styles.sectionSummary}>Lifecycle</summary>
           <p className={styles.helperText} style={{ marginBottom: 8 }}>
             Link this asset to the one it replaces (predecessor) or the one that replaced it (successor).
           </p>
@@ -1384,7 +1404,7 @@ const AssetFormModal: React.FC<AssetFormModalProps> = ({
               )}
             </div>
           </div>
-        </div>
+        </details>
 
         {/* ITSM Data Source Section — only shown when editing */}
         {asset && (

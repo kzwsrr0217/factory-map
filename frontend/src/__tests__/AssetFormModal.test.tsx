@@ -108,6 +108,46 @@ describe('AssetFormModal — create mode', () => {
     expect(screen.getByText('Technical Specifications')).toBeInTheDocument();
   });
 
+  it('puts the everyday fields first, before Basic Information', async () => {
+    // Status, the room, the socket and the person used to sit in four different
+    // sections, so a routine edit meant scrolling past ten of them to touch four
+    // fields. They are grouped at the top now, and this asserts the order rather
+    // than just their presence — a reorder is exactly the kind of thing a later
+    // change undoes without noticing.
+    renderModal({});
+    await waitFor(() => expect(screen.getByText('Where & Who')).toBeInTheDocument());
+
+    const headings = screen.getAllByText(/Where & Who|Basic Information/);
+    expect(headings[0]).toHaveTextContent('Where & Who');
+
+    // The four live in that section: the room cascade, the socket, the person
+    // and the status.
+    expect(screen.getByText('Physical Wall Port')).toBeInTheDocument();
+    expect(screen.getByText('Full Name')).toBeInTheDocument();
+    expect(screen.getByText('Status')).toBeInTheDocument();
+  });
+
+  it('collapses the sections that are set once, and leaves the everyday ones open', async () => {
+    renderModal({});
+    await waitFor(() => expect(screen.getByText('Where & Who')).toBeInTheDocument());
+
+    // Native <details> — collapsible with no state to manage, and keyboard- and
+    // screen-reader-operable for free.
+    // Queried with an explicit selector: "Maintenance" is also a status option,
+    // so a plain getByText would match two nodes.
+    const collapsed = ['Operating System', 'Technical Specifications', 'Maintenance', 'Lifecycle'];
+    for (const title of collapsed) {
+      const summary = screen.getByText(title, { selector: 'summary' });
+      expect(summary.closest('details')).not.toHaveAttribute('open');
+    }
+
+    // …while the ones that carry the daily work are not behind a disclosure.
+    for (const title of ['Where & Who', 'Basic Information', 'Network']) {
+      expect(screen.queryByText(title, { selector: 'summary' })).toBeNull();
+      expect(screen.getByText(title, { selector: 'h3' })).toBeInTheDocument();
+    }
+  });
+
   it('shows required-field error when submitting without Display Name', async () => {
     renderModal({});
     await waitFor(() => screen.getByRole('button', { name: /create asset/i }));
