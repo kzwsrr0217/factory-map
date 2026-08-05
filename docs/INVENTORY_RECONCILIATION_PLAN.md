@@ -254,8 +254,20 @@ the real map.
 ### On dev
 
 **1. Take a backup you have actually restored from.** The import re-places hundreds of assets
-in one transaction. `ops/backup-factorymap.ps1` writes one; restoring it once now is what
-makes the rest of this reversible.
+in one transaction. Both parameters are mandatory — the script reads the password out of an
+env file rather than taking one, and it will not guess where to put the `.bak`:
+
+```powershell
+powershell -NoProfile -File "opsackup-factorymap.ps1" -EnvFile "C:	emporary\Claude - factorymap\.env" -Destination "C:	emporaryactorymap-backups"
+```
+
+On the VM the paths are the deployment's own — `-EnvFile C:actorymap\.env.prod
+-Destination D:ackupsactorymap` (see docs/DEPLOYMENT.md). Expect a line ending
+`OK - ...bak (23,1 MB)` and exit code 0; the script fails loudly if the file is missing or
+under 1 MB, because a backup job that reports success while producing nothing is the failure
+it exists to prevent.
+
+Restoring it once now is what makes the rest of this reversible.
 
 **2. Merge the exports into one file.** Set E has no JSON, so convert it first:
 
