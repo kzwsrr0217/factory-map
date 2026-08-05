@@ -277,8 +277,17 @@ twins or `zg_eszkozok.json` — they are the same devices again.
 The floor *number* matters more than the name: the survey writes `0` and `1`, and those match
 by number without any correction.
 
-**4. The four corrections.** On **Inventory import** → *Stored corrections*, or by previewing
-first and using the boxes the preview offers:
+**4. The four corrections — and they arrive in two passes.** There is no "add a correction"
+form; the boxes appear next to the names the preview could not resolve, and only the side that
+failed gets one. So the sequence is preview → fix the buildings → preview → fix the floors.
+Measured, so you can check yourself against it at each press:
+
+| After | Rows with no building or floor | What the preview shows |
+|---|---|---|
+| today, before anything | 612 in 8 groups | |
+| the hierarchy (step 3) | **478** in 6 groups | `W2 / 0` 275, `W2 / 1` 86, `BZYSRM3Werk 2` 5 → **building** boxes; `Werk 2 / foldszint` 63, `Werk 1 / 1. Emelet` 39, `Werk 2 / 1. emelet` 10 → **floor** boxes |
+| `W2` → `Werk 2` and `BZYSRM3Werk 2` → `Werk 2` | **117** in 4 groups | only floor boxes left |
+| `foldszint` → `Ground floor` and `1. emelet` → `First floor` | **0** | |
 
 | Scope | From | To |
 |---|---|---|
@@ -286,6 +295,12 @@ first and using the boxes the preview offers:
 | building | `BZYSRM3Werk 2` | `Werk 2` |
 | floor | `foldszint` | `Ground floor` |
 | floor | `1. emelet` | `First floor` |
+
+`1. Emelet` and `1. emelet` fold to one key, so fixing either covers both — the other group
+disappears on the next preview. Renaming Werk 1's existing `Ground Floor (Földszint)` to
+`Ground floor` is **cosmetic only**: the survey reaches that floor through the number `0`, and
+`foldszint` only ever appears with Werk 2. Rename it for consistency if you like; the import
+does not care.
 
 **5. Preview.** Select the five files, press **What would this change?**. Expected on the
 current data:
