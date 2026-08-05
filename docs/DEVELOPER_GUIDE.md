@@ -418,6 +418,22 @@ Similar CRUD, filtered by `section_id`.
 
 **Response envelope**: all endpoints return `{ success: boolean, data: ... }` (or `{ success: false, error: string }` on failure).
 
+### Normalisation tasks `/api/tasks`
+
+The derived worklist that closes the inventory — see `services/itsm/taskGenerator.ts` for
+how the rows come about and `NormalisationTask.entity.ts` for why only the assignee, the
+note and the dismissal are human-owned.
+
+| Method | Path | Query | Description |
+|--------|------|-------|-------------|
+| GET | `/` | `state?` (default `open`), `kind?`, `assigned_to?` (a username or `__unassigned__`), `q?`, `page?`, `limit?` | Oldest first — a task outstanding for three weeks is the one worth looking at. Each row carries `machine_verifiable` so the UI need not restate the closing rule |
+| GET | `/summary` | — | `by_kind`, `by_state`, `open_unassigned`, and `consistent` (true when nothing is outstanding) |
+| PATCH | `/:id` | — | Take it, note something, close it, dismiss it. **400 when dismissing without a note** — a decision nobody can review is indistinguishable from forgetting. Ticking a machine-verifiable kind returns `meta.note` warning that the next generation reopens it if the cause remains |
+| POST | `/generate` | — | Re-derive from the current data. Run after importing a new ITSM export |
+
+Reading needs any authenticated user (the list is the shared picture of what is left);
+changing a task or generating needs `operator`.
+
 ### ITSM `/api/itsm`
 
 | Method | Path | Description |

@@ -1,0 +1,207 @@
+/* Normalisation tasks — see NormalisationTasks.tsx.
+   A worklist: the evidence has to be readable at a glance, and the two closing actions
+   have to be reachable without opening anything. */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-lg);
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--spacing-lg);
+  flex-wrap: wrap;
+}
+
+.header h1 { margin: 0 0 var(--spacing-xs); }
+
+.subtitle {
+  max-width: 78ch;
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+/* Nothing outstanding: the state the whole exercise is aiming at, so it looks like it. */
+.doneBanner {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  border-left: 3px solid var(--color-success);
+}
+
+.countBanner {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  border-left: 3px solid var(--color-primary);
+}
+
+.filters {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-md);
+  flex-wrap: wrap;
+  margin-bottom: var(--spacing-md);
+}
+
+.stateTabs {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-md);
+}
+
+.stateTab {
+  padding: 5px 12px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  font-family: inherit;
+  text-transform: capitalize;
+  cursor: pointer;
+}
+
+.stateTabActive {
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  font-weight: var(--font-weight-medium);
+  box-shadow: var(--shadow-sm);
+}
+
+.kindSelect {
+  padding: 6px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  font-family: inherit;
+}
+
+.kindHint {
+  margin: 0 0 var(--spacing-md);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.task {
+  padding: var(--spacing-md);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.taskHead {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  flex-wrap: wrap;
+  margin-bottom: var(--spacing-xs);
+}
+
+.taskSummary {
+  color: var(--color-text-primary);
+  font-weight: var(--font-weight-medium);
+  text-decoration: none;
+}
+
+a.taskSummary:hover { color: var(--color-primary); text-decoration: underline; }
+
+.age {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--color-warning-light);
+  color: var(--color-text-primary);
+  font-size: 10px;
+  font-weight: var(--font-weight-medium);
+}
+
+/* The generator's reasoning, verbatim. Monospace because it is a record, not prose. */
+.evidence {
+  margin: 0 0 var(--spacing-sm);
+  padding: var(--spacing-sm);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono, monospace);
+  font-size: var(--font-size-xs);
+  white-space: pre-wrap;
+  overflow-x: auto;
+}
+
+.taskActions {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  flex-wrap: wrap;
+}
+
+.assign,
+.dismissRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.assign input,
+.dismissRow input {
+  padding: 5px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  font-family: inherit;
+}
+
+.assign input { width: 130px; }
+.dismissRow input { width: 260px; }
+
+.humanOnly {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.closedNote {
+  margin: var(--spacing-sm) 0 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  font-style: italic;
+}
+
+.empty {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-md);
+  margin-top: var(--spacing-lg);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}

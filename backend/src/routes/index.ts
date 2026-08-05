@@ -31,6 +31,7 @@ import entityKindsRoutes from './entityKinds.routes';
 import productionLinesRoutes from './productionLines.routes';
 import workCentersRoutes from './workCenters.routes';
 import exportRoutes from './export.routes';
+import normalisationTasksRoutes from './normalisationTasks.routes';
 import { authenticate } from '../middleware/auth.middleware';
 
 const router = Router();
@@ -57,5 +58,6 @@ router.use('/entity-kinds', entityKindsRoutes);
 router.use('/production-lines', productionLinesRoutes);
 router.use('/work-centers', workCentersRoutes);
 router.use('/export', exportRoutes);
+router.use('/tasks', normalisationTasksRoutes);
 
 export default router;

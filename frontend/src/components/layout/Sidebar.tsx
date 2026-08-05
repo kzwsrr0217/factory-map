@@ -16,6 +16,7 @@ import {
   RefreshCw,
   Keyboard,
   Gauge,
+  ListChecks,
   LucideIcon,
 } from 'lucide-react';
 import { useMaintenanceCounts } from '../../hooks/useMaintenanceCounts';
@@ -78,6 +79,9 @@ const menuGroups: MenuGroup[] = [
     title: 'Data & admin',
     items: [
       { icon: RefreshCw,     label: 'ITSM Reconcile', path: '/itsm' },
+      // What is left before the inventory, the app and ITSM agree — derived, see
+      // backend/src/services/itsm/taskGenerator.ts.
+      { icon: ListChecks,    label: 'Tasks',          path: '/tasks' },
       { icon: BarChart2,     label: 'Reports',        path: '/reports' },
       { icon: Bell,          label: 'Alerts',         path: '/alerts' },
       { icon: ClipboardList, label: 'Audit Log',      path: '/audit' },

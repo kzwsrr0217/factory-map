@@ -58,7 +58,7 @@ import {
  * record, or the record stops coming in the export. Judgement is needed to DO it, not
  * to prove it was done.
  */
-const MACHINE_VERIFIABLE: ReadonlySet<NormalisationTaskKind> = new Set([
+export const MACHINE_VERIFIABLE: ReadonlySet<NormalisationTaskKind> = new Set([
   'link-to-itsm',
   'decide-match',
   'register-in-itsm',

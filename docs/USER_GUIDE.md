@@ -84,6 +84,7 @@ The left **sidebar** is the main navigation menu, in groups:
 | Network | Infrastructure | Physical network infrastructure — rooms, racks, patch panels, sockets |
 | Network | Connections | Force-directed graph of all asset connections |
 | Data & admin | ITSM Reconcile | Compare assets against the ITSM system (read-only) and resolve differences per field |
+| Data & admin | Tasks | What is left before the inventory, the app and ITSM agree. Derived from the data — press **Re-derive** after a new ITSM export. Dismissing needs a reason, and only "put a label on it" can be closed on your word alone: everything else is checked against the data and comes back if the cause is still there |
 | Data & admin | Reports | Asset statistics and ITSM sync |
 | Data & admin | Alerts | Maintenance alert configuration *(admin only)* |
 | Data & admin | Audit Log | Immutable history of all changes |
