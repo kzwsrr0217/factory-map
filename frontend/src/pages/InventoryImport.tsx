@@ -245,10 +245,19 @@ const InventoryImport: React.FC = () => {
             <span className={styles.fileHint}>
               {rows.length > 0
                 ? `${rows.length} entr${rows.length === 1 ? 'y' : 'ies'} across ${fileNames.length} file(s)`
-                : 'The tool’s own JSON. Several files are merged; a repeated entry id takes the last one.'}
+                : 'The tool’s own JSON, including its .bak exports. Several files are merged; a repeated entry id takes the last one.'}
             </span>
           </span>
-          <input type="file" accept=".json,application/json" multiple onChange={(e) => pickFiles(e.target.files)} />
+          {/* `.bak` is in the list because the survey tool writes exports under that
+              extension too — same JSON inside, and filtering them out of the dialog left
+              two of the five real files unselectable. The parser decides what a file is;
+              the picker only decides what is easy to reach. */}
+          <input
+            type="file"
+            accept=".json,.bak,application/json"
+            multiple
+            onChange={(e) => pickFiles(e.target.files)}
+          />
         </label>
 
         <div className={styles.actions}>
