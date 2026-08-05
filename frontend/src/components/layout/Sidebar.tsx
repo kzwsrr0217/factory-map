@@ -14,6 +14,7 @@ import {
   Server,
   Wrench,
   FileInput,
+  Route,
   RefreshCw,
   Keyboard,
   Gauge,
@@ -79,6 +80,9 @@ const menuGroups: MenuGroup[] = [
   {
     title: 'Data & admin',
     items: [
+      // The round itself: which step is next, and what is out of date. First in the
+      // group because it is where someone picking the work back up should start.
+      { icon: Route,         label: 'Normalisation run', path: '/normalisation' },
       { icon: RefreshCw,     label: 'ITSM Reconcile', path: '/itsm' },
       // Where the physical walk-around is handed to the app, and where the survey's
       // free-text names are mapped onto the app's — see pages/InventoryImport.tsx.

@@ -34,6 +34,7 @@ import {
   fold,
   planSurveyImport,
 } from '../services/inventory/surveyImport';
+import { getNormalisationStatus } from '../services/inventory/normalisationStatus';
 import { io } from '../server';
 import { AuthRequest } from '../middleware/auth.middleware';
 
@@ -117,6 +118,18 @@ async function writeImportAudit(
   })));
   await Promise.all(writes.map((w) => w.catch(() => { /* audit failure must never fail the request */ })));
 }
+
+/**
+ * GET /api/inventory/status — where the current round has got to.
+ *
+ * Readable by anyone authenticated: it is the shared picture of how far the inventory has
+ * come, and counts alone give nothing away that the pages behind it do not.
+ */
+export const normalisationStatus = async (_req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    res.json({ success: true, data: await getNormalisationStatus() });
+  } catch (error) { next(error); }
+};
 
 // ── Corrections ───────────────────────────────────────────────────────────────
 

@@ -52,6 +52,18 @@
  *       400:
  *         description: No "rows" array, or an empty survey
  *
+ * /inventory/status:
+ *   get:
+ *     tags: [Inventory]
+ *     summary: Where the current normalisation round has got to
+ *     description: >
+ *       Counts and timestamps already stored — nothing is recomputed, so it can be polled.
+ *       `tasks.stale` is the one derived fact: the task list was generated before the newest
+ *       export or survey, so what it says describes a situation that has already changed.
+ *     responses:
+ *       200:
+ *         description: The four steps of a round, with their times
+ *
  * /inventory/corrections:
  *   get:
  *     tags: [Inventory]
@@ -99,6 +111,7 @@
 import { Router } from 'express';
 import {
   importSurvey,
+  normalisationStatus,
   listCorrections,
   upsertCorrection,
   deleteCorrection,
@@ -108,6 +121,7 @@ import { requireOperator } from '../middleware/auth.middleware';
 const router = Router();
 
 router.post('/survey/import', requireOperator, importSurvey);
+router.get('/status', normalisationStatus);
 router.get('/corrections', listCorrections);
 router.put('/corrections', requireOperator, upsertCorrection);
 router.delete('/corrections/:id', requireOperator, deleteCorrection);

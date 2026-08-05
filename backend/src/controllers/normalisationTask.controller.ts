@@ -179,9 +179,12 @@ export const updateTask = async (req: AuthRequest, res: Response, next: NextFunc
 
 // ── POST /tasks/generate ──────────────────────────────────────────────────────
 
-export const runTaskGeneration = async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
+export const runTaskGeneration = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const result = await generateTasks({ apply: true });
+    // Who re-derived is worth recording: the run is logged, and "the list is older than the
+    // data" is answered from that log rather than from the task rows, which say nothing
+    // about a run that changed nothing.
+    const result = await generateTasks({ apply: true, by: (req as AuthRequest).user?.username ?? 'system' });
     res.json({
       success: true,
       data: {

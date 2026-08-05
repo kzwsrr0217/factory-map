@@ -77,7 +77,35 @@ export interface NameCorrection {
   updated_at: string;
 }
 
+/**
+ * Where a normalisation round has got to. Counts and timestamps already stored, so the
+ * page can be opened freely — nothing here is recomputed on read.
+ */
+export interface NormalisationStatus {
+  itsm_export: { records: number; loaded_at: string | null };
+  survey: {
+    applied_at: string | null;
+    assets_updated: number | null;
+    assets_created: number | null;
+  };
+  app: { linked: number; local_only: number; placed: number; total: number };
+  tasks: {
+    open: number;
+    done: number;
+    dismissed: number;
+    derived_at: string | null;
+    consistent: boolean;
+    /** The list was derived before the newest export or survey, so it is describing the past. */
+    stale: boolean;
+  };
+}
+
 export const inventoryService = {
+  async getStatus(): Promise<NormalisationStatus> {
+    const { data } = await api.get('/inventory/status');
+    return data.data as NormalisationStatus;
+  },
+
   async importSurvey(input: SurveyImportInput): Promise<SurveyImportPlan> {
     const { data } = await api.post('/inventory/survey/import', input);
     return data.data as SurveyImportPlan;

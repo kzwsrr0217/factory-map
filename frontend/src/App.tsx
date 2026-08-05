@@ -24,6 +24,7 @@
  *   /alerts        → Maintenance alert configuration (admin)
  *   /infrastructure→ Network infrastructure (IDF/MDF rooms, racks, patch panels)
  *   /inventory-import → The physical survey, previewed then applied
+ *   /normalisation → Where the current reconciliation round has got to
  */
 import React, { Suspense, lazy } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -48,6 +49,7 @@ import UnplacedAssets from './pages/UnplacedAssets';
 import SurveyProgress from './pages/SurveyProgress';
 import NormalisationTasks from './pages/NormalisationTasks';
 import InventoryImport from './pages/InventoryImport';
+import NormalisationRun from './pages/NormalisationRun';
 import OrphanedAssets from './pages/OrphanedAssets';
 import Alerts from './pages/Alerts';
 import NetworkGraph from './pages/NetworkGraph';
@@ -106,6 +108,7 @@ function App() {
                           <Route path="/maintenance" element={<Maintenance />} />
                           <Route path="/itsm" element={<ItsmReconcile />} />
                           <Route path="/inventory-import" element={<InventoryImport />} />
+                          <Route path="/normalisation" element={<NormalisationRun />} />
                           <Route path="*" element={<Navigate to="/" replace />} />
                         </Routes>
                         </Suspense>

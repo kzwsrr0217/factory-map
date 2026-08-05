@@ -22,17 +22,18 @@
 11. [Network Graph](#network-graph)
 12. [Network Infrastructure](#network-infrastructure)
 13. [Maintenance Calendar](#maintenance-calendar)
-14. [ITSM Reconcile](#itsm-reconcile)
+14. [Normalisation run](#normalisation-run)
+15. [ITSM Reconcile](#itsm-reconcile)
     - [Loading a fresh ITSM export](#loading-a-fresh-itsm-export)
     - [Inventory import (the physical walk-around)](#inventory-import)
-15. [Tasks](#normalisation-tasks)
-16. [Alerts (Admins only)](#alerts)
-17. [Reports](#reports)
-18. [Audit Log](#audit-log)
-19. [Settings](#settings)
-20. [User Management (Admins only)](#user-management)
-21. [Keyboard Shortcuts](#keyboard-shortcuts)
-22. [Tips & Best Practices](#tips--best-practices)
+16. [Tasks](#normalisation-tasks)
+17. [Alerts (Admins only)](#alerts)
+18. [Reports](#reports)
+19. [Audit Log](#audit-log)
+20. [Settings](#settings)
+21. [User Management (Admins only)](#user-management)
+22. [Keyboard Shortcuts](#keyboard-shortcuts)
+23. [Tips & Best Practices](#tips--best-practices)
 
 ---
 
@@ -86,6 +87,7 @@ The left **sidebar** is the main navigation menu, in groups:
 | Devices | Maintenance | Monthly calendar of scheduled maintenance |
 | Network | Infrastructure | Physical network infrastructure — rooms, racks, patch panels, sockets |
 | Network | Connections | Force-directed graph of all asset connections |
+| Data & admin | Normalisation run | Where the current round has got to: which step is next, and whether the task list is older than the data it describes |
 | Data & admin | ITSM Reconcile | Compare assets against the ITSM system (read-only) and resolve differences per field |
 | Data & admin | Inventory import | Hand the physical walk-around to the app: preview what it would change, fix the names that did not match, then apply |
 | Data & admin | Tasks | What is left before the inventory, the app and ITSM agree. Derived from the data — press **Re-derive** after a new ITSM export. Dismissing needs a reason, and only "put a label on it" can be closed on your word alone: everything else is checked against the data and comes back if the cause is still there |
@@ -743,6 +745,35 @@ If the current month has any scheduled assets, a **CSV** button appears in the c
 > the overdue list, even if its old maintenance date is technically in the
 > past — it's been superseded by its replacement, which carries its own
 > schedule going forward.
+
+---
+
+## Normalisation run
+
+**Normalisation run** is the page to open when picking the work back up. A round
+is: export from ITSM → walk the site → hand both to the app → work the list →
+act in Alemba → export again. Each step has its own page; this one says where the
+round has got to.
+
+It shows the four steps with **how long ago** each happened — the age is what
+matters, since nobody remembers whether the export they loaded was the 12th or the
+19th, but "27 days ago" is immediately a problem. Hover a figure for the exact
+time.
+
+The warning worth reading is **“The task list is older than the data.”** It means
+the list was derived before the newest export or survey, so whatever it says now —
+including "nothing outstanding" — describes a situation that has already changed.
+The **Re-derive** button sits inside the warning. Pressing it counts as a check
+even when it changes nothing, which is the point: "derived and found nothing" and
+"never derived" look the same otherwise.
+
+**This round is closed** appears only when the list is both empty *and* derived
+from the current data. The next round starts with a fresh ITSM export.
+
+The page never performs a step for you. Loading an export and importing a survey
+both need the file in front of you and a preview you actually read — a one-click
+"do everything" would be an invitation to skip the check that catches a partial
+export.
 
 ---
 

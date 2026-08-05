@@ -27,9 +27,10 @@
  * later export has to do or prove. The one exception to "only tasks" is closing them,
  * which is bookkeeping about its own rows.
  */
-import { createHash } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { AppDataSource } from '../../config/database';
 import { Asset } from '../../entities/Asset.entity';
+import { AuditLog } from '../../entities/AuditLog.entity';
 import { ItsmHardwareSnapshot } from '../../entities/ItsmHardwareSnapshot.entity';
 import {
   NormalisationTask,
@@ -89,6 +90,9 @@ export interface GenerateResult {
   /** No longer derivable but only a person can say it is done. */
   awaitingHuman: NormalisationTask[];
 }
+
+/** The audit `entity_type` that marks one generator run. */
+export const TASK_GENERATION_ENTITY = 'task_generation';
 
 function hash(evidence: string): string {
   return createHash('sha256').update(evidence).digest('hex').slice(0, 64);
@@ -263,7 +267,38 @@ export async function deriveRequiredTasks(): Promise<RequiredTask[]> {
  * `apply: false` computes everything and writes nothing, which is how this is meant to
  * be looked at first — the same discipline as every other script here.
  */
-export async function generateTasks({ apply }: { apply: boolean }): Promise<GenerateResult> {
+/**
+ * Records the run itself, so "derived and found nothing" can be told apart from "never
+ * derived". Both look like an empty task table, and the difference is the whole claim the
+ * inventory rests on.
+ *
+ * The task rows cannot answer this: a run that changes nothing leaves no trace in them, and
+ * a clean estate has no rows at all. Written to the audit log rather than a table of its
+ * own because a generation IS an event with an actor, and the log already shows those.
+ */
+async function recordRun(by: string, result: GenerateResult): Promise<void> {
+  const repo = AppDataSource.getRepository(AuditLog);
+  await repo.save(repo.create({
+    user_id: by,
+    username: by,
+    action: 'generate',
+    entity_type: TASK_GENERATION_ENTITY,
+    // Not an entity id: the run is what this row is about, and it needs an identity to be
+    // referred to at all.
+    document_id: randomUUID(),
+    diff: {
+      created: result.created.length,
+      reopened: result.reopened.length,
+      closed: result.closed.length,
+      unchanged: result.unchanged,
+      awaiting_human: result.awaitingHuman.length,
+    },
+  })).catch(() => { /* the run happened; failing to log it must not undo it */ });
+}
+
+export async function generateTasks(
+  { apply, by = 'system' }: { apply: boolean; by?: string },
+): Promise<GenerateResult> {
   const repo = AppDataSource.getRepository(NormalisationTask);
   const required = await deriveRequiredTasks();
   const existing = await repo.find();
@@ -356,5 +391,41 @@ export async function generateTasks({ apply }: { apply: boolean }): Promise<Gene
   }
 
   if (apply && toSave.length > 0) await repo.save(toSave);
+
+  if (apply) {
+    // `last_seen_at` means "the last run that still found this necessary" (see the entity),
+    // and an unchanged task is not saved above — so without this the column stopped moving
+    // exactly for the tasks nothing had happened to, and "how long has this been
+    // outstanding, and is the answer current?" became unanswerable.
+    const stillRequired = [...requiredByKey.keys()]
+      .map((k) => existingByKey.get(k)?.id)
+      .filter((id): boolean => !!id) as string[];
+    for (const chunk of chunkIds(stillRequired)) {
+      await repo.createQueryBuilder()
+        .update(NormalisationTask)
+        .set({ last_seen_at: new Date() })
+        .whereInIds(chunk)
+        .execute();
+    }
+    await recordRun(by, result);
+  }
   return result;
+}
+
+/** MSSQL caps a statement at 2100 parameters; ids go one per parameter. */
+function chunkIds(ids: string[], size = 1000): string[][] {
+  const chunks: string[][] = [];
+  for (let i = 0; i < ids.length; i += size) chunks.push(ids.slice(i, i + size));
+  return chunks;
+}
+
+/**
+ * When the generator last ran, whatever it found. Null only when it has never run.
+ */
+export async function lastGenerationAt(): Promise<Date | null> {
+  const row = await AppDataSource.getRepository(AuditLog).findOne({
+    where: { entity_type: TASK_GENERATION_ENTITY },
+    order: { timestamp: 'DESC' },
+  });
+  return row?.timestamp ?? null;
 }

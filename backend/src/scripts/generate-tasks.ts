@@ -54,7 +54,7 @@ async function main(): Promise<void> {
       return;
     }
 
-    const result = await generateTasks({ apply });
+    const result = await generateTasks({ apply, by: 'cli' });
     const open = await AppDataSource.getRepository(NormalisationTask)
       .createQueryBuilder('t').where("t.state = 'open'").getCount();
     const dismissed = await AppDataSource.getRepository(NormalisationTask)

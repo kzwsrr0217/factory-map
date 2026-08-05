@@ -1,0 +1,133 @@
+/* Normalisation run — see NormalisationRun.tsx.
+   A stepper, so the round reads as a sequence rather than four unrelated numbers. The one
+   thing that must not be quiet is the stale warning: it is the whole reason the page
+   exists, so it sits above the steps with its action inside it. */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-lg);
+}
+
+.header h1 { margin: 0 0 var(--spacing-xs); }
+
+.subtitle {
+  max-width: 82ch;
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.staleBanner,
+.doneBanner {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  font-size: var(--font-size-sm);
+}
+
+.staleBanner { border-left: 3px solid var(--color-warning); }
+.doneBanner { border-left: 3px solid var(--color-success); }
+
+/* The action belongs in the banner: reading the warning and then hunting for the button is
+   how a warning gets ignored. */
+.staleBanner > button { margin-left: auto; flex-shrink: 0; }
+
+.warn {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  margin: 0;
+  color: var(--color-warning);
+  font-size: var(--font-size-sm);
+}
+
+/* ── The steps ─────────────────────────────────────────────────────── */
+
+.steps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+}
+
+.step {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--spacing-md);
+  padding: var(--spacing-md) 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.step:last-child { border-bottom: none; }
+
+.marker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-secondary);
+  padding-top: 2px;
+}
+
+.markerDone { color: var(--color-success); }
+
+.stepBody h2 {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  margin: 0 0 var(--spacing-xs);
+  font-size: var(--font-size-md);
+}
+
+.stepIndex {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.4em;
+  height: 1.4em;
+  border-radius: 50%;
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.stepFacts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+  align-items: flex-start;
+  font-size: var(--font-size-sm);
+}
+
+.stepFacts p { margin: 0; }
+
+.hint { color: var(--color-text-secondary); }
+
+/* The age is the number that matters; the exact timestamp is in the title attribute. */
+.when {
+  color: var(--color-text-secondary);
+  border-bottom: 1px dotted var(--color-border);
+  cursor: help;
+}
+
+.stepAction { padding-top: 2px; }
+
+.link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  font-size: var(--font-size-sm);
+  color: var(--color-primary);
+  text-decoration: none;
+}
+
+.link:hover { text-decoration: underline; }
+
+@media (max-width: 720px) {
+  /* The action drops under the facts rather than squeezing the text into a column. */
+  .step { grid-template-columns: auto minmax(0, 1fr); }
+  .stepAction { grid-column: 2; }
+}

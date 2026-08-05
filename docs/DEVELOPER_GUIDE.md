@@ -1052,6 +1052,21 @@ The plan also names which side of a place failed (`building_matched`): a floor n
 under an unknown building was never looked up, so the page does not offer to
 correct it.
 
+**Where a round has got to.** `GET /api/inventory/status`
+(`services/inventory/normalisationStatus.ts`, page `/normalisation`) reports the four
+steps of a round with their timestamps, all from stored counts — nothing is recomputed
+on read, so it can be polled. The one derived field is `tasks.stale`: the task list was
+generated before the newest export or survey, so what it says describes a situation that
+has already changed.
+
+`derived_at` reads the **logged run**, not the task rows, and that is not incidental: a
+generation that changes nothing writes nothing to the tasks, and a clean estate has no
+task rows at all — so "derived, found nothing" and "never derived" were
+indistinguishable, and the page went on insisting the list was stale after a re-derive.
+The generator now writes one audit row per run (`entity_type: 'task_generation'`, actor
+`cli` from the script, the username from the endpoint), and bumps `last_seen_at` on every
+task it still derives, which is what that column already claimed to mean.
+
 **For the asset data itself**, `data-quality-report.ts`
 (`npm run report:quality -- [--csv=<path>]`) finds the mistakes a bulk import
 makes — the ones invisible one asset at a time, because they only show up when
