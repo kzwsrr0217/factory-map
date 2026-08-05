@@ -394,11 +394,19 @@ const InventoryImport: React.FC = () => {
 
           {plan.missing_work_areas.length > 0 && (
             <section className={styles.section}>
-              <h2>Rooms the map does not have</h2>
+              <h2>Rooms (work areas) the map does not have</h2>
               <p className={styles.sectionHint}>
-                The devices are still placed on their floor. Either the room is spelled differently
-                here — fix it below — or it genuinely is not drawn yet, in which case tick the box
-                above and apply.
+                A room here is the survey’s <strong>work_area</strong> and the app’s{' '}
+                <strong>work area</strong> — the rectangle on the floor plan. Its{' '}
+                <strong>helyszín</strong> is the zone above it. The devices are still placed on
+                their floor either way.
+              </p>
+              <p className={styles.sectionHint}>
+                <strong>Most of these usually need creating, not correcting.</strong> Only type a
+                fix where the same room already exists on the map under another spelling — tick
+                the box above instead and they are all created on apply, with these names. There
+                {plan.missing_work_areas.length === 1 ? ' is 1' : ` are ${plan.missing_work_areas.length}`}{' '}
+                here, so correcting them one by one is a transcription job with no reward.
               </p>
               <ul className={styles.fixList}>
                 {plan.missing_work_areas.map((m) => (
