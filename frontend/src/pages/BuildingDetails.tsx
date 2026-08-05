@@ -287,6 +287,9 @@ const BuildingDetails: React.FC = () => {
       <BuildingFormModal
         isOpen={formOpen}
         onClose={() => setFormOpen(false)}
+        // The modal invalidates the building queries itself, so closing is all that is
+        // left to do here — it used to be all that happened, which is why a rename looked
+        // like nothing at all.
         onSuccess={() => setFormOpen(false)}
         building={building}
       />

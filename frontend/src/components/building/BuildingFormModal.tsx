@@ -8,13 +8,22 @@
  *
  * Calls `hierarchyService.createBuilding()` or `.updateBuilding()` depending
  * on whether an existing building was passed in.
+ *
+ * It invalidates the building queries itself rather than leaving that to whoever mounted
+ * it. Renaming a building on its own detail page looked like it did nothing at all: the
+ * save went through, the page's `onSuccess` only closed the modal, and the detail query
+ * sits behind a five-minute `staleTime`, so the old name stayed on screen. The list page
+ * happened to work only because it passed an explicit `refetch()`. A component that writes
+ * is the one place that knows what it invalidated.
  */
 import React, { useState, useEffect } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import Modal from '../common/Modal';
 import Button from '../common/Button';
 import Input from '../common/Input';
 import Textarea from '../common/Textarea';
 import { hierarchyService, Building } from '../../services/hierarchy.service';
+import { buildingKeys } from '../../hooks/queries/useBuildings';
 import { useToast } from '../../contexts/ToastContext';
 import styles from '../../styles/components/BuildingFormModal.module.css';
 
@@ -38,6 +47,7 @@ const BuildingFormModal: React.FC<BuildingFormModalProps> = ({
     construction_year: '',
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const queryClient = useQueryClient();
   const [submitting, setSubmitting] = useState(false);
   const toast = useToast();
 
@@ -102,6 +112,10 @@ const BuildingFormModal: React.FC<BuildingFormModalProps> = ({
         // Create new building
         await hierarchyService.createBuilding(payload);
       }
+
+      // The list and every detail share the `['buildings']` prefix, so one invalidation
+      // covers both — including the page this modal was opened from.
+      await queryClient.invalidateQueries({ queryKey: buildingKeys.all });
 
       onSuccess();
       onClose();
