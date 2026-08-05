@@ -10,10 +10,11 @@
  */
 import React, { useState, useCallback, useEffect } from 'react';
 import {
-  RefreshCw, ExternalLink, Check, EyeOff, Eye, AlertTriangle,
+  RefreshCw, ExternalLink, Check, EyeOff, Eye, AlertTriangle, Upload,
   CheckCircle2, XCircle, HelpCircle, Unlink, Search, PlusCircle,
 } from 'lucide-react';
 import Card from '../components/common/Card';
+import SnapshotImportModal from '../components/itsm/SnapshotImportModal';
 import Button from '../components/common/Button';
 import Badge from '../components/common/Badge';
 import { useAuth } from '../contexts/AuthContext';
@@ -43,6 +44,7 @@ const ItsmReconcile: React.FC = () => {
   const [linked, setLinked] = useState<ReconcileLinkedAsset[]>([]);
   const [summary, setSummary] = useState<ReconcileSummary | null>(null);
   const [loadingList, setLoadingList] = useState(true);
+  const [importOpen, setImportOpen] = useState(false);
   const [results, setResults] = useState<Record<string, ReconcileAssetResult>>({});
   const [checking, setChecking] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState<Set<string>>(new Set());
@@ -228,9 +230,16 @@ const ItsmReconcile: React.FC = () => {
             into the app, ignore it, or fix it directly in ITSM.
           </p>
         </div>
-        <Button variant="outline" onClick={loadList} loading={loadingList} disabled={loadingList}>
-          <RefreshCw size={16} /> Refresh list
-        </Button>
+        <div className={styles.headerActions}>
+          {/* The load step used to need a terminal on the VM, which is how a monthly job
+              becomes a quarterly one. */}
+          <Button variant="primary" onClick={() => setImportOpen(true)}>
+            <Upload size={16} /> Load an ITSM export
+          </Button>
+          <Button variant="outline" onClick={loadList} loading={loadingList} disabled={loadingList}>
+            <RefreshCw size={16} /> Refresh list
+          </Button>
+        </div>
       </div>
 
       {summary && (
@@ -435,7 +444,13 @@ const ItsmReconcile: React.FC = () => {
           );
         })}
       </div>
-    </div>
+    
+      <SnapshotImportModal
+        isOpen={importOpen}
+        onClose={() => setImportOpen(false)}
+        onApplied={loadList}
+      />
+</div>
   );
 };
 

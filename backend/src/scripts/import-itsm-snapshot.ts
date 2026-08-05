@@ -53,21 +53,20 @@ import 'reflect-metadata';
 import * as fs from 'fs';
 import * as path from 'path';
 import { AppDataSource } from '../config/database';
-import { ItsmHardwareSnapshot } from '../entities/ItsmHardwareSnapshot.entity';
-import { chunkForEntity } from '../utils/mssqlBatch';
+import { planSnapshotImport } from '../services/itsm/snapshotImport';
 
 type Row = Record<string, unknown>;
-
-const str = (v: unknown): string | null => (v == null || v === '' ? null : String(v));
 
 const HARDWARE_FILE = 'itsm-mmh-hardware.json';
 const CATALOG_ITEMS_FILE = 'hardware-catalog-items.csv';
 const PERSONS_FILE = 'persons.csv';
 
-// Reads a bare `[...]` array or a `{ items: [...] }` / `{ Items: [...] }` wrapper
-// (matching the shape Alemba's GetViewData itself returns, which the PS export
-// script may pass through as-is). Strips a leading UTF-8 BOM (PowerShell's
-// `Out-File -Encoding utf8` writes one, which JSON.parse rejects).
+/**
+ * Reads a bare `[...]` array or a `{ items: [...] }` / `{ Items: [...] }` wrapper
+ * (matching the shape Alemba's GetViewData itself returns, which the PS export script may
+ * pass through as-is). Strips a leading UTF-8 BOM — PowerShell's `Out-File -Encoding utf8`
+ * writes one and JSON.parse rejects it.
+ */
 function readRows(dir: string, file: string): Row[] {
   const full = path.join(dir, file);
   if (!fs.existsSync(full)) return [];
@@ -78,221 +77,51 @@ function readRows(dir: string, file: string): Row[] {
   return Array.isArray(rows) ? rows : [];
 }
 
-// ── Hardware Catalog Items reference (CSV, exported by hand — see header) ──
-
-interface CatalogItemRef {
-  id: string;
-  displayName: string;
-  type: string | null;
+function readTextIfPresent(dir: string, file: string): string | null {
+  const full = path.join(dir, file);
+  if (!fs.existsSync(full)) return null;
+  return fs.readFileSync(full, 'utf8');
 }
 
-// Normalises a catalog item display name for joining — the Hardware Asset
-// payload's CatalogItemId is an internal GUID with no counterpart in this
-// CSV (which keys by the human-readable HCI#### id instead), so the join
-// has to go through the display name. Verified against the real export: 8
-// of 618 names collide, but every colliding pair shares the same Type, so a
-// name-keyed lookup is safe for classification purposes even though it
-// isn't a true 1:1 identity join.
-function normalizeName(name: string): string {
-  return name.trim().toLowerCase();
-}
-
-// This export's fields never contain a literal comma, but many display names
-// contain an unescaped inch-mark quote (e.g. `Monitor 24"`, `19" Rack`) that
-// breaks a naive quote-toggling CSV parser — confirmed against the real
-// export, ~20 of 618 rows (mostly Monitors) would otherwise be lost.
-// Splitting on the literal `","` delimiter instead handles this correctly,
-// as long as no field contains that exact 3-char sequence (true here).
-function parseCsvLine(line: string): string[] {
-  let s = line;
-  if (s.startsWith('"')) s = s.slice(1);
-  if (s.endsWith('"')) s = s.slice(0, -1);
-  return s.split('","');
-}
-
-// Expected columns: #ID, Display Name, Status, Type, Time Added, Last Modified
-// (exactly what the ITSM grid's "Export to CSV" produces). A row with a
-// different field count is logged and skipped rather than guessed at.
-function readCatalogItems(dir: string): Map<string, CatalogItemRef> {
-  const map = new Map<string, CatalogItemRef>();
-  const full = path.join(dir, CATALOG_ITEMS_FILE);
-  if (!fs.existsSync(full)) {
-    console.log(`  – ${CATALOG_ITEMS_FILE}: not present, skipping asset_type/manufacturer enrichment`);
-    return map;
-  }
-  const text = fs.readFileSync(full, 'utf8').replace(/^﻿/, '');
-  const lines = text.split(/\r?\n/).filter((l) => l.trim() !== '');
-  let skipped = 0;
-  for (const line of lines.slice(1)) {
-    const fields = parseCsvLine(line);
-    if (fields.length !== 6) { skipped++; continue; }
-    const [id, displayName, , type] = fields;
-    if (!id || !displayName) continue;
-    map.set(normalizeName(displayName), { id, displayName, type: type || null });
-  }
-  console.log(`  ✔ ${CATALOG_ITEMS_FILE}: ${map.size} catalog items loaded${skipped > 0 ? ` (${skipped} malformed row(s) skipped)` : ''}`);
-  return map;
-}
-
-// Expected columns: #ID, Display Name, Status, Principal Name, Logon Name,
-// AD Account, Cost Center, Location, Organization, Is Real Person, Time
-// Added, Last Modified (ITSM web UI: Asset Management > Master Data >
-// Persons > Export to CSV). Same display-name join rationale as Catalog
-// Items — the Hardware Asset payload's PersonId is an internal GUID with no
-// counterpart here, only the login-style #ID (e.g. "mmhgeza") does.
-function readPersons(dir: string): Map<string, string> {
-  const map = new Map<string, string>();
-  const full = path.join(dir, PERSONS_FILE);
-  if (!fs.existsSync(full)) {
-    console.log(`  – ${PERSONS_FILE}: not present, skipping person_id enrichment`);
-    return map;
-  }
-  const text = fs.readFileSync(full, 'utf8').replace(/^﻿/, '');
-  const lines = text.split(/\r?\n/).filter((l) => l.trim() !== '');
-  let skipped = 0;
-  for (const line of lines.slice(1)) {
-    const fields = parseCsvLine(line);
-    if (fields.length !== 12) { skipped++; continue; }
-    const [id, displayName] = fields;
-    if (!id || !displayName) continue;
-    // Same collision caveat as Catalog Items — if two rows ever share a
-    // display name, first one wins (whichever the export lists first).
-    const key = normalizeName(displayName);
-    if (!map.has(key)) map.set(key, id);
-  }
-  console.log(`  ✔ ${PERSONS_FILE}: ${map.size} persons loaded${skipped > 0 ? ` (${skipped} malformed row(s) skipped)` : ''}`);
-  return map;
-}
-
-// Controlled Catalog Item "Type" values (confirmed against the real MMH
-// export, 2026-07-27) -> the app's asset_type buckets (see
-// frontend/src/utils/assetTypes.ts ASSET_TYPE_MAP). Anything not listed here
-// (Accessory, Dockingstation, Tablet, Headset, Mouse, Microscope, Keyboard,
-// USB Stick, Security Device, Projector, Arbeitsbekleidung & Zubehör, blank)
-// falls back to 'other' — there's no app bucket for them today.
-const ITSM_TYPE_TO_ASSET_TYPE: Record<string, string> = {
-  Notebook: 'laptop',
-  Printer: 'printer',
-  Monitor: 'monitor',
-  Phone: 'phone',
-  Desktop: 'workstation',
-  'Generic PC': 'workstation',
-  'Generic IPC': 'ipc',
-  IPC: 'ipc',
-  'IPC Zubehör': 'ipc',
-  Server: 'server',
-  Scanner: 'scanner',
-  Webcam: 'camera',
-  'Datacenter Infrastructure': 'server',
-};
-
-// "Network Device" is too broad on its own (covers switches, APs, RFID
-// readers, firewalls, ...) — disambiguate by keyword against the catalog
-// item's own display name.
-function classifyNetworkDevice(displayName: string): string {
-  const n = displayName.toLowerCase();
-  if (n.includes('switch')) return 'switch';
-  if (n.includes('router') || n.includes('firewall') || n.includes('netscaler')) return 'router';
-  if (n.includes('wlan') || n.includes('access point')) return 'access_point';
-  return 'other';
-}
-
-// Always returns a bucket — never null/blank — so a resolved catalog item
-// with an untracked or missing ITSM Type still lands on 'other' rather than
-// showing as "Unknown" in the UI (the app's own fallback for an empty field).
-function classifyAssetType(itsmType: string | null, catalogDisplayName: string | null): string {
-  if (itsmType === 'Network Device') return classifyNetworkDevice(catalogDisplayName ?? '');
-  if (itsmType && ITSM_TYPE_TO_ASSET_TYPE[itsmType]) return ITSM_TYPE_TO_ASSET_TYPE[itsmType];
-  return 'other';
-}
-
-// Approximation only — see the file header. Takes the first whitespace-
-// delimited token of the catalog item's display name.
-function deriveManufacturer(catalogDisplayName: string | null): string | null {
-  if (!catalogDisplayName) return null;
-  const first = catalogDisplayName.trim().split(/\s+/)[0];
-  return first || null;
-}
-
-function mapRow(
-  r: Row,
-  now: Date,
-  catalogItems: Map<string, CatalogItemRef>,
-  persons: Map<string, string>,
-): Partial<ItsmHardwareSnapshot> | null {
-  const itsm_id = str(r.HardwareAssetID) ?? str(r.itsm_id);
-  const itsm_guid = str(r.Guid) ?? str(r.itsm_guid) ?? itsm_id;
-  if (!itsm_id || !itsm_guid) return null;
-
-  const catalog_itsm_id = str(r.CatalogItemId) ?? str(r.catalog_itsm_id);
-  const catalog_item_name = str(r.CatalogItem) ?? str(r.catalog_item_name);
-  // Joined by display name, not catalog_itsm_id — the Hardware Asset payload's
-  // CatalogItemId is an internal GUID with no counterpart in the CSV (see
-  // normalizeName). catalog_itsm_id is still stored on the row/asset
-  // as-is; it's just not the join key here.
-  const catalogRef = catalog_item_name ? catalogItems.get(normalizeName(catalog_item_name)) : undefined;
-  const catalogDisplayName = catalog_item_name ?? catalogRef?.displayName ?? null;
-  const catalogType = catalogRef?.type ?? null;
-
-  const assigned_person_name = str(r.AssignedPersonName) ?? str(r.assigned_person_name);
-
-  return {
-    itsm_guid,
-    itsm_id,
-    display_name: str(r.DisplayName) ?? str(r.display_name),
-    serial_number: str(r.SerialNumber) ?? str(r.serial_number),
-    asset_tag: str(r.AssetTag) ?? str(r.asset_tag),
-    mac_address: str(r.MACAddress) ?? str(r.mac_address),
-    status: str(r.Status) ?? str(r.status),
-    location_name: str(r.Location) ?? str(r.location_name),
-    catalog_item_name,
-    catalog_itsm_id,
-    asset_type: classifyAssetType(catalogType, catalogDisplayName),
-    manufacturer: deriveManufacturer(catalogDisplayName),
-    assigned_person_name,
-    person_itsm_id: str(r.PersonId) ?? str(r.person_itsm_id),
-    person_id: assigned_person_name ? persons.get(normalizeName(assigned_person_name)) ?? null : null,
-    itsm_modified_at: str(r.ModifiedDate) ?? str(r.itsm_modified_at),
-    imported_at: now,
-  };
-}
-
+/**
+ * Reads the three files and hands them to the service, which owns the mapping, the joins
+ * and the write. This script is the file-reading and the printing; the same service answers
+ * an upload from the browser, so there is one definition of what importing means.
+ */
 async function importSnapshot(dir: string): Promise<void> {
-  const raw = readRows(dir, HARDWARE_FILE);
-  if (raw.length === 0) {
+  const hardware = readRows(dir, HARDWARE_FILE);
+  if (hardware.length === 0) {
     console.log(`  – ${HARDWARE_FILE}: not present or empty in ${dir}, nothing to import`);
     return;
   }
-  const catalogItems = readCatalogItems(dir);
-  const persons = readPersons(dir);
+  const catalogItemsCsv = readTextIfPresent(dir, CATALOG_ITEMS_FILE);
+  const personsCsv = readTextIfPresent(dir, PERSONS_FILE);
+  if (!catalogItemsCsv) console.log(`  – ${CATALOG_ITEMS_FILE}: not present, skipping asset_type/manufacturer enrichment`);
+  if (!personsCsv) console.log(`  – ${PERSONS_FILE}: not present, skipping person_id enrichment`);
 
-  const now = new Date();
-  const rows = raw.map((r) => mapRow(r, now, catalogItems, persons)).filter((r): r is Partial<ItsmHardwareSnapshot> => r !== null);
-  const skipped = raw.length - rows.length;
+  const plan = await planSnapshotImport({ hardware, catalogItemsCsv, personsCsv, apply: true });
+  const e = plan.enrichment;
 
-  await AppDataSource.transaction(async (manager) => {
-    await manager.clear(ItsmHardwareSnapshot);
-    const repo = manager.getRepository(ItsmHardwareSnapshot);
-    // MSSQL caps a statement at 2100 parameters — see utils/mssqlBatch.ts.
-    // Derived from entity metadata so adding a column can't silently overflow.
-    const chunk = chunkForEntity(ItsmHardwareSnapshot);
-    for (let i = 0; i < rows.length; i += chunk) {
-      await repo.insert(rows.slice(i, i + chunk) as ItsmHardwareSnapshot[]);
-    }
-  });
+  if (catalogItemsCsv) {
+    console.log(`  ✔ ${CATALOG_ITEMS_FILE}: ${e.catalog_items} catalog items loaded${e.catalog_malformed > 0 ? ` (${e.catalog_malformed} malformed row(s) skipped)` : ''}`);
+  }
+  if (personsCsv) {
+    console.log(`  ✔ ${PERSONS_FILE}: ${e.persons} persons loaded${e.persons_malformed > 0 ? ` (${e.persons_malformed} malformed row(s) skipped)` : ''}`);
+  }
 
-  // Counts genuinely-classified rows, NOT just non-null ones —
-  // classifyAssetType() always returns a bucket (falling back to 'other'), so
-  // `r.asset_type` being set says nothing about whether the Catalog Items CSV
-  // join actually resolved anything. Reporting that as "resolved" made a run
-  // with no CSV at all still claim 100%.
-  const withType = rows.filter((r) => r.asset_type && r.asset_type !== 'other').length;
-  const withManufacturer = rows.filter((r) => r.manufacturer).length;
-  const withPersonName = rows.filter((r) => r.assigned_person_name).length;
-  const withPersonId = rows.filter((r) => r.person_id).length;
-  console.log(`  ✔ itsm_hardware_snapshot: ${rows.length} rows replaced${skipped > 0 ? ` (${skipped} skipped — missing HardwareAssetID/Guid)` : ''}`);
-  console.log(`    asset_type classified (excl. 'other' fallback): ${withType}/${rows.length}, manufacturer derived: ${withManufacturer}/${rows.length}`);
-  console.log(`    person_id resolved: ${withPersonId}/${withPersonName} assigned-person rows`);
+  const loaded = plan.parsed - plan.skipped;
+  console.log(`  ✔ itsm_hardware_snapshot: ${loaded} rows replaced${plan.skipped > 0 ? ` (${plan.skipped} skipped — missing HardwareAssetID/Guid)` : ''}`);
+  // Counts genuinely-classified rows, NOT just non-null ones — classifyAssetType() always
+  // returns a bucket (falling back to 'other'), so a set asset_type says nothing about
+  // whether the Catalog Items join resolved anything. Reporting that as "resolved" made a
+  // run with no CSV at all still claim 100%.
+  console.log(`    asset_type classified (excl. 'other' fallback): ${e.classified}/${loaded}, manufacturer derived: ${e.manufacturer}/${loaded}`);
+  console.log(`    person_id resolved: ${e.person_id_resolved}/${e.with_person_name} assigned-person rows`);
+  // What the replacement actually did to the table, which the old version never said.
+  console.log(`    against the previous snapshot: ${plan.added.length} new, ${plan.removed.length} gone, ${plan.changed.length} changed, ${plan.unchanged} unchanged`);
+  if (plan.removed.length > 0) {
+    console.log(`    the ${plan.removed.length} gone from ITSM become verify-disposal tasks — run tasks:generate`);
+  }
 }
 
 function resolveDir(): string {

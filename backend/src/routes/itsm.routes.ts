@@ -115,6 +115,7 @@ import {
   unignoreReconcileDiff,
   unlinkReconcileAsset,
   unlinkedMmh,
+  importSnapshotFromUpload,
   createUnlinkedMmhAssets,
 } from '../controllers/itsm.controller';
 import { requireOperator } from '../middleware/auth.middleware';
@@ -137,6 +138,9 @@ router.get('/reconcile/summary', reconcileSummary);
 // MMH-scoped ITSM hardware not linked to any local asset (the reverse
 // direction) — built from the imported snapshot table + local DB only.
 router.get('/reconcile/unlinked-mmh', unlinkedMmh);
+// The browser parses the export and posts rows; nothing lands on the server's disk.
+// `apply` is opt-in, so the same call answers "what would this change?" first.
+router.post('/snapshot/import', requireOperator, importSnapshotFromUpload);
 
 // Materialise selected snapshot rows into real, unplaced local assets. Local
 // DB write only — never calls ITSM. Body: { itsm_guids: string[] }.

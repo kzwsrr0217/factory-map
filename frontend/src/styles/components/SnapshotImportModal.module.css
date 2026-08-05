@@ -1,0 +1,116 @@
+/* Loading an ITSM export — see SnapshotImportModal.tsx.
+   The preview is the important half of this dialog, so it gets the room. */
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+.intro {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.files {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.file {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.file:hover { border-color: var(--color-primary); }
+
+.fileLabel {
+  display: flex;
+  flex-direction: column;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+}
+
+.fileLabel em {
+  font-style: normal;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.fileName {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.file input { display: none; }
+
+.actions {
+  display: flex;
+  gap: var(--spacing-sm);
+  flex-wrap: wrap;
+}
+
+.plan {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-md);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
+}
+
+.applied {
+  margin: 0;
+  color: var(--color-success);
+  font-weight: var(--font-weight-medium);
+}
+
+/* A partial export looks exactly like an estate that vanished — hence the shouting. */
+.warn {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--spacing-sm);
+  margin: 0;
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-left: 3px solid var(--color-warning);
+  background: var(--color-surface);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+}
+
+.counts {
+  margin: 0;
+  padding-left: var(--spacing-lg);
+  font-size: var(--font-size-sm);
+}
+
+.enrichment {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.details summary {
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+}
+
+.details ul {
+  margin: var(--spacing-xs) 0;
+  padding-left: var(--spacing-lg);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+.details {
+  max-height: 260px;
+  overflow-y: auto;
+}

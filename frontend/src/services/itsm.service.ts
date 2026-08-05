@@ -38,6 +38,42 @@ export interface ReconcileLinkedAsset {
   diff_count: number | null;
 }
 
+
+/** What loading an ITSM export would change — see backend snapshotImport.ts. */
+export interface SnapshotImportPlan {
+  parsed: number;
+  /** Rows with no HardwareAssetID/Guid: nothing can be done with them. */
+  skipped: number;
+  added: Array<{ itsm_id: string; display_name: string | null }>;
+  /**
+   * In the current snapshot, absent from this export. These become `verify-disposal`
+   * tasks — and a large number here usually means the export is partial, not that the
+   * estate vanished.
+   */
+  removed: Array<{ itsm_id: string; display_name: string | null }>;
+  changed: Array<{ itsm_id: string; display_name: string | null; changes: string[] }>;
+  unchanged: number;
+  enrichment: {
+    catalog_items: number;
+    catalog_malformed: number;
+    persons: number;
+    persons_malformed: number;
+    classified: number;
+    manufacturer: number;
+    person_id_resolved: number;
+    with_person_name: number;
+  };
+  applied: boolean;
+}
+
+export interface SnapshotImportInput {
+  /** The Hardware Asset export, parsed in the browser — the file never leaves it. */
+  hardware: Array<Record<string, unknown>>;
+  catalogItemsCsv?: string | null;
+  personsCsv?: string | null;
+  apply: boolean;
+}
+
 export interface ReconcileSummary {
   total_linked: number;
   never_checked: number;
@@ -77,6 +113,18 @@ export interface UnlinkedMmhAsset {
 }
 
 export const itsmService = {
+  /**
+   * Loads an ITSM export, or (with `apply: false`) says what loading it would change.
+   *
+   * The rows are parsed in the browser and posted as JSON, the same way the asset CSV
+   * import works: an ITSM export is Confidential, and not putting it on the server's disk
+   * is easier than remembering to delete it.
+   */
+  importSnapshot: async (input: SnapshotImportInput): Promise<SnapshotImportPlan> => {
+    const response = await api.post('/itsm/snapshot/import', input);
+    return response.data.data as SnapshotImportPlan;
+  },
+
   // ── Read from LOCAL DB (no ITSM call) ─────────────────────────────────────
   getLinked: async (): Promise<ReconcileLinkedAsset[]> => {
     const res = await api.get('/itsm/reconcile/linked');

@@ -28,6 +28,7 @@ import {
   findUnlinkedMmhAssets,
   createAssetsFromUnlinkedMmh,
 } from '../services/itsm/ReconcileService';
+import { planSnapshotImport } from '../services/itsm/snapshotImport';
 import { AppDataSource } from '../config/database';
 import { Asset } from '../entities/Asset.entity';
 import { AuditLog } from '../entities/AuditLog.entity';
@@ -270,5 +271,51 @@ export const acceptSnapshot = async (req: Request, res: Response, next: NextFunc
 
     await repo.save(asset);
     res.json({ success: true, data: asset.toApiResponse() });
+  } catch (error) { next(error); }
+};
+
+/**
+ * POST /itsm/snapshot/import — loads an ITSM export handed over by the browser.
+ *
+ * Two things make this different from the other write endpoints:
+ *
+ *  - **The file never reaches the server's disk.** The browser parses it and posts rows,
+ *    the same way the asset CSV import already works. An ITSM export is Confidential; not
+ *    storing it is easier than remembering to delete it.
+ *  - **`apply` is opt-in.** Without it the same code path returns what the load WOULD
+ *    change and writes nothing, so the person can look before a snapshot replaces the
+ *    previous one. That replacement is the correct semantic — an export is a point in
+ *    time, and whatever is absent from it is absent from ITSM — but it is destructive
+ *    enough to deserve a preview.
+ */
+export const importSnapshotFromUpload = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const body = req.body as {
+      hardware?: unknown;
+      catalogItemsCsv?: string | null;
+      personsCsv?: string | null;
+      apply?: boolean;
+    };
+    if (!Array.isArray(body.hardware)) {
+      res.status(400).json({ success: false, error: 'hardware must be an array of exported rows' });
+      return;
+    }
+    if (body.hardware.length === 0) {
+      // Refused rather than applied: an empty export would clear the table, and "the file
+      // failed to parse" looks exactly like "ITSM has nothing" once it has happened.
+      res.status(400).json({
+        success: false,
+        error: 'The hardware export is empty. Applying it would clear the snapshot, so it is refused.',
+      });
+      return;
+    }
+
+    const plan = await planSnapshotImport({
+      hardware: body.hardware as Array<Record<string, unknown>>,
+      catalogItemsCsv: body.catalogItemsCsv ?? null,
+      personsCsv: body.personsCsv ?? null,
+      apply: body.apply === true,
+    });
+    res.json({ success: true, data: plan });
   } catch (error) { next(error); }
 };

@@ -284,3 +284,10 @@
   .stats { grid-template-columns: 1fr; }
   .header { flex-direction: column; }
 }
+
+/* Load-an-export next to Refresh — see the header in ItsmReconcile.tsx. */
+.headerActions {
+  display: flex;
+  gap: var(--spacing-sm);
+  flex-wrap: wrap;
+}
