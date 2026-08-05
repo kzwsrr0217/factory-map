@@ -7,7 +7,7 @@
 4. [Dashboard](#dashboard)
 5. [Buildings & Floors](#buildings--floors)
 6. [Floor Map](#floor-map)
-7. [Work Areas & Sections](#work-areas--sections)
+7. [Zones & Work Areas](#zones--work-areas)
 8. [Assets](#assets)
    - [Browsing Assets](#browsing-assets)
    - [Asset Details](#asset-details)
@@ -23,13 +23,16 @@
 12. [Network Infrastructure](#network-infrastructure)
 13. [Maintenance Calendar](#maintenance-calendar)
 14. [ITSM Reconcile](#itsm-reconcile)
-15. [Alerts (Admins only)](#alerts)
-16. [Reports](#reports)
-17. [Audit Log](#audit-log)
-18. [Settings](#settings)
-19. [User Management (Admins only)](#user-management)
-20. [Keyboard Shortcuts](#keyboard-shortcuts)
-21. [Tips & Best Practices](#tips--best-practices)
+    - [Loading a fresh ITSM export](#loading-a-fresh-itsm-export)
+    - [Inventory import (the physical walk-around)](#inventory-import)
+15. [Tasks](#normalisation-tasks)
+16. [Alerts (Admins only)](#alerts)
+17. [Reports](#reports)
+18. [Audit Log](#audit-log)
+19. [Settings](#settings)
+20. [User Management (Admins only)](#user-management)
+21. [Keyboard Shortcuts](#keyboard-shortcuts)
+22. [Tips & Best Practices](#tips--best-practices)
 
 ---
 
@@ -84,6 +87,7 @@ The left **sidebar** is the main navigation menu, in groups:
 | Network | Infrastructure | Physical network infrastructure — rooms, racks, patch panels, sockets |
 | Network | Connections | Force-directed graph of all asset connections |
 | Data & admin | ITSM Reconcile | Compare assets against the ITSM system (read-only) and resolve differences per field |
+| Data & admin | Inventory import | Hand the physical walk-around to the app: preview what it would change, fix the names that did not match, then apply |
 | Data & admin | Tasks | What is left before the inventory, the app and ITSM agree. Derived from the data — press **Re-derive** after a new ITSM export. Dismissing needs a reason, and only "put a label on it" can be closed on your word alone: everything else is checked against the data and comes back if the cause is still there |
 | Data & admin | Reports | Asset statistics and ITSM sync |
 | Data & admin | Alerts | Maintenance alert configuration *(admin only)* |
@@ -781,6 +785,102 @@ If the linked record no longer exists in ITSM, the asset is flagged and offers
 plain local record. Nothing is deleted in ITSM.
 
 Every accept, ignore and unlink is recorded in the **Audit Log**.
+
+<a id="loading-a-fresh-itsm-export"></a>
+### Loading a fresh ITSM export (operator/admin)
+
+**Load an ITSM export** at the top of the page takes the Hardware Asset export
+out of Alemba and refreshes what the app knows about ITSM. Pick the hardware JSON
+(the two CSVs — catalog items and persons — are optional; without them the device
+type, the make and the person ids stay unfilled, and the page says so).
+
+The files are read **in your browser**; only the rows are sent, so the export
+itself never lands on the server.
+
+Press **What would this change?** first. Loading an export *replaces* the app's
+picture of ITSM — an export is a point in time, and whatever is missing from it is
+missing from ITSM — so the preview names what would appear, what would disappear
+and which fields differ, record by record. If more than a tenth of the records
+would disappear, it says so plainly: that is almost always a partial export rather
+than that many devices leaving ITSM. **Apply** is a second, separate press, and
+nothing is written before it.
+
+Whatever disappeared becomes a "confirm or retire" task on the
+[Tasks](#normalisation-tasks) page after the next re-derive.
+
+<a id="inventory-import"></a>
+### Inventory import (the physical walk-around)
+
+**Inventory import** in the sidebar is where the physical inventory — the survey
+tool's export from walking the site — is handed to the app and compared against
+what it already holds.
+
+Choose one or more survey exports (several files are merged; if the same entry
+appears twice, the last file wins). As with the ITSM export, the file is read in
+your browser and only its rows are sent.
+
+**What would this change?** writes nothing. It tells you:
+
+- how many devices would be re-placed, and how many would be **created as
+  local-only records** because ITSM has never heard of them;
+- how many would sit on a floor but in no room;
+- every building, floor, room, person and HWA number that did **not** resolve.
+
+That last list is the work. Each entry has a box next to it, pre-filled with a
+suggestion when the app has a near-miss close enough to propose — "Rcpcio" next to
+"Recepció". Saving it stores the answer and re-runs the preview, so you watch the
+list shrink. The answer is kept for good: the next import reads that name the same
+way, and so does the command-line importer.
+
+Only the name that actually failed gets a box. If the building is unknown, the
+floor name underneath it was never even checked, so you are not asked to correct
+it.
+
+If a room genuinely is not drawn yet, tick **Also create the rooms the survey
+names and the map lacks** before applying. They appear as default-size rectangles
+below whatever is already drawn on that floor — drag them into place on the
+[Floor Map](#floor-map), then use **Arrange N unplaced** per room.
+
+An HWA number with no asset is not a naming problem: either the number was read
+wrong off the device, or the record is in ITSM but not yet in the app — the ITSM
+Reconcile page creates the missing ones.
+
+**Apply — write the placements** is the only step that writes. Afterwards,
+re-derive the [task list](#normalisation-tasks) so the newly created devices turn
+into "register in ITSM" tasks.
+
+---
+
+<a id="normalisation-tasks"></a>
+## Tasks
+
+The **Tasks** page answers one question: what is left before the physical
+inventory, this app and ITSM all agree?
+
+The list is **derived**, not kept by hand. **Re-derive from the data** recomputes
+it from the three sources — the ITSM export, the survey as it landed in the app,
+and the app's own records — so run it after every new export or survey import. It
+is safe to run repeatedly: it adds what is new, closes what the data now proves
+done, and brings back anything whose cause has returned. That is also why there is
+no "add task" button: something that needs doing but cannot be derived means the
+generator is missing a rule.
+
+Every task carries the **evidence** that raised it, so you can judge it rather than
+trust it. What you can do with one is deliberately narrow:
+
+| Action | What it means |
+|---|---|
+| **Assign** | Type a name and press Enter. Free text — it need not be a Factory Map user |
+| **Done** | For most kinds the *data* decides. If the cause is still there, the next re-derive reopens it — and the page tells you so instead of showing a plain "Saved" |
+| **Dismiss** | Requires a reason. The task stays dismissed while the facts stay the same, and returns if they change |
+
+One kind — **Put a label on it** — is marked *needs a person*: nothing in any
+export records that a sticker was applied, so your word is the only evidence there
+will ever be.
+
+When the list is empty the page says **Nothing outstanding**, which is the whole
+point of the exercise: the inventory, the app and ITSM agree as far as the data can
+show.
 
 ---
 

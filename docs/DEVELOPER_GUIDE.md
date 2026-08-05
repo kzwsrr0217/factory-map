@@ -980,9 +980,16 @@ Two outcomes per row:
 must already exist, and so must the WorkAreas (drawn on the map, with the
 room as the name and the zone in the Zone/Group field) — this script never
 invents hierarchy, it only matches by name (diacritic/case/
-whitespace-insensitive) and reports unmatched pairs as `zone / room`. Fix
-typos/nicknames via an optional `inventory-corrections.json` in the same
-directory:
+whitespace-insensitive) and reports unmatched pairs as `zone / room`.
+
+Fix typos/nicknames in the **`name_corrections` table** — "when the survey says
+this, it means that", one row per folded name per column, upserted on
+`(scope, from_folded)` so a second rule for one name can't make the import
+depend on row order. Edit them on the **Inventory import** page
+(`/inventory-import`), which is also where the unmatched names are listed with
+a box next to each; the CLI reads the same table, so an answer given once holds
+for both. An `inventory-corrections.json` next to the export is still read and
+layered on top, so a pre-existing file keeps working:
 ```json
 { "persons": { "gorog tomi": "Görög Tamás" },
   "helyszin": { "hr": "HR" },
@@ -990,10 +997,13 @@ directory:
 ```
 Re-run (still dry-run) until the report is clean, then add `--apply` to
 commit. Person matching (`szemely`) is best-effort against names already
-known from the ITSM snapshot (`itsm_hardware_snapshot.assigned_person_name`)
-— informal survey names without diacritics won't all match; unmatched ones
-are still kept as free-text `person_full_name`, correctable by hand later,
-same tradeoff as the ITSM person-ID enrichment. `terulet` (e.g. "Client
+known from the ITSM snapshot (`itsm_hardware_snapshot.assigned_person_name`),
+compared as an **order-independent set of name parts**: the export writes
+"Móder, Hajnalka" and the survey "moder hajnalka", and folding only case and
+accents left both the comma and the word order to fail on — which put names in
+the unmatched list that were never wrong. Names that still don't match are kept
+as free-text `person_full_name`, correctable by hand later, same tradeoff as the
+ITSM person-ID enrichment. `terulet` (e.g. "Client
 Operation" vs "Operation Technology" — a network/VLAN-segmentation
 classification, not a location) is stored verbatim on `network_domain`.
 
@@ -1024,6 +1034,23 @@ Recommended order, which is also why the dry run comes first:
 3. Drag and resize the new rectangles on the Map View.
 4. Per work area, use **Arrange N unplaced** on the floor page to give the assets
    coordinates (`POST /workareas/:id/auto-place`).
+
+**The same thing from the browser.** The whole loop is on the **Inventory import**
+page (`/inventory-import`) — the CLI and the page share one planner
+(`services/inventory/surveyImport.ts`), so they cannot disagree about what an
+import would do. The page reads the export file **in the browser** and posts only
+its rows to `POST /api/inventory/survey/import`: the survey records who uses which
+device, so it is Confidential, and not putting it on the server's disk beats
+remembering to delete it. `apply: false` (the default) writes nothing and returns
+the plan; the unresolved names come back with a suggestion where the app has a
+near-miss close enough to propose, each with a box that stores the correction and
+re-runs the preview so the list visibly shrinks. Several files can be chosen at
+once and are merged by the tool's own row `id`, last one winning — the same rule as
+the CLI, because two tools that dedupe differently would report two inventories.
+
+The plan also names which side of a place failed (`building_matched`): a floor name
+under an unknown building was never looked up, so the page does not offer to
+correct it.
 
 **For the asset data itself**, `data-quality-report.ts`
 (`npm run report:quality -- [--csv=<path>]`) finds the mistakes a bulk import

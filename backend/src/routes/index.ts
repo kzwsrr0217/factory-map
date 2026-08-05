@@ -32,6 +32,7 @@ import productionLinesRoutes from './productionLines.routes';
 import workCentersRoutes from './workCenters.routes';
 import exportRoutes from './export.routes';
 import normalisationTasksRoutes from './normalisationTasks.routes';
+import inventoryRoutes from './inventory.routes';
 import { authenticate } from '../middleware/auth.middleware';
 
 const router = Router();
@@ -59,5 +60,6 @@ router.use('/production-lines', productionLinesRoutes);
 router.use('/work-centers', workCentersRoutes);
 router.use('/export', exportRoutes);
 router.use('/tasks', normalisationTasksRoutes);
+router.use('/inventory', inventoryRoutes);
 
 export default router;

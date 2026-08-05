@@ -13,6 +13,7 @@ import {
   Network,
   Server,
   Wrench,
+  FileInput,
   RefreshCw,
   Keyboard,
   Gauge,
@@ -79,6 +80,9 @@ const menuGroups: MenuGroup[] = [
     title: 'Data & admin',
     items: [
       { icon: RefreshCw,     label: 'ITSM Reconcile', path: '/itsm' },
+      // Where the physical walk-around is handed to the app, and where the survey's
+      // free-text names are mapped onto the app's — see pages/InventoryImport.tsx.
+      { icon: FileInput,     label: 'Inventory import', path: '/inventory-import' },
       // What is left before the inventory, the app and ITSM agree — derived, see
       // backend/src/services/itsm/taskGenerator.ts.
       { icon: ListChecks,    label: 'Tasks',          path: '/tasks' },

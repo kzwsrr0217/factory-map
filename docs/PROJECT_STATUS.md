@@ -413,9 +413,13 @@ run `npm run import:master -- <dir>` (it can't see host paths directly — the
     [--apply]`) — **dry-run by default, doubles as the validation tool** the
     user asked for: never invents hierarchy, matches everything by
     diacritic/case/whitespace-folded name, and reports every unmatched
-    building/floor/WorkArea/Section/person/HWA so typos can be fixed via an
-    optional `inventory-corrections.json` (`{"persons": {"gorog tomi":
-    "Görög Tamás"}, ...}`) before `--apply` writes anything. HWA rows update
+    building/floor/WorkArea/Section/person/HWA so typos can be fixed before
+    `--apply` writes anything. The planning half now lives in
+    `services/inventory/surveyImport.ts`, shared with the **Inventory import**
+    page (`/inventory-import`), so the browser and the CLI cannot disagree about
+    what an import would do; the corrections live in the `name_corrections`
+    table (+ migration 1733100000000) and are edited on that page, with an
+    `inventory-corrections.json` still read and layered on top. HWA rows update
     the existing linked asset's placement/person/notes; EGYEB rows create
     **local-only** assets (`source_of_truth: 'local'`), deduped by serial
     number on re-runs. The plan: once those get registered in Alemba by hand

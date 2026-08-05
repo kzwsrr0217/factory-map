@@ -113,7 +113,7 @@ function fold(v: string | null | undefined): string {
  * of order. Two different people with each other's names swapped would collide, which
  * is rare and harmless here — a name only ever corroborates, it is never an identity.
  */
-function foldName(v: string | null | undefined): string {
+export function foldName(v: string | null | undefined): string {
   return fold(v)
     .normalize('NFD').replace(/[̀-ͯ]/g, '')
     .replace(/[^a-z0-9\s]/g, ' ')
