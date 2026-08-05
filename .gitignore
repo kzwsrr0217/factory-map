@@ -68,3 +68,9 @@ ops/.form_blocks*
 /IT_Eszkoz_Nyilvantarto.exe
 /eszkozok.json*
 /inventory-corrections.json
+# The survey exports arrive as a whole directory of them, under several names
+# (eszkozok1.json, hajtomu_*.csv, szenkefe_*.bak, ...), so the directory is
+# ignored rather than the file names — a pattern per name is a pattern that
+# will be missed. Checked with `git status` after dropping files in: an
+# `eszkozok.json*` rule does NOT cover `eszkoz/eszkozok1.json`.
+/eszkoz/
