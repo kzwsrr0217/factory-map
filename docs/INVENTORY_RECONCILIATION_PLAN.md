@@ -117,8 +117,21 @@ a floor and no closer.
 ## 4. Other data quality
 
 - **14 placeholder serials**: `...`, `...2`, `N/A`, `N/A 2` … `N/A8`. The importer matches
-  non-HWA rows *by serial*, so `N/A 2` and `N/A 3` become two assets, and two `...` rows
-  collapse into one. Neither is right.
+  non-HWA rows *by serial*, so `N/A 2` and `N/A 3` would have become two assets and two `...`
+  rows would have collapsed into one. Read as "no serial" now, and counted.
+
+  A missing serial is not a data-entry error: it means the number was not found or the device
+  could not be reached, and it has to be picked up later. Of the 280 rows with no identifier,
+  **266 carry a usable serial** (9 of them already on an asset) and **14 have nothing at all**.
+  Those 14 come back from the generator as *identify the device* — "read a serial off it" —
+  which is the only honest thing to do with them, and the import now says how many are coming
+  rather than leaving it to be discovered.
+
+- **The unresolved `MMHIPC…` names cannot be rescued by the data.** Many industrial PCs do
+  have HWA numbers today, but the older ones do not always, and **none of the 33 unresolved
+  rows carries a serial** — measured. So there is no second key to try: each one is a person
+  going to the machine to see whether it has an HWA now. That is a *check-hwa* or *identify
+  the device* task, not a matching problem.
 - **Device type**: blank on 455 rows (correct — type comes from ITSM for HWA rows),
   `Monitor` on 246, and ~13 rows where a Dell **model** was typed into the type field.
 - **Persons**: 73 distinct names, 47 known to the ITSM export, 26 not.
@@ -228,3 +241,111 @@ The round is finished when the task list is empty and was derived after the last
 
 Steps 1–3 were what stood between the import and a task list worth trusting. Step 6 is where
 the time goes.
+
+---
+
+## 8. Runbook — dev first, then the VM
+
+Do the whole thing on the development database first. Not as a rehearsal for its own sake:
+step 4 creates 127 rooms and 36 zones, and if the corrections are wrong they arrive with the
+wrong names and have to be deleted by hand. On dev that costs a re-seed; on the VM it costs
+the real map.
+
+### On dev
+
+**1. Take a backup you have actually restored from.** The import re-places hundreds of assets
+in one transaction. `ops/backup-factorymap.ps1` writes one; restoring it once now is what
+makes the rest of this reversible.
+
+**2. Merge the exports into one file.** Set E has no JSON, so convert it first:
+
+```bash
+cd backend && npm run convert:survey-csv -- ../eszkoz/eszkozok_20260729_MMHBABA.csv
+```
+
+Then merge the four newest tool exports plus that conversion. The Inventory import page takes
+several files at once and merges them by row id, so this can also be done by selecting them
+together in step 5: `eszkozok1.json`, `eszkozok2.json`, `eszkozok.json.bak`,
+`szenkefe_eszkozok.bak`, `eszkozok_20260729_MMHBABA.converted.json`. **Do not** add the CSV
+twins or `zg_eszkozok.json` — they are the same devices again.
+
+**3. The hierarchy.** On the Buildings page:
+- rename `Werk1` → `Werk 1`
+- add `Werk 2`
+- under each: `Ground floor` (number **0**) and `First floor` (number **1**)
+
+The floor *number* matters more than the name: the survey writes `0` and `1`, and those match
+by number without any correction.
+
+**4. The four corrections.** On **Inventory import** → *Stored corrections*, or by previewing
+first and using the boxes the preview offers:
+
+| Scope | From | To |
+|---|---|---|
+| building | `W2` | `Werk 2` |
+| building | `BZYSRM3Werk 2` | `Werk 2` |
+| floor | `foldszint` | `Ground floor` |
+| floor | `1. emelet` | `First floor` |
+
+**5. Preview.** Select the five files, press **What would this change?**. Expected on the
+current data:
+
+| | |
+|---|---|
+| entries read | 735 |
+| no building or floor | **0** — if this is not zero, a correction is missing or misspelled |
+| identified | 300 by HWA + 92 after the prefix + 30 by the older name |
+| unresolved identifiers | 33 (10 numbers, 23 names) |
+| rooms the map lacks | 127 |
+| new devices with no number | 14 |
+| unknown persons | 26 |
+
+Read the numbers before going on. The two that must be right are **0 place failures** and
+**735 entries** — anything else means the wrong files or a missing correction.
+
+**6. Fix the person names** the preview lists, using the boxes. 47 of 73 already match; the
+rest are nicknames or informal spellings, and each fix is stored for good. This is worth
+doing before applying, because a name matched to ITSM also carries the person id.
+
+**7. Apply, with “also create the rooms the survey names” ticked.** One press. Expect ~420
+updates and ~280 new local-only assets, plus 127 rooms and 36 zones as default rectangles
+stacked below whatever is already drawn on each floor.
+
+**8. Check what the app now says.** On `/normalisation`: the survey step should show the run
+and its counts, and the task list should be flagged as older than the data. Press
+**Re-derive**. Then on `/tasks`, the shape to expect:
+- *register in ITSM* — the new local-only devices
+- *identify the device* — the 14 with no number, and the unresolved older names
+- *check an HWA* — the 10 unknown numbers, one of them a single missing letter
+- *put a label on it* — the labelling round
+
+**9. Only then position the rooms** — and on dev, only enough of them to satisfy yourself the
+map behaves. The real positioning is done once, on the VM.
+
+### Then the VM
+
+Once the dev numbers look right:
+
+1. `git pull`, then **run the migrations** — `1733100000000-AddNameCorrections` has not run
+   there yet. `ops/deploy-factorymap.ps1` does the pull, rebuild, migration and health check;
+   `-DryRun` first.
+2. Backup, again, before touching data.
+3. Repeat steps 3–8 exactly. The corrections and the hierarchy are per database, so they have
+   to be entered again; there are four corrections and six hierarchy rows, which is quicker
+   than any export/import of them would be.
+4. Position the 127 rooms on the map, floor by floor. This is the long part — do it per floor,
+   and use **Arrange N unplaced** on each room afterwards to give its devices coordinates.
+5. Re-derive, and work the task list from the printed worksheet.
+
+### If it goes wrong
+
+- **Place failures are not zero** — a correction is missing. The preview names the exact
+  spelling that failed; fix it and preview again. Nothing has been written.
+- **The preview is right but Apply fails** — it is one transaction, so nothing landed. The
+  likeliest cause on a first run is a missing migration.
+- **The rooms arrived with wrong names** — they were created from the *corrected* names, so a
+  wrong correction means wrong rooms. Delete them and re-run; the corrections are editable
+  and the import is idempotent on row ids.
+- **A device was placed in the wrong room** — fix it on the asset, not in the survey. The next
+  import will overwrite it from the survey again, so the survey needs the fix too if the
+  device really moved.

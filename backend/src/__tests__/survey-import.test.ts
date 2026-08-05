@@ -588,6 +588,9 @@ describe('POST /api/inventory/survey/import — serials that are not serials', (
       apply: true,
     });
     expect(res.body.data.placeholder_serials).toBe(3);
+    // The devices behind them have no number at all: not found, or not reachable. Said up
+    // front, because they come back as "read a number off it" and somebody has to expect that.
+    expect(res.body.data.create_without_serial).toBe(3);
     // Three unknown devices, not one device and not three rows sharing a serial.
     expect(res.body.data.to_create).toBe(3);
     const created = await AppDataSource.getRepository(Asset).createQueryBuilder('a')

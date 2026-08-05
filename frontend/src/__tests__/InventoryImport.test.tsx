@@ -45,6 +45,7 @@ const EMPTY_PLAN = {
   unmatched_hwa: [],
   matched_by: { hwa: 1, hwa_prefixed: 0, device_name: 0, serial: 0 },
   placeholder_serials: 0,
+  create_without_serial: 0,
   duplicates: [],
   create_sample: [],
   created_areas: null,
@@ -201,6 +202,7 @@ describe('InventoryImport — what the survey wrote in its identifier column', (
       ...EMPTY_PLAN,
       matched_by: { hwa: 300, hwa_prefixed: 92, device_name: 30, serial: 4 },
       placeholder_serials: 14,
+      create_without_serial: 14,
     });
     renderPage();
     chooseFile();
@@ -212,6 +214,8 @@ describe('InventoryImport — what the survey wrote in its identifier column', (
     expect(screen.getByText(/by the older name on the asset tag/)).toBeInTheDocument();
     // A placeholder serial is not a serial, and the devices behind them still need a number.
     expect(screen.getByText(/14 serial\(s\) were placeholders/)).toBeInTheDocument();
+    // And what happens to those devices next, rather than leaving it to be discovered.
+    expect(screen.getByText(/would have no\s+number at all/)).toBeInTheDocument();
   });
 
   it('shows a device recorded twice before anything is applied', async () => {

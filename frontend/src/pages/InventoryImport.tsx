@@ -294,8 +294,12 @@ const InventoryImport: React.FC = () => {
             {plan.matched_by.device_name > 0 && <>, <strong>{plan.matched_by.device_name}</strong> by the older name on the asset tag</>}
             {plan.matched_by.serial > 0 && <>, <strong>{plan.matched_by.serial}</strong> by serial</>}.
             {plan.placeholder_serials > 0 && (
-              <> {plan.placeholder_serials} serial(s) were placeholders (“…”, “N/A”) and read as no serial —
-              those devices still need a number read off them.</>
+              <> {plan.placeholder_serials} serial(s) were placeholders (“…”, “N/A”) and read as no serial.</>
+            )}
+            {plan.create_without_serial > 0 && (
+              <> <strong>{plan.create_without_serial}</strong> of the new devices would have no
+              number at all — nobody could reach or read one. Those come back as “read a number
+              off it” tasks, which is the only honest thing to do with them.</>
             )}
           </p>
 

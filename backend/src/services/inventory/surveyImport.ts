@@ -471,6 +471,15 @@ interface InternalPlan {
   matchedBy: Record<'hwa' | 'hwa-prefixed' | 'device-name' | 'serial', number>;
   /** Serial values that were not serial numbers at all. */
   placeholderSerials: number;
+  /**
+   * Devices that would be created with nothing to identify them.
+   *
+   * A survey row with no HWA and no serial means the number was not found or could not be
+   * reached — a real outcome of walking a factory, and one that has to be picked up later.
+   * Counted here so the import says how many are coming rather than leaving them to be
+   * discovered in the task list.
+   */
+  createWithoutSerial: number;
   /** The same identifier or serial on more than one row. */
   duplicates: Map<string, { value: string; kind: 'identifier' | 'serial'; rows: number }>;
 }
@@ -517,6 +526,12 @@ export interface SurveyImportPlan {
   matched_by: { hwa: number; hwa_prefixed: number; device_name: number; serial: number };
   /** Rows whose serial was `...`, `N/A` or similar — counted, not silently dropped. */
   placeholder_serials: number;
+  /**
+   * How many of the new assets would have neither an HWA nor a serial. Those come back as
+   * "read a number off it" tasks, which is the only honest thing to do with a device nobody
+   * could get a number from.
+   */
+  create_without_serial: number;
   /**
    * The same device recorded twice. Small and real on the current survey (4 HWA numbers,
    * each pair in the same room), and the sort of thing that has to be seen before applying
@@ -595,6 +610,7 @@ async function planInternal(rows: SurveyRow[], corrections: Corrections): Promis
     noRoom: 0,
     matchedBy: { hwa: 0, 'hwa-prefixed': 0, 'device-name': 0, serial: 0 },
     placeholderSerials: 0,
+    createWithoutSerial: 0,
     duplicates: new Map(),
   };
 
@@ -739,6 +755,7 @@ async function planInternal(rows: SurveyRow[], corrections: Corrections): Promis
       continue;
     }
 
+    if (!serial) plan.createWithoutSerial++;
     const displayName = (row.megjegyzes ?? '').trim() || row.eszkoz_tipus || serial || 'Survey device';
     plan.toCreate.push({
       display: displayName,
@@ -964,6 +981,7 @@ export async function planSurveyImport(input: SurveyImportInput): Promise<Survey
       serial: internal.matchedBy.serial,
     },
     placeholder_serials: internal.placeholderSerials,
+    create_without_serial: internal.createWithoutSerial,
     duplicates: [...internal.duplicates.values()].sort((a, b) => b.rows - a.rows),
     create_sample: internal.toCreate.slice(0, 25).map((c) => ({
       display: c.display,

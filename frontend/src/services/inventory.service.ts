@@ -65,6 +65,8 @@ export interface SurveyImportPlan {
   matched_by: { hwa: number; hwa_prefixed: number; device_name: number; serial: number };
   /** Rows whose serial was `...`, `N/A` or similar — read as no serial, and counted. */
   placeholder_serials: number;
+  /** New assets with neither an HWA nor a serial — they come back as "read a number off it". */
+  create_without_serial: number;
   /** The same device recorded twice, once per value with a row count. */
   duplicates: Array<{ value: string; kind: 'identifier' | 'serial'; rows: number }>;
   create_sample: Array<{ display: string; asset_type: string; serial: string | null }>;
