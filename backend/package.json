@@ -24,6 +24,7 @@
     "seed:network-demo": "ts-node src/scripts/seed-network-demo.ts",
     "report:match": "ts-node src/scripts/match-report.ts",
     "tasks:generate": "ts-node src/scripts/generate-tasks.ts",
+    "set:password": "ts-node src/scripts/set-password.ts",
     "test": "jest --runInBand --forceExit --passWithNoTests",
     "test:watch": "jest --watch",
     "migration:generate": "typeorm-ts-node-commonjs migration:generate -d src/data-source.ts",

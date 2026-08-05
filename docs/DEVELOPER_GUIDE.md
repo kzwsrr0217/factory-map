@@ -1077,6 +1077,17 @@ Effect on the current data: 1057 assets became 1054, decommissioned 64 → 61, a
 the duplicate-serial section went from 6 groups to 3 — the redeployment category
 emptied out, leaving the two retired-only pairs and the one pair of real docks.
 
+**Forgotten the local dev login?** `set-password.ts`
+(`npm run set:password -- --username admin`) sets a local user's password on a
+development database. It prompts with echo off and takes the value from nowhere else:
+not from an argument (which lands in shell history and in `ps`), not from an environment
+variable. It never prints or logs it, and it refuses to run with `NODE_ENV=production`,
+where the app's own audited user management is the right route.
+
+This exists because the alternative was `seed-mssql.ts`, which deletes ALL data — an
+absurd price for getting back into a local login, and catastrophic on a database holding
+a real ITSM import.
+
 **Matching the physical inventory against ITSM**: `match-report.ts`
 (`npm run report:match [-- --csv]`) answers "this device was found in a room, which ITSM
 record is it?" for every local asset with no HWA link, and reports the two directions
