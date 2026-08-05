@@ -269,11 +269,24 @@ it exists to prevent.
 
 Restoring it once now is what makes the rest of this reversible.
 
-**2. Merge the exports into one file.** Set E has no JSON, so convert it first:
+**2. Convert the CSV-only export.** Set E has no JSON, so it has to be converted — and where
+you run it matters. There is **no `node_modules` on the host**, so `npm run` there fails
+outright, and the container's `package.json` is the one baked into the image: a script added
+since the last build is not in it (only `backend/src` is mounted). Until the next rebuild, call
+the file directly, and copy the CSV in and the result out — the container cannot see `eszkoz/`:
 
-```bash
-cd backend && npm run convert:survey-csv -- ../eszkoz/eszkozok_20260729_MMHBABA.csv
+```powershell
+podman cp "eszkoz\eszkozok_20260729_MMHBABA.csv" factory-map-backend:/tmp/e.csv
+podman exec -w /app factory-map-backend npx ts-node src/scripts/convert-survey-csv.ts /tmp/e.csv -o /tmp/converted.json
+podman cp factory-map-backend:/tmp/converted.json "eszkoz\eszkozok_20260729_MMHBABA.converted.json"
 ```
+
+Expect `123 entries (65 with an identifier -> read as ITSM rows, 58 as not-in-ITSM)`. On the
+VM, after `deploy-factorymap.ps1` has rebuilt the image, `npm run convert:survey-csv -- <file>`
+works normally inside the container.
+
+The converted file is a plain export and travels with the others, so this is done once, not
+once per machine.
 
 Then merge the four newest tool exports plus that conversion. The Inventory import page takes
 several files at once and merges them by row id, so this can also be done by selecting them
