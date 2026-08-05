@@ -2,7 +2,7 @@
 
 > **Read this first if you're a new session with no prior context.** It's a
 > point-in-time snapshot of where the project stands, why, and what's next.
-> Last updated: 2026-07-28 (Phase 15 — physical inventory survey import + bulk reconcile report).
+> Last updated: 2026-08-05 (Phase 16 — the real survey exports, read and reconciled; import previewed on dev).
 
 ---
 
@@ -426,6 +426,16 @@ run `npm run import:master -- <dir>` (it can't see host paths directly — the
     (factorymap still never writes to ITSM), a human links the HWA via the
     existing asset-edit "search ITSM record" UI and normal reconcile takes
     over — user's own suggested workflow.
+  - **The real exports arrived (5 Aug 2026)** and reading them changed the
+    importer: see `docs/INVENTORY_RECONCILIATION_PLAN.md` for the findings, the
+    four name corrections that cover all 735 devices, and the dev-then-VM
+    runbook. Three things the data forced, each measured first: the identifier
+    column holds HWA numbers, the same numbers with the prefix missing, and
+    older device names that live in `asset_tag` (122 devices would have been
+    reported as unknown); a CSV-only export with no `azonosito_mod` would have
+    created 123 duplicates; and writing the survey's blanks through would have
+    wiped the person from 233 assets that got it from ITSM. Dev is at "previewed,
+    not yet applied": 735 entries, 0 place failures, 431 updates / 271 creates.
   - `network_domain` added to Asset (+ migration 1732700000000) for the
     survey's `terulet` ("Client Operation" vs "Operation Technology") — a
     VLAN/segmentation classification, deliberately not a location field.

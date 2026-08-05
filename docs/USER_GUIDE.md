@@ -847,8 +847,9 @@ tool's export from walking the site — is handed to the app and compared agains
 what it already holds.
 
 Choose one or more survey exports (several files are merged; if the same entry
-appears twice, the last file wins). As with the ITSM export, the file is read in
-your browser and only its rows are sent.
+appears twice, the last file wins). The tool writes some exports with a `.bak`
+extension — same JSON inside — and those are selectable too. As with the ITSM
+export, the file is read in your browser and only its rows are sent.
 
 **What would this change?** writes nothing. It tells you:
 
@@ -872,9 +873,43 @@ names and the map lacks** before applying. They appear as default-size rectangle
 below whatever is already drawn on that floor — drag them into place on the
 [Floor Map](#floor-map), then use **Arrange N unplaced** per room.
 
-An HWA number with no asset is not a naming problem: either the number was read
-wrong off the device, or the record is in ITSM but not yet in the app — the ITSM
-Reconcile page creates the missing ones.
+An identifier with no asset is not a naming problem, and it is two different
+problems: a **number** was either misread off the device or is in ITSM but not yet
+in the app — the ITSM Reconcile page creates those from the export — while a
+**name** (`MMHIPC…`, `MMH PRINTER …`) is an older device nothing has on record and
+needs identifying first. The row says which it is; neither has a box, because
+neither is a spelling to correct.
+
+### What the import will and will not overwrite
+
+The survey fills in what was written down and **does not erase what was not**. A
+blank person, room, note or network area in the survey leaves whatever the app
+already has — most often something the ITSM export supplied. Where the survey does
+give a value it wins: it is what somebody saw in the room, and a disagreement with
+ITSM becomes a task rather than being hidden.
+
+That matters most for people. On the current survey, 310 of the identified rows
+name nobody — the walkers were recording rooms, not asking who sits at each desk —
+and 233 of those devices have a person from ITSM. Those are left alone.
+
+A few more things worth knowing before you press Apply:
+
+- The preview says **how** each device was identified: by HWA number, by the number
+  with its "HWA" prefix supplied, or by the older name on its asset tag. Older
+  devices carry names like `MMHIPC7402` or `MMH PRINTER 1033`, and those still
+  resolve.
+- Serials that are not serials (`...`, `N/A 2`) are read as **no serial** and
+  counted. The devices behind them come back as "read a number off it" — there is
+  nothing else honest to do with a number nobody could reach.
+- **The same device recorded twice** is listed before you apply. Applying is safe —
+  the later row wins — but if a pair is really two devices, one is about to lose its
+  own record.
+- A **person correction that stays in the list** after you save it is telling you
+  something: the corrected name is not in the export either. Either it is spelled
+  differently there, or that person has no device in this export at all — in which
+  case free text is the right answer. Technical accounts (`MMHGEN…`) belong in that
+  second group; leave them empty, since a responsible person belongs there rather
+  than a generic account.
 
 **Apply — write the placements** is the only step that writes. Afterwards,
 re-derive the [task list](#normalisation-tasks) so the newly created devices turn

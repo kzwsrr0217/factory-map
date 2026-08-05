@@ -200,7 +200,7 @@ reported either way. Doing it the other way round meant 612 of 735 rows were dro
 building check, so a run reported 6 identifier problems out of the 33 that were there — and
 only after every building had been fixed would the rest have appeared.
 
-### Phase 2 — the hierarchy *(next, and the long part)*
+### Phase 2 — the hierarchy *(done on dev; the room positioning is the long part)*
 1. Rename `Werk1` → `Werk 1`; create `Werk 2`; create `Ground floor` (0) and `First floor`
    (1) under both.
 2. Enter the four corrections from §3 on the **Inventory import** page. Rehearsed: place
@@ -211,7 +211,7 @@ only after every building had been fixed would the rest have appeared.
 4. Drag the rectangles into place, floor by floor. This cannot be automated: only a person
    knows where a room is. It is the bulk of the remaining effort.
 
-### Phase 3 — import
+### Phase 3 — import *(dev: previewed, not yet applied)*
 Preview on `/inventory-import`, fix what is flagged inline (26 unknown persons, whatever
 rooms remain), re-preview until the list stops shrinking, then apply. On the current data
 expect roughly 420 updates and 280 new local-only assets.
@@ -245,6 +245,35 @@ the time goes.
 ---
 
 ## 8. Runbook — dev first, then the VM
+
+### Where this stands on dev (5 Aug 2026)
+
+| Step | State |
+|---|---|
+| 1. Backup | **done** — `factorymap-20260805-140707.bak`, 23.1 MB |
+| 2. Convert the CSV-only export | **done** — `eszkoz/eszkozok_20260729_MMHBABA.converted.json`, 123 rows |
+| 3. Hierarchy | **done** — `Werk 1` / `Werk 2`, each with a ground floor (0) and a first floor (1) |
+| 4. The four corrections | **done** — place failures are at 0 |
+| 5. Preview | **done** — 735 entries, 0 place failures, 431 updates / 271 creates |
+| 6. Person names | **mostly done** — 19 of 22 corrections resolve; see below |
+| 7. Apply | **not yet** — this is the next action |
+| 8–9. Re-derive, position the rooms | not yet |
+
+Three person corrections are stored and still find nobody, which is a real state rather
+than a mistake: `ALEX` → `Hettman, Alex` where the export writes `Hettmann` with two n's,
+and `amrein kata` / `CSÁSZÁR DÁNIEL` whose people have no device in this export at all.
+The export's person list only holds people something in it is assigned to. `DIAK` and the
+`MMHGEN…` technical accounts are deliberately left empty — a responsible person belongs
+there, not a generic account, and free text loses nothing.
+
+The rooms are being taken as the survey spells them, and tidied later when they are
+positioned on the map. The one cost of that: renaming a room in the app needs a stored
+correction too, or the next import stops matching it and creates a second one under the
+old name. Case and accents do not count as a rename — folding covers those. (And it stops
+mattering entirely once a survey is generated from the app's own room list rather than
+typed as free text.)
+
+
 
 Do the whole thing on the development database first. Not as a rehearsal for its own sake:
 step 4 creates 127 rooms and 36 zones, and if the corrections are wrong they arrive with the

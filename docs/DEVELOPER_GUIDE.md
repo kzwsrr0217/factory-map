@@ -982,6 +982,66 @@ room as the name and the zone in the Zone/Group field) — this script never
 invents hierarchy, it only matches by name (diacritic/case/
 whitespace-insensitive) and reports unmatched pairs as `zone / room`.
 
+### What the identifier column actually holds
+
+Measured on the real 735-device survey, the `hwa` column carries **three different kinds of
+value**, and every one of them has to resolve:
+
+| In the column | Rows | Found via |
+|---|---|---|
+| `HWA26255` | 307 | `hardware_asset_id` |
+| `26255` — the same number, prefix left off | 95 | `hardware_asset_id`, once the prefix is supplied |
+| `MMHIPC7402`, `MMH_PRINTER_1039`, `MMH LABEL 1008`, `MMHWSBDE7022` | 52 | **`asset_tag`**, then `display_name` |
+
+HWA is the current convention; the names belong to older devices (industrial PCs, printers,
+label printers, workstations) and are **not errors**. In the app they live in `asset_tag` —
+30 of the 52 are there and none at all in the display name. The same name is written with
+underscores, with spaces and run together in one export, so `nameKey()` drops separators
+entirely. `identifierKind()` tells a number from a name; `identifierKeys()` returns what to
+try, in order of how much it claims. Reading the column as one thing reported 122 devices
+the app already held as unknown.
+
+`plan.matched_by` reports which rule found each row, so a later export that stops needing
+`hwa_prefixed` shows it.
+
+### Blanks are not values
+
+**A blank column in the survey means "not written down".** Writing the blanks through as
+nulls is a different claim, and an expensive one: 310 of the 455 identified rows carry no
+person, and 233 of those are devices whose person came from the ITSM export. Applying that
+would have wiped 233 assignments and then raised 233 "differs from ITSM" tasks to put them
+back. The walkers were recording rooms, not asking who sits where.
+
+So the survey fills in what it recorded and does not erase what it did not: person, notes,
+network area and the room are only written when the survey has them. A row naming no room
+leaves an existing placement alone rather than knocking the device back out to the floor.
+Where the survey **does** give a value it wins — it is the physical truth, and the
+disagreement with ITSM is a task rather than something to hide.
+
+Two more rules from the same data:
+
+- **Placeholder serials.** `...`, `...2`, `N/A`, `N/A 2` … `N/A8` — 14 of them. Devices with
+  no HWA are matched BY serial, so these would have created junk assets and merged unrelated
+  ones. `usableSerial()` reads them as no serial and the plan counts them, along with
+  `create_without_serial` — the devices that will come back as "read a number off it".
+- **The row mode is inferred when the column is missing.** A CSV export has no
+  `azonosito_mod` at all, so every row fell to the "not in ITSM" branch: 123 creates, 65 of
+  them duplicates of devices already present. A row carrying an identifier is now read as an
+  ITSM row; an explicit `EGYEB` still wins.
+
+### Suggestions never cross a digit
+
+`bestSuggestion()` proposes a near-miss for an unresolved name, and `differsOnlyInDigits()`
+stops it proposing one whose only difference is numeric. `mmhgen0049` and `mmhgen0009` are
+one character apart — 0.9 by edit distance — and are two different technical accounts. Same
+for `HWA17583` against `HWA17587`, and `18. állomás` against `19. állomás`. A letter can be
+misspelled; a digit is a value.
+
+A person correction can be **stored, applied and still find nobody**: the export's person
+list only holds people something in it is assigned to. `unmatched_persons[].corrected_to`
+carries where the name currently reads, so the page can tell that state apart from "not
+corrected yet" — they used to look identical, which reads as a failed save.
+
 Fix typos/nicknames in the **`name_corrections` table** — "when the survey says
 this, it means that", one row per folded name per column, upserted on
 `(scope, from_folded)` so a second rule for one name can't make the import
