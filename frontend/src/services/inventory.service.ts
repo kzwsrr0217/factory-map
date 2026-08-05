@@ -51,7 +51,17 @@ export interface SurveyImportPlan {
     rows: number;
     suggestion: string | null;
   }>;
-  unmatched_persons: Array<{ name: string; rows: number; suggestion: string | null }>;
+  unmatched_persons: Array<{
+    name: string;
+    rows: number;
+    suggestion: string | null;
+    /**
+     * Where a stored correction already sends this name. Its presence means the fix was
+     * saved and the corrected name is still not in the ITSM export — a different situation
+     * from "not corrected yet", and it used to look identical.
+     */
+    corrected_to: string | null;
+  }>;
   /**
    * Identifiers that resolved to nothing. `kind` separates "an HWA number we do not have"
    * from "a device name we have never seen" — different problems, different next step.

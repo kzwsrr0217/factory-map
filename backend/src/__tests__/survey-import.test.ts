@@ -254,7 +254,9 @@ describe('POST /api/inventory/survey/import', () => {
       apply: true,
     });
     expect(res.body.data.unmatched_persons).toEqual([
-      { name: 'Nobody Atall', rows: 2, suggestion: null },
+      // `corrected_to` is null: nothing is stored for this name, which is a different state
+      // from "stored and still not found".
+      { name: 'Nobody Atall', rows: 2, suggestion: null, corrected_to: null },
     ]);
     // Free text beats nothing: it is the best information anyone has about who uses it.
     const placed = await AppDataSource.getRepository(Asset)
@@ -702,5 +704,58 @@ describe('POST /api/inventory/survey/import — what the survey did not record',
       .findOne({ where: { hardware_asset_id: `${PREFIX}-KEEP4` } });
     expect(after!.notes).toBe('typed in the app by a person');
     expect(after!.network_domain).toBe('Operation Technology');
+  });
+});
+
+describe('POST /api/inventory/survey/import — a correction that is saved and still misses', () => {
+  it('says where the name now reads, so a saved fix is not mistaken for an unsaved one', async () => {
+    // The export's person list only holds people who have a device IN that export. A
+    // correction can be stored, applied, and still find nobody — and without saying so the
+    // row looks exactly like one nobody has touched. Three of the real survey's 22 person
+    // corrections are in this state.
+    await request(app).put('/api/inventory/corrections').set(auth()).send({
+      scope: 'persons', from_value: 'ALEX', to_value: 'Hettman, Alex',
+    });
+
+    const res = await importSurvey({
+      rows: [row({ azonosito_mod: 'HWA', hwa: `${PREFIX}-P1`, szemely: 'ALEX' })],
+      apply: false,
+    });
+
+    expect(res.body.data.unmatched_persons).toEqual([
+      { name: 'ALEX', rows: 1, suggestion: null, corrected_to: 'Hettman, Alex' },
+    ]);
+  });
+
+  it('reports nothing under corrected_to when no correction is stored', async () => {
+    const res = await importSurvey({
+      rows: [row({ azonosito_mod: 'HWA', hwa: `${PREFIX}-P1`, szemely: 'Nobody Known' })],
+      apply: false,
+    });
+    expect(res.body.data.unmatched_persons[0]).toMatchObject({
+      name: 'Nobody Known',
+      corrected_to: null,
+    });
+  });
+
+  it('does not propose a name that differs from this one only in its digits', async () => {
+    // `mmhgen0049` and `mmhgen0009` are one character apart, which edit distance calls a 0.9
+    // match — and they are two different technical accounts. A digit is a value, not a
+    // spelling. The page offered exactly this swap on the real survey.
+    await AppDataSource.getRepository(ItsmHardwareSnapshot).insert([{
+      itsm_guid: `${PREFIX}-gen`,
+      itsm_id: `${PREFIX}-GEN`,
+      display_name: `${PREFIX}-gen`,
+      assigned_person_name: 'mmhgen0009',
+    } as ItsmHardwareSnapshot]);
+
+    const res = await importSurvey({
+      rows: [row({ azonosito_mod: 'HWA', hwa: `${PREFIX}-P1`, szemely: 'MMHGEN0049' })],
+      apply: false,
+    });
+    const row0 = res.body.data.unmatched_persons.find((p: any) => p.name === 'MMHGEN0049');
+    expect(row0.suggestion).toBeNull();
+
+    await AppDataSource.getRepository(ItsmHardwareSnapshot).delete({ itsm_id: `${PREFIX}-GEN` });
   });
 });

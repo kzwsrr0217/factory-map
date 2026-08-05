@@ -248,6 +248,18 @@ function editDistance(a: string, b: string): number {
  */
 const SUGGESTION_THRESHOLD = 0.72;
 
+/**
+ * Two names that differ only in their digits are not spellings of one thing.
+ *
+ * `mmhgen0049` and `mmhgen0009` are one character apart, which edit distance calls a 0.9
+ * match — and they are two different technical accounts. The same goes for `18. állomás` and
+ * `19. állomás`, or any HWA-style number. Letters can be misspelled; a digit is a value.
+ */
+function differsOnlyInDigits(a: string, b: string): boolean {
+  const skeleton = (v: string) => v.replace(/\d+/g, '#');
+  return skeleton(a) === skeleton(b) && a !== b;
+}
+
 function bestSuggestion(target: string, candidates: string[]): string | null {
   const t = foldName(target);
   if (!t) return null;
@@ -256,6 +268,7 @@ function bestSuggestion(target: string, candidates: string[]): string | null {
   for (const candidate of candidates) {
     const c = foldName(candidate);
     if (!c) continue;
+    if (differsOnlyInDigits(t, c)) continue;
     const score = 1 - editDistance(t, c) / Math.max(t.length, c.length);
     if (score > bestScore) { bestScore = score; best = candidate; }
   }
@@ -463,7 +476,12 @@ interface InternalPlan {
   }>;
   /** Keyed by floor + folded zone + folded room. */
   missingWorkAreas: Map<string, MissingWorkArea>;
-  unmatchedPerson: Map<string, number>;
+  /**
+   * Keyed by the name as the survey wrote it, with a row count and — when a stored correction
+   * already points somewhere — where it points. A correction whose target is not in the
+   * export leaves the row here, and without saying so it looks exactly like an unsaved fix.
+   */
+  unmatchedPerson: Map<string, { rows: number; correctedTo: string | null }>;
   unmatchedHwa: Array<{ hwa: string; note: string; kind: IdentifierKind }>;
   /** Rows that will land on a floor but in no room. */
   noRoom: number;
@@ -510,7 +528,17 @@ export interface SurveyImportPlan {
     rows: number;
     suggestion: string | null;
   }>;
-  unmatched_persons: Array<{ name: string; rows: number; suggestion: string | null }>;
+  unmatched_persons: Array<{
+    name: string;
+    rows: number;
+    suggestion: string | null;
+    /**
+     * Where a stored correction already sends this name, when that is not the name itself.
+     * Its presence means "corrected, and the corrected name is still not in the export" —
+     * either the target is misspelled, or that person has no device in the export at all.
+     */
+    corrected_to: string | null;
+  }>;
   /**
    * Identifiers that resolved to nothing. `kind` separates "an HWA number we do not have"
    * from "a device name we have never seen" — different problems, different next step.
@@ -710,7 +738,15 @@ async function planInternal(rows: SurveyRow[], corrections: Corrections): Promis
     const person = matchPerson(personIndex, row.szemely, corrections);
     if ((row.szemely ?? '').trim() && !person.matched) {
       const name = row.szemely!.trim();
-      plan.unmatchedPerson.set(name, (plan.unmatchedPerson.get(name) ?? 0) + 1);
+      const seen = plan.unmatchedPerson.get(name);
+      if (seen) seen.rows++;
+      else {
+        // `person.fullName` is the corrected value when a correction applied, otherwise the
+        // raw name — so a difference is exactly "a correction is stored and still misses".
+        const corrected = person.fullName && fold(person.fullName) !== fold(name)
+          ? person.fullName : null;
+        plan.unmatchedPerson.set(name, { rows: 1, correctedTo: corrected });
+      }
     }
 
     /**
@@ -993,8 +1029,15 @@ export async function planSurveyImport(input: SurveyImportInput): Promise<Survey
         suggestion: bestSuggestion(m.room_name, areasByFloor.get(m.floor_id) ?? []),
       })),
     unmatched_persons: [...internal.unmatchedPerson.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .map(([name, rows]) => ({ name, rows, suggestion: bestSuggestion(name, personNames) })),
+      .sort((a, b) => b[1].rows - a[1].rows)
+      .map(([name, { rows, correctedTo }]) => ({
+        name,
+        rows,
+        // Suggest against whichever name is currently being looked up, so a stored
+        // correction that is one letter out gets the right proposal.
+        suggestion: bestSuggestion(correctedTo ?? name, personNames),
+        corrected_to: correctedTo,
+      })),
     unmatched_hwa: internal.unmatchedHwa,
     matched_by: {
       hwa: internal.matchedBy.hwa,

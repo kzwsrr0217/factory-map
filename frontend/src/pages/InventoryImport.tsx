@@ -431,6 +431,13 @@ const InventoryImport: React.FC = () => {
                 Kept as free text either way, so nothing is lost — but a name matched to ITSM also
                 carries the person id, which is what makes “whose device is this” answerable.
               </p>
+              <p className={styles.sectionHint}>
+                A row that stays after you save a fix is saying something: the corrected name is
+                not in the export either. Usually one of two things — the target is spelled
+                differently there, or that person has no device in this export at all, in which
+                case there is nothing to match and free text is the right answer. Technical
+                accounts (MMHGEN…) belong in the second group: leave them empty.
+              </p>
               <ul className={styles.fixList}>
                 {plan.unmatched_persons.map((p) => (
                   <FixRow
@@ -439,6 +446,11 @@ const InventoryImport: React.FC = () => {
                     from={p.name}
                     rows={p.rows}
                     suggestion={p.suggestion}
+                    // Says the fix landed and still missed, so a saved correction is not
+                    // mistaken for an unsaved one.
+                    context={p.corrected_to
+                      ? `already reads as “${p.corrected_to}”, which the export does not have`
+                      : undefined}
                     onSaved={afterFix}
                   />
                 ))}
