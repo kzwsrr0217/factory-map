@@ -17,7 +17,7 @@
  *   - Only `label-device` can be closed on a person's word. Nothing in any export records
  *     that a sticker was applied, so for every other kind the data is the authority.
  */
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, RefreshCw, XCircle, User, Clock } from 'lucide-react';
@@ -65,6 +65,12 @@ const TaskRow: React.FC<{
   const [dismissing, setDismissing] = useState(false);
   const [reason, setReason] = useState(task.note ?? '');
   const [assignee, setAssignee] = useState(task.assigned_to ?? '');
+  /**
+   * What the server last accepted for this field. Compared against instead of the prop,
+   * which lags behind by a refetch — so pressing Enter and then clicking away sent the
+   * same name twice.
+   */
+  const savedAssignee = useRef(task.assigned_to ?? '');
   const toast = useToast();
 
   const save = async (changes: Parameters<typeof taskService.updateTask>[1]) => {
@@ -82,6 +88,13 @@ const TaskRow: React.FC<{
       setBusy(false);
       setDismissing(false);
     }
+  };
+
+  /** Sends the assignee once, and only when it actually changed. */
+  const saveAssignee = (value: string) => {
+    if (value === savedAssignee.current) return;
+    savedAssignee.current = value;
+    save({ assigned_to: value });
   };
 
   const age = ageInDays(task.first_seen_at);
@@ -105,10 +118,26 @@ const TaskRow: React.FC<{
       <div className={styles.taskActions}>
         <label className={styles.assign}>
           <User size={13} />
+          {/* Saves on blur AND on Enter. Blur alone was a trap: typing a name and pressing
+              Enter did nothing, and the name was gone on the next refresh — pressing
+              Enter in a single field is the one gesture everybody expects to commit it.
+              Escape puts back what was stored. */}
           <input
             value={assignee}
             onChange={(e) => setAssignee(e.target.value)}
-            onBlur={() => { if ((task.assigned_to ?? '') !== assignee) save({ assigned_to: assignee }); }}
+            onBlur={() => saveAssignee(assignee)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                // Saved directly rather than by blurring the field: going through blur
+                // meant nothing happened unless the field held focus, which is true of a
+                // person typing but leaves the behaviour resting on where the caret is.
+                saveAssignee(assignee);
+                e.currentTarget.blur();
+              } else if (e.key === 'Escape') {
+                setAssignee(savedAssignee.current);
+                e.currentTarget.blur();
+              }
+            }}
             placeholder="nobody yet"
             aria-label="Assign this task to someone"
           />

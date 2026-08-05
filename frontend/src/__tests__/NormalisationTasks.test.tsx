@@ -122,6 +122,42 @@ describe('NormalisationTasks', () => {
     expect(screen.queryByText('Saved')).not.toBeInTheDocument();
   });
 
+  it('saves an assignee on Enter, not only when the field loses focus', async () => {
+    // Blur alone was a trap: typing a name and pressing Enter did nothing, and the name
+    // was gone on the next refresh. Found by using the page, not by reading it.
+    seed();
+    let sent: unknown;
+    server.use(rest.patch(`${API}/tasks/task-1`, async (req, res, ctx) => {
+      sent = await req.json();
+      return res(ctx.json({ success: true, data: { ...TASK, assigned_to: 'bela' } }));
+    }));
+
+    renderPage();
+    const input = await screen.findByLabelText(/Assign this task/);
+    fireEvent.change(input, { target: { value: 'bela' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    await waitFor(() => expect(sent).toEqual({ assigned_to: 'bela' }));
+  });
+
+  it('puts back the stored assignee on Escape', async () => {
+    seed([{ ...TASK, assigned_to: 'anna' }]);
+    let patched = false;
+    server.use(rest.patch(`${API}/tasks/task-1`, (_req, res, ctx) => {
+      patched = true;
+      return res(ctx.json({ success: true, data: TASK }));
+    }));
+
+    renderPage();
+    const input = await screen.findByLabelText(/Assign this task/) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: 'someone else' } });
+    fireEvent.keyDown(input, { key: 'Escape' });
+
+    expect(input.value).toBe('anna');
+    // Escape is "never mind", so it must not send anything.
+    await waitFor(() => expect(patched).toBe(false));
+  });
+
   it('says so when nothing is outstanding', async () => {
     // The state the whole exercise aims at, and the one claim the page must not make
     // loosely.
