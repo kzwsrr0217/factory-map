@@ -1,0 +1,189 @@
+/* Worksheet — see TaskWorksheet.tsx.
+   Two audiences: a screen where you pick what to print, and paper somebody carries around a
+   factory. The print rules are the point of the file — a room's rows must not break across
+   pages, and the controls must not appear on the sheet. */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-lg);
+}
+
+.controls {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--spacing-lg);
+  flex-wrap: wrap;
+}
+
+.controls h1 { margin: 0 0 var(--spacing-xs); }
+
+.subtitle {
+  max-width: 70ch;
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.controlRow {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--spacing-sm);
+  flex-wrap: wrap;
+}
+
+.controlRow label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+.controlRow select {
+  padding: 6px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  font-family: inherit;
+  font-size: var(--font-size-sm);
+}
+
+/* ── The sheet ─────────────────────────────────────────────────────── */
+
+.sheet {
+  padding: var(--spacing-lg);
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.sheetHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--spacing-md);
+  flex-wrap: wrap;
+  padding-bottom: var(--spacing-sm);
+  border-bottom: 2px solid var(--color-border);
+}
+
+.sheetHead h2 { margin: 0; font-size: var(--font-size-lg); }
+
+.taken {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.warn,
+.note,
+.empty {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  margin: var(--spacing-md) 0 0;
+  font-size: var(--font-size-sm);
+}
+
+.warn { color: var(--color-warning); }
+.note,
+.empty { color: var(--color-text-secondary); }
+
+.group { margin-top: var(--spacing-lg); }
+
+.group h3 {
+  display: flex;
+  align-items: baseline;
+  gap: var(--spacing-sm);
+  margin: 0 0 var(--spacing-xs);
+  padding-bottom: 2px;
+  border-bottom: 1px solid var(--color-border);
+  font-size: var(--font-size-md);
+}
+
+.room { font-weight: 600; }
+
+.where {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: 400;
+}
+
+.count {
+  margin-left: auto;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: 400;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-size-sm);
+}
+
+.table th {
+  text-align: left;
+  padding: 4px 6px;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.table td {
+  padding: 5px 6px;
+  border-top: 1px solid var(--color-border);
+  vertical-align: top;
+}
+
+.mono { font-family: var(--font-mono, monospace); }
+
+.what { color: var(--color-text-secondary); }
+
+.tick { width: 1.6rem; }
+
+/* Drawn rather than an <input>: this box is for a pen, and a real checkbox on paper looks
+   like something the app already knows the answer to. */
+.box {
+  display: inline-block;
+  width: 0.9rem;
+  height: 0.9rem;
+  border: 1.5px solid var(--color-text-secondary);
+  border-radius: 2px;
+}
+
+/* ── Paper ─────────────────────────────────────────────────────────── */
+
+@media print {
+  .controls { display: none !important; }
+
+  .sheet {
+    padding: 0;
+    border: none;
+    border-radius: 0;
+  }
+
+  /* A room is a place you stand in — its rows belong on one page. */
+  .group {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .group h3 {
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+
+  .table { font-size: 10pt; }
+
+  /* Links are for the screen; on paper the underline just adds noise. */
+  .table a {
+    color: inherit;
+    text-decoration: none;
+  }
+}

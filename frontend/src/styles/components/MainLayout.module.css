@@ -92,3 +92,30 @@
     padding: var(--spacing-md);
   }
 }
+/* Printing.
+   The app shell is a fixed-height flex column with `overflow: hidden`, which is right on a
+   screen and wrong on paper: it clips the printout to whatever fits one page. The walking
+   list (see NormalisationTasks / TaskWorksheet) is the first thing meant to be printed, and
+   it is several pages long.
+
+   The chrome goes too. Nobody needs the navigation on paper, and a banner about a network
+   error in the middle of a printed worklist is noise. */
+@media print {
+  .layout,
+  .container {
+    height: auto;
+    overflow: visible;
+  }
+
+  .main {
+    overflow: visible;
+    padding: 0;
+    background: none;
+  }
+
+  .networkErrorBanner,
+  .passwordExpiredBanner,
+  .overlay {
+    display: none !important;
+  }
+}

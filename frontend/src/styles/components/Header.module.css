@@ -196,3 +196,8 @@
   .searchButton { min-width: 44px; padding: 0.375rem; }
   .logoText { display: none; }
 }
+
+/* Not on paper — see the print block in MainLayout.module.css. */
+@media print {
+  .header { display: none !important; }
+}

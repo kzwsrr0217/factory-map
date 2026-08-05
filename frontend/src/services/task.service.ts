@@ -49,6 +49,42 @@ export interface TaskSummary {
   consistent: boolean;
 }
 
+/**
+ * One task with the device and the place it is about — what the printable walking sheet and
+ * the CSV both need, and what the task rows themselves do not carry.
+ */
+export interface WorksheetRow {
+  task_id: string;
+  kind: NormalisationTaskKind;
+  state: NormalisationTaskState;
+  summary: string;
+  evidence: string | null;
+  assigned_to: string | null;
+  itsm_id: string | null;
+  age_days: number;
+  machine_verifiable: boolean;
+  asset_id: string | null;
+  device: string | null;
+  asset_type: string | null;
+  serial_number: string | null;
+  hardware_asset_id: string | null;
+  person: string | null;
+  building: string | null;
+  floor: string | null;
+  zone: string | null;
+  room: string | null;
+}
+
+export interface Worksheet {
+  rows: WorksheetRow[];
+  total: number;
+  /** The server capped the list. Shown, never swallowed. */
+  truncated: boolean;
+  /** Tasks whose device has no room — they cannot be walked to. */
+  without_place: number;
+  generated_at: string;
+}
+
 export interface TaskQuery {
   state?: NormalisationTaskState;
   kind?: NormalisationTaskKind;
@@ -85,6 +121,25 @@ export const taskService = {
   ): Promise<{ task: NormalisationTask; note?: string }> => {
     const response = await api.patch(`/tasks/${id}`, changes);
     return { task: response.data.data as NormalisationTask, note: response.data.meta?.note };
+  },
+
+  /**
+   * The whole filtered list with device and place, unpaged — for the walking sheet and the
+   * CSV. Unpaged on purpose: a worksheet that stops at page one is how a floor gets skipped.
+   */
+  getWorksheet: async (query: { state?: NormalisationTaskState; kind?: NormalisationTaskKind; assigned_to?: string } = {}): Promise<Worksheet> => {
+    const params = new URLSearchParams();
+    if (query.state) params.set('state', query.state);
+    if (query.kind) params.set('kind', query.kind);
+    if (query.assigned_to) params.set('assigned_to', query.assigned_to);
+    const response = await api.get(`/tasks/worksheet?${params.toString()}`);
+    return {
+      rows: (response.data.data ?? []) as WorksheetRow[],
+      total: response.data.meta?.total ?? 0,
+      truncated: !!response.data.meta?.truncated,
+      without_place: response.data.meta?.without_place ?? 0,
+      generated_at: response.data.meta?.generated_at ?? new Date().toISOString(),
+    };
   },
 
   /** Re-derives the list. Run after importing a new ITSM export. */

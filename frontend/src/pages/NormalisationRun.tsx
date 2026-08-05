@@ -229,6 +229,11 @@ const NormalisationRun: React.FC = () => {
                 <Button variant="outline" size="sm" onClick={rederive} loading={deriving} disabled={deriving}>
                   <RefreshCw size={14} /> Re-derive from the data
                 </Button>
+                {s.tasks.open > 0 && (
+                  <Link className={styles.link} to="/tasks/worksheet">
+                    Print a worksheet for the walk <ArrowRight size={14} />
+                  </Link>
+                )}
               </Step>
             </ol>
           </Card>

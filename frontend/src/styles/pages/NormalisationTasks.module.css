@@ -205,3 +205,22 @@ a.taskSummary:hover { color: var(--color-primary); text-decoration: underline; }
   color: var(--color-text-secondary);
   font-size: var(--font-size-sm);
 }
+
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  flex-wrap: wrap;
+}
+
+.worksheetLink {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  white-space: nowrap;
+  color: var(--color-primary);
+  font-size: var(--font-size-sm);
+  text-decoration: none;
+}
+
+.worksheetLink:hover { text-decoration: underline; }

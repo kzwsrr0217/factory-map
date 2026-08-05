@@ -25,6 +25,7 @@
  *   /infrastructure→ Network infrastructure (IDF/MDF rooms, racks, patch panels)
  *   /inventory-import → The physical survey, previewed then applied
  *   /normalisation → Where the current reconciliation round has got to
+ *   /tasks/worksheet → The task list grouped by room, to print or export
  */
 import React, { Suspense, lazy } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -50,6 +51,7 @@ import SurveyProgress from './pages/SurveyProgress';
 import NormalisationTasks from './pages/NormalisationTasks';
 import InventoryImport from './pages/InventoryImport';
 import NormalisationRun from './pages/NormalisationRun';
+import TaskWorksheet from './pages/TaskWorksheet';
 import OrphanedAssets from './pages/OrphanedAssets';
 import Alerts from './pages/Alerts';
 import NetworkGraph from './pages/NetworkGraph';
@@ -100,6 +102,7 @@ function App() {
                           <Route path="/audit" element={<AuditLog />} />
                           <Route path="/progress" element={<SurveyProgress />} />
                           <Route path="/tasks" element={<NormalisationTasks />} />
+                          <Route path="/tasks/worksheet" element={<TaskWorksheet />} />
                           <Route path="/unplaced" element={<UnplacedAssets />} />
                           <Route path="/orphaned" element={<OrphanedAssets />} />
                           <Route path="/alerts" element={<Alerts />} />

@@ -55,6 +55,31 @@
  *           `by_kind`, `by_state`, `open_unassigned`, and `consistent` — true when
  *           nothing is outstanding, which is the definition of done for the inventory.
  *
+ * /tasks/worksheet:
+ *   get:
+ *     tags: [Tasks]
+ *     summary: The whole filtered list, with each task's device and place
+ *     description: >
+ *       Unpaged, for the printable walking sheet and the CSV — a worksheet that stops at
+ *       page one is how a floor gets skipped. Sorted in walking order (building, floor,
+ *       zone, room). Capped at 5000 rows; `meta.truncated` says when the cap bit, and
+ *       `meta.without_place` counts the tasks whose device has no room to walk to.
+ *     parameters:
+ *       - in: query
+ *         name: state
+ *         schema: { type: string, enum: [open, done, dismissed] }
+ *       - in: query
+ *         name: kind
+ *         schema: { type: string }
+ *       - in: query
+ *         name: assigned_to
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         description: Rows plus `meta.total`, `meta.truncated`, `meta.generated_at`
+ *       400:
+ *         description: Unknown state
+ *
  * /tasks/{id}:
  *   patch:
  *     tags: [Tasks]
@@ -97,6 +122,7 @@
 import { Router } from 'express';
 import {
   listTasks,
+  taskWorksheet,
   taskSummary,
   updateTask,
   runTaskGeneration,
@@ -109,6 +135,7 @@ const router = Router();
 
 // Before '/:id' so the literal path wins over the parameter.
 router.get('/summary', taskSummary);
+router.get('/worksheet', taskWorksheet);
 router.get('/', listTasks);
 router.patch('/:id', requireOperator, captureAuditBefore(NormalisationTask), auditLog('normalisation_task'), updateTask);
 router.post('/generate', requireOperator, runTaskGeneration);

@@ -20,7 +20,7 @@
 import React, { useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { CheckCircle2, RefreshCw, XCircle, User, Clock } from 'lucide-react';
+import { CheckCircle2, Printer, RefreshCw, XCircle, User, Clock } from 'lucide-react';
 import Card from '../components/common/Card';
 import Button from '../components/common/Button';
 import Badge from '../components/common/Badge';
@@ -245,9 +245,16 @@ const NormalisationTasks: React.FC = () => {
             Re-derive after every new export; the list closes what the data proves done by itself.
           </p>
         </div>
-        <Button variant="primary" onClick={regenerate} loading={generating} disabled={generating}>
-          <RefreshCw size={15} /> Re-derive from the data
-        </Button>
+        <div className={styles.headerActions}>
+          {/* The list is for deciding; the worksheet is for carrying. Linked rather than
+              built in, because printing wants a page with no controls on it. */}
+          <Link to="/tasks/worksheet" className={styles.worksheetLink}>
+            <Printer size={15} /> Worksheet to print or export
+          </Link>
+          <Button variant="primary" onClick={regenerate} loading={generating} disabled={generating}>
+            <RefreshCw size={15} /> Re-derive from the data
+          </Button>
+        </div>
       </div>
 
       {summary.data && (

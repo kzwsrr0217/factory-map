@@ -36,6 +36,7 @@ import {
   NormalisationTask,
   NormalisationTaskKind,
 } from '../../entities/NormalisationTask.entity';
+import { chunkForEntity, chunked, MSSQL_PARAM_BUDGET } from '../../utils/mssqlBatch';
 import { findUnlinkedMmhAssets } from './ReconcileService';
 import {
   buildSnapshotIndex,
@@ -390,7 +391,13 @@ export async function generateTasks(
     }
   }
 
-  if (apply && toSave.length > 0) await repo.save(toSave);
+  // Chunked for MSSQL's 2100-parameter cap: a task row spends a parameter per column, so an
+  // unchunked save fails somewhere above 150 rows. That is not a hypothetical size — the
+  // FIRST generation over a real estate derives far more than that, and it surfaced as a
+  // driver error the moment the test database held a few hundred assets.
+  if (apply && toSave.length > 0) {
+    await repo.save(toSave, { chunk: chunkForEntity(NormalisationTask) });
+  }
 
   if (apply) {
     // `last_seen_at` means "the last run that still found this necessary" (see the entity),
@@ -400,7 +407,8 @@ export async function generateTasks(
     const stillRequired = [...requiredByKey.keys()]
       .map((k) => existingByKey.get(k)?.id)
       .filter((id): boolean => !!id) as string[];
-    for (const chunk of chunkIds(stillRequired)) {
+    // One parameter per id here, so the budget IS the row count — see utils/mssqlBatch.ts.
+    for (const chunk of chunked(stillRequired, MSSQL_PARAM_BUDGET)) {
       await repo.createQueryBuilder()
         .update(NormalisationTask)
         .set({ last_seen_at: new Date() })
@@ -410,13 +418,6 @@ export async function generateTasks(
     await recordRun(by, result);
   }
   return result;
-}
-
-/** MSSQL caps a statement at 2100 parameters; ids go one per parameter. */
-function chunkIds(ids: string[], size = 1000): string[][] {
-  const chunks: string[][] = [];
-  for (let i = 0; i < ids.length; i += size) chunks.push(ids.slice(i, i + size));
-  return chunks;
 }
 
 /**

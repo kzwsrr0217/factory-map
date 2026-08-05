@@ -241,3 +241,38 @@ describe('taskGenerator — dry run', () => {
     expect(await tasksFor(asset.id)).toHaveLength(0);
   });
 });
+
+describe('taskGenerator — at the size of a real estate', () => {
+  it('writes a few hundred new tasks in one run', async () => {
+    // A task row spends one parameter per column, and MSSQL rejects a statement carrying
+    // more than 2100 — so an unchunked save fails somewhere above 150 rows. The FIRST
+    // generation over a real site derives far more than that, which makes this the one
+    // size that matters and the one nothing smaller would catch. It showed up as a driver
+    // error only once the shared test database happened to hold a few hundred assets.
+    const N = 200;
+    const repo = AppDataSource.getRepository(Asset);
+    const many = Array.from({ length: N }, (_, i) => repo.create({
+      display_name: `${PREFIX}_bulk_${i}`,
+      status: 'active',
+      // Nothing to match on, so each derives exactly one task and no ITSM lookup can
+      // rescue it — the cheapest way to a large, predictable batch.
+      serial_number: null,
+      mac_address: null,
+      asset_tag: null,
+      hardware_asset_id: null,
+    }));
+    const saved = await repo.save(many, { chunk: 40 });
+    for (const a of saved) createdAssetIds.push(a.id);
+
+    const result = await generateTasks({ apply: true });
+    const mine = result.created.filter((t) => t.subject_key.length > 0
+      && saved.some((a) => a.id === t.subject_key));
+    expect(mine).toHaveLength(N);
+
+    const stored = await AppDataSource.getRepository(NormalisationTask)
+      .createQueryBuilder('t')
+      .where('t.subject_key IN (:...ids)', { ids: saved.map((a) => a.id) })
+      .getCount();
+    expect(stored).toBe(N);
+  }, 60000);
+});

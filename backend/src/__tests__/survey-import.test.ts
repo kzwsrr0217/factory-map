@@ -267,6 +267,117 @@ describe('POST /api/inventory/survey/import', () => {
     expect(res.body.data.to_update).toBe(1);
   });
 
+  it('does not reach into another floor for a room of the same name', async () => {
+    // The place hierarchy is folded into an index once per run rather than scanned per row
+    // (it was quadratic: a 3000-row survey spent five seconds planning). An index keyed
+    // wrongly would silently place devices in the identically-named room one floor up,
+    // which nothing else would notice.
+    const other = await request(app).post('/api/floors').set(auth())
+      .send({ building_id: buildingId, floor_number: 4, name: `${PREFIX} Fourth` });
+    const twin = await request(app).post('/api/workareas').set(auth()).send({
+      floor_id: other.body.data._id,
+      name: ROOM, // the same room name, a different floor
+      coordinates: { x: 1, y: 1 },
+      dimensions: { width: 50, height: 50 },
+    });
+
+    const res = await importSurvey({
+      rows: [row({ azonosito_mod: 'HWA', hwa: `${PREFIX}-P1`, emelet: '3' })],
+      apply: true,
+    });
+    expect(res.body.data.to_update).toBe(1);
+
+    const placed = await AppDataSource.getRepository(Asset)
+      .findOne({ where: { hardware_asset_id: `${PREFIX}-P1` } });
+    expect(placed!.floor_id).toBe(floorId);
+    expect(placed!.workarea_id).toBe(roomId);
+    expect(placed!.workarea_id).not.toBe(twin.body.data._id);
+
+    await AppDataSource.getRepository(WorkArea).delete({ id: twin.body.data._id });
+    await request(app).delete(`/api/floors/${other.body.data._id}`).set(auth());
+  });
+
+  it('uses the zone to choose between two rooms of one name on the same floor', async () => {
+    const zoneA = await request(app).post('/api/zones').set(auth())
+      .send({ floor_id: floorId, name: `${PREFIX} Zone A` });
+    const zoneB = await request(app).post('/api/zones').set(auth())
+      .send({ floor_id: floorId, name: `${PREFIX} Zone B` });
+    const shared = `${PREFIX} Iroda`;
+    // Saved through the repository, not the API: `POST /workareas` refuses a second room of
+    // the same name on a floor. The importer's own `--create-missing-workareas` can still
+    // produce the pair (it reports the collision rather than refusing), and so can data that
+    // predates that guard — which is exactly what the zone tiebreak is for.
+    const waRepo = AppDataSource.getRepository(WorkArea);
+    const inA = await waRepo.save(waRepo.create({
+      floor_id: floorId, name: shared, zone_id: zoneA.body.data._id,
+      coord_x: 300, coord_y: 10, dim_width: 50, dim_height: 50,
+    }));
+    const inB = await waRepo.save(waRepo.create({
+      floor_id: floorId, name: shared, zone_id: zoneB.body.data._id,
+      coord_x: 400, coord_y: 10, dim_width: 50, dim_height: 50,
+    }));
+
+    const res = await importSurvey({
+      rows: [row({
+        azonosito_mod: 'HWA', hwa: `${PREFIX}-P1`,
+        work_area: shared, helyszin: `${PREFIX} Zone B`,
+      })],
+      apply: true,
+    });
+    expect(res.body.data.missing_work_areas).toEqual([]);
+
+    const placed = await AppDataSource.getRepository(Asset)
+      .findOne({ where: { hardware_asset_id: `${PREFIX}-P1` } });
+    // The zone is a tiebreak, and this is the case it exists for.
+    expect(placed!.workarea_id).toBe(inB.id);
+    expect(placed!.workarea_id).not.toBe(inA.id);
+
+    await waRepo.delete({ id: inA.id });
+    await waRepo.delete({ id: inB.id });
+    await AppDataSource.getRepository(Zone).delete({ id: zoneA.body.data._id });
+    await AppDataSource.getRepository(Zone).delete({ id: zoneB.body.data._id });
+  });
+
+  it('a whole site in one go: every row lands, and none is created twice', async () => {
+    // The real survey is the size of a site, not of a test. Measured on synthetic runs:
+    // 1200 rows plan in ~0.4 s and apply in ~1.4 s, 3000 in ~0.8 s and ~3.4 s — linear,
+    // which is the property this case exists to keep. There is no wall-clock assertion
+    // below: a timing threshold in a suite this size would fail for reasons that have
+    // nothing to do with the import.
+    const N = 400;
+    const assetRepo = AppDataSource.getRepository(Asset);
+    const bulk = Array.from({ length: N }, (_, i) => assetRepo.create({
+      display_name: `${PREFIX}-bulk-${i}`,
+      asset_type: 'workstation',
+      hardware_asset_id: `${PREFIX}-BULK-${i}`,
+      source_of_truth: 'itsm',
+    }));
+    await assetRepo.save(bulk, { chunk: 40 });
+
+    const rows = Array.from({ length: N }, (_, i) => row({
+      azonosito_mod: 'HWA',
+      hwa: `${PREFIX}-BULK-${i}`,
+      szemely: i % 3 === 0 ? 'moder hajnalka' : `Someone ${i}`,
+      megjegyzes: `note ${i}`,
+    }));
+
+    const res = await importSurvey({ rows, apply: true });
+    expect(res.body.data.to_update).toBe(N);
+    expect(res.body.data.to_create).toBe(0);
+    expect(res.body.data.unmatched_hwa).toEqual([]);
+
+    const landed = await assetRepo.createQueryBuilder('a')
+      .where('a.display_name LIKE :p', { p: `${PREFIX}-bulk-%` })
+      .andWhere('a.workarea_id = :w', { w: roomId })
+      .getCount();
+    expect(landed).toBe(N);
+
+    // Removed in one statement: 400 deletes through the API took longer than the hook
+    // budget, and this case is about scale, so it has to clean up at scale too.
+    await assetRepo.createQueryBuilder().delete().from(Asset)
+      .where('display_name LIKE :p', { p: `${PREFIX}-bulk-%` }).execute();
+  }, 60000);
+
   it('creates the rooms the survey names only when applying', async () => {
     const roomName = `${PREFIX} Tárgyaló`;
     const dry = await importSurvey({

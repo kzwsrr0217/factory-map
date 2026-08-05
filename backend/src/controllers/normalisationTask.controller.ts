@@ -28,6 +28,7 @@ import {
   NormalisationTaskState,
 } from '../entities/NormalisationTask.entity';
 import { generateTasks, MACHINE_VERIFIABLE } from '../services/itsm/taskGenerator';
+import { buildWorksheet } from '../services/inventory/taskWorksheet';
 
 interface AuthRequest extends Request {
   user?: { username?: string };
@@ -72,6 +73,38 @@ export const listTasks = async (req: Request, res: Response, next: NextFunction)
         machine_verifiable: MACHINE_VERIFIABLE.has(t.kind),
       })),
       meta: { total, page: p, limit: l, totalPages: Math.ceil(total / l) },
+    });
+  } catch (error) { next(error); }
+};
+
+// ── GET /tasks/worksheet ──────────────────────────────────────────────────────
+
+/**
+ * The whole filtered list, with each task's device and where it sits — for the printable
+ * walking sheet and for the CSV. Unpaged on purpose: a worksheet that stops at page one is
+ * how a floor gets skipped. It is capped, and says so when the cap bites.
+ */
+export const taskWorksheet = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { state, kind, assigned_to } = req.query as Record<string, string | undefined>;
+    if (state && !STATES.includes(state as NormalisationTaskState)) {
+      res.status(400).json({ success: false, error: `"state" must be one of: ${STATES.join(', ')}` });
+      return;
+    }
+    const sheet = await buildWorksheet({
+      state: (state as NormalisationTaskState | undefined),
+      kind: kind as NormalisationTaskKind | undefined,
+      assigned_to,
+    });
+    res.json({
+      success: true,
+      data: sheet.rows,
+      meta: {
+        total: sheet.total,
+        truncated: sheet.truncated,
+        without_place: sheet.without_place,
+        generated_at: new Date().toISOString(),
+      },
     });
   } catch (error) { next(error); }
 };

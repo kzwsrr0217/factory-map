@@ -1067,6 +1067,27 @@ The generator now writes one audit row per run (`entity_type: 'task_generation'`
 `cli` from the script, the username from the endpoint), and bumps `last_seen_at` on every
 task it still derives, which is what that column already claimed to mean.
 
+**The task list as something you can carry.** `GET /api/tasks/worksheet`
+(`services/inventory/taskWorksheet.ts`, page `/tasks/worksheet`) returns the whole
+filtered list with each task's device and place joined on, in walking order (building,
+floor, zone, room). It is deliberately **unpaged** — a worksheet that stops at page one
+is how a floor gets skipped — capped at 5000 rows with `meta.truncated` when the cap
+bites, and `meta.without_place` counting the tasks whose device has no room to walk to
+(those sort last, not first). The page prints the sheet grouped by room with a drawn tick
+box per row, and exports the same rows as CSV for the Alemba data entry. Print rules live
+in `MainLayout.module.css`: the app shell is a fixed-height flex column with
+`overflow: hidden`, which clips a printout to one page unless it is undone.
+
+**Measured, not assumed:** the survey planner used to scan the place arrays and re-fold
+the stored names for every row. 1200 rows planned in 1.2 s and 3000 in 5.7 s — nearly four
+times the work for two and a half times the rows, because `fold()` does an NFD normalise
+plus a per-codepoint loop and it was running in an inner loop. Folding the hierarchy into
+an index once (`buildPlaceIndex`) and turning the HWA `candidates.some(...)` lookup into a
+`Set` took 3000 rows to 0.8 s to plan and 3.4 s to apply, linear from there. There is no
+wall-clock assertion in the suite; `survey-import.test.ts` pins the correctness properties
+an index can break instead (a room of the same name on another floor, two rooms of one name
+in different zones).
+
 **For the asset data itself**, `data-quality-report.ts`
 (`npm run report:quality -- [--csv=<path>]`) finds the mistakes a bulk import
 makes — the ones invisible one asset at a time, because they only show up when

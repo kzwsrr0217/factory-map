@@ -913,6 +913,30 @@ When the list is empty the page says **Nothing outstanding**, which is the whole
 point of the exercise: the inventory, the app and ITSM agree as far as the data can
 show.
 
+<a id="worksheet"></a>
+### The worksheet — for the walk and for the typing
+
+**Worksheet to print or export** on the Tasks page opens the same list arranged for
+carrying. Pick a kind and a state, then either:
+
+- **Print** — the sheet is grouped by room, in walking order, with a box beside each
+  device to tick with a pen. A room's devices stay on one page, and the navigation and
+  banners are left off the paper. Made for the labelling round: "put a label on it"
+  only becomes actionable once you know which room to walk into.
+- **CSV** — the same rows as a spreadsheet, with the serial, the type, the person, the
+  place and the reason the task exists. This is the list for whoever registers devices
+  in Alemba by hand.
+
+Two things the sheet says out loud. Devices with **no room recorded** are collected
+under one heading at the end rather than scattered through the route — those need
+finding rather than walking to, and the count is stated at the top. And if the list is
+longer than one sheet can hold, it says how many were left off, because a partial list
+walked and fully ticked leaves the round open for reasons nobody can see.
+
+The sheet is a snapshot and prints the time it was taken, so a page found on a desk can
+be dated. Ticks on paper change nothing in the app: tasks are closed back on the Tasks
+page, or by the next re-derive.
+
 ---
 
 ## Alerts
