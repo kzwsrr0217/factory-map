@@ -42,7 +42,7 @@ import { WorkArea } from '../../entities/WorkArea.entity';
 import { Zone } from '../../entities/Zone.entity';
 import { ItsmHardwareSnapshot } from '../../entities/ItsmHardwareSnapshot.entity';
 import { NameCorrection, NameCorrectionScope, NAME_CORRECTION_SCOPES } from '../../entities/NameCorrection.entity';
-import { chunkForEntity, findByIn } from '../../utils/mssqlBatch';
+import { chunkForEntity } from '../../utils/mssqlBatch';
 import { foldName } from '../itsm/inventoryMatch';
 
 export interface SurveyRow {
@@ -106,6 +106,76 @@ function correct(map: Record<string, string> | undefined, raw: string): string {
 
 export function classifyDeviceType(eszkozTipus: string | undefined): string {
   return DEVICE_TYPE_MAP[fold(eszkozTipus)] ?? 'other';
+}
+
+// ── What the survey writes in its identifier column ───────────────────────────
+//
+// Measured on the real exports (735 devices): the `hwa` column holds THREE different
+// kinds of value, and reading it as one was going to report 122 devices the app already
+// has as unknown.
+//
+//   307 rows  a proper HWA number         "HWA26255"
+//    95 rows  the same, prefix missing     "26255"
+//    52 rows  a device name               "MMHIPC7402", "MMH_PRINTER_1039", "MMH LABEL 1008"
+//
+// HWA is the current convention; the names are what older devices carry — industrial PCs
+// (`MMHIPC…`), printers (`MMH PRINTER …`), label printers (`MMH LABEL …`), workstations
+// (`MMHWSBDE…`) — and all of them still have to resolve. In the app those names live in
+// `asset_tag`, not in the display name: 30 of the 52 are found there and none at all in
+// `display_name`. The same name is written with underscores, with spaces and run together
+// in different rows, so the comparison has to ignore separators entirely.
+
+/** A number, with or without the prefix. Three digits minimum, so "1" is not an HWA. */
+const HWA_NUMBER = /^(?:hwa)?\s*(\d{3,})$/i;
+
+/** What kind of thing the survey put in the identifier column. */
+export type IdentifierKind = 'number' | 'name' | 'none';
+
+export function identifierKind(raw: string | undefined): IdentifierKind {
+  const value = (raw ?? '').trim();
+  if (!value) return 'none';
+  return HWA_NUMBER.test(value) ? 'number' : 'name';
+}
+
+/**
+ * Key for comparing device names: case, accents, spaces, underscores and hyphens all
+ * dropped, because `MMH_PRINTER_1039`, `MMH PRINTER 1039` and `MMHPRINTER1039` are one
+ * device written three ways — all three spellings appear in the real exports.
+ */
+export function nameKey(value: string | null | undefined): string {
+  return (value ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[\s_-]+/g, '').toLowerCase();
+}
+
+/**
+ * The keys worth trying for an identifier, in order of how much they claim.
+ *
+ * A bare number is offered both as written and with the prefix added: `26255` is what
+ * somebody read off a label that says `HWA26255`.
+ */
+export function identifierKeys(raw: string): string[] {
+  const value = raw.trim();
+  const match = HWA_NUMBER.exec(value);
+  if (!match) return [fold(value)];
+  const digits = match[1];
+  return [...new Set([fold(value), `hwa${digits}`])];
+}
+
+/**
+ * Serial numbers that are not serial numbers.
+ *
+ * The real survey carries 14 of these: `...`, `...2`, `N/A`, `N/A 2` … `N/A8`. They matter
+ * because a device with no HWA is matched BY serial — so `N/A 2` and `N/A 3` would become
+ * two assets that are really one unknown thing each, and two `...` rows would be merged
+ * into one device that does not exist. Treated as "no serial given", and counted, so the
+ * report can say how many devices still need a number read off them.
+ */
+const PLACEHOLDER_SERIAL = /^(?:\.+|-+|_+|\?+|x+|n\s*\/?\s*a)\s*\d*$/i;
+
+export function usableSerial(raw: string | undefined): string | null {
+  const value = (raw ?? '').trim();
+  if (!value) return null;
+  return PLACEHOLDER_SERIAL.test(value) ? null : value;
 }
 
 /**
@@ -394,9 +464,15 @@ interface InternalPlan {
   /** Keyed by floor + folded zone + folded room. */
   missingWorkAreas: Map<string, MissingWorkArea>;
   unmatchedPerson: Map<string, number>;
-  unmatchedHwa: Array<{ hwa: string; note: string }>;
+  unmatchedHwa: Array<{ hwa: string; note: string; kind: IdentifierKind }>;
   /** Rows that will land on a floor but in no room. */
   noRoom: number;
+  /** How each matched row was found — the report says when a rule earned its keep. */
+  matchedBy: Record<'hwa' | 'hwa-prefixed' | 'device-name' | 'serial', number>;
+  /** Serial values that were not serial numbers at all. */
+  placeholderSerials: number;
+  /** The same identifier or serial on more than one row. */
+  duplicates: Map<string, { value: string; kind: 'identifier' | 'serial'; rows: number }>;
 }
 
 /** What a caller outside this module sees. Serialisable on purpose — it goes over HTTP. */
@@ -426,7 +502,27 @@ export interface SurveyImportPlan {
     suggestion: string | null;
   }>;
   unmatched_persons: Array<{ name: string; rows: number; suggestion: string | null }>;
-  unmatched_hwa: Array<{ hwa: string; note: string }>;
+  /**
+   * Identifiers that resolved to nothing. `kind` separates "an HWA number we do not have"
+   * from "a device name we have never seen" — different problems, different next step.
+   */
+  unmatched_hwa: Array<{ hwa: string; note: string; kind: IdentifierKind }>;
+  /**
+   * How the identifier column resolved, across every row — including rows that are skipped
+   * for want of a building, since the two problems are independent. Worth reporting rather
+   * than hiding: it is the evidence that the prefix and old-convention rules are earning
+   * their keep, and if `hwa_prefixed` drops to zero on a later export, the survey tool has
+   * started writing full numbers.
+   */
+  matched_by: { hwa: number; hwa_prefixed: number; device_name: number; serial: number };
+  /** Rows whose serial was `...`, `N/A` or similar — counted, not silently dropped. */
+  placeholder_serials: number;
+  /**
+   * The same device recorded twice. Small and real on the current survey (4 HWA numbers,
+   * each pair in the same room), and the sort of thing that has to be seen before applying
+   * rather than explained afterwards.
+   */
+  duplicates: Array<{ value: string; kind: 'identifier' | 'serial'; rows: number }>;
   /** A look at what would be created, since a create is the less reversible half. */
   create_sample: Array<{ display: string; asset_type: string; serial: string | null }>;
   created_areas: { zones: number; work_areas: number; duplicate_names: string[] } | null;
@@ -443,30 +539,48 @@ async function planInternal(rows: SurveyRow[], corrections: Corrections): Promis
   const personIndex = await buildPersonIndex();
   const assetRepo = AppDataSource.getRepository(Asset);
 
-  const hwaValues = rows.filter((r) => fold(r.azonosito_mod) === 'hwa' && r.hwa).map((r) => r.hwa!.trim());
+  // Every asset, once, keyed three ways.
+  //
+  // The identifier column may hold an HWA number, the same number without its prefix, or an
+  // older device name that lives in `asset_tag` — and a name is written with underscores,
+  // with spaces or run together, so no `In(...)` lookup can find it. Reading the table once
+  // and indexing it is both simpler and honest about the cost; the previous code already
+  // fell back to loading every asset with an HWA the moment one value was missing, which on
+  // a real survey is every time.
+  const allAssets = await assetRepo.find();
   const existingByHwa = new Map<string, Asset>();
-  if (hwaValues.length > 0) {
-    // hardware_asset_id casing may not match the survey's ("hwa26255" vs "HWA26255") —
-    // fetch broadly and fold-key it rather than relying on In() matching exactly.
-    const candidates = await findByIn(assetRepo, 'hardware_asset_id', [...new Set(hwaValues)]);
-    // Folded once into a set. Asking `candidates.some(...)` per value was O(rows × rows)
-    // with an NFD normalise inside, which is where a 3000-row survey spent most of its time.
-    const foundFolded = new Set(candidates.map((a) => fold(a.hardware_asset_id)));
-    const anyMissing = hwaValues.some((v) => !foundFolded.has(fold(v)));
-    const extra = anyMissing
-      ? await assetRepo.createQueryBuilder('a').where('a.hardware_asset_id IS NOT NULL').getMany()
-      : [];
-    for (const a of [...candidates, ...extra]) {
-      if (a.hardware_asset_id) existingByHwa.set(fold(a.hardware_asset_id), a);
-    }
+  const existingByTag = new Map<string, Asset>();
+  const existingByName = new Map<string, Asset>();
+  const existingBySerial = new Map<string, Asset>();
+  for (const a of allAssets) {
+    if (a.hardware_asset_id) existingByHwa.set(fold(a.hardware_asset_id), a);
+    if (a.asset_tag) existingByTag.set(nameKey(a.asset_tag), a);
+    if (a.display_name) existingByName.set(nameKey(a.display_name), a);
+    if (a.serial_number) existingBySerial.set(fold(a.serial_number), a);
   }
 
-  const serialValues = rows.filter((r) => fold(r.azonosito_mod) !== 'hwa' && r.sorozatszam).map((r) => r.sorozatszam!.trim());
-  const existingBySerial = new Map<string, Asset>();
-  if (serialValues.length > 0) {
-    const existing = await findByIn(assetRepo, 'serial_number', [...new Set(serialValues)]);
-    for (const a of existing) if (a.serial_number) existingBySerial.set(fold(a.serial_number), a);
-  }
+  /**
+   * The device a survey row names, and which rule found it.
+   *
+   * Order matters: an HWA number as written is the strongest claim, the same number with the
+   * prefix supplied is next, and only then the old-convention name. `asset_tag` before
+   * `display_name` because that is where the names actually are — measured, not assumed.
+   */
+  const resolveIdentifier = (raw: string): { asset: Asset; by: 'hwa' | 'hwa-prefixed' | 'device-name' } | null => {
+    const keys = identifierKeys(raw);
+    const asWritten = existingByHwa.get(keys[0]);
+    if (asWritten) return { asset: asWritten, by: 'hwa' };
+    for (const k of keys.slice(1)) {
+      const prefixed = existingByHwa.get(k);
+      if (prefixed) return { asset: prefixed, by: 'hwa-prefixed' };
+    }
+    if (identifierKind(raw) === 'name') {
+      const key = nameKey(raw);
+      const byTag = existingByTag.get(key) ?? existingByName.get(key);
+      if (byTag) return { asset: byTag, by: 'device-name' };
+    }
+    return null;
+  };
 
   const plan: InternalPlan = {
     rows: rows.length,
@@ -479,11 +593,64 @@ async function planInternal(rows: SurveyRow[], corrections: Corrections): Promis
     unmatchedPerson: new Map(),
     unmatchedHwa: [],
     noRoom: 0,
+    matchedBy: { hwa: 0, 'hwa-prefixed': 0, 'device-name': 0, serial: 0 },
+    placeholderSerials: 0,
+    duplicates: new Map(),
   };
 
+  // Counted over the whole survey rather than per row, so a device entered twice is
+  // reported once with a count instead of appearing as two separate findings.
+  const seenIdentifier = new Map<string, string[]>();
+  const seenSerial = new Map<string, string[]>();
   for (const row of rows) {
-    const isHwa = fold(row.azonosito_mod) === 'hwa' && !!(row.hwa ?? '').trim();
+    const id = (row.hwa ?? '').trim();
+    if (id) {
+      const k = identifierKeys(id)[identifierKeys(id).length - 1];
+      (seenIdentifier.get(k) ?? seenIdentifier.set(k, []).get(k)!).push(id);
+    }
+    const serial = usableSerial(row.sorozatszam);
+    if (serial) {
+      const k = fold(serial);
+      (seenSerial.get(k) ?? seenSerial.set(k, []).get(k)!).push(serial);
+    } else if ((row.sorozatszam ?? '').trim()) {
+      // Counted here rather than where the row is used, so the number does not depend on
+      // whether the row's building happens to exist yet.
+      plan.placeholderSerials++;
+    }
+  }
+  for (const [, values] of seenIdentifier) {
+    if (values.length > 1) plan.duplicates.set(`identifier:${values[0]}`, { value: values[0], kind: 'identifier', rows: values.length });
+  }
+  for (const [, values] of seenSerial) {
+    if (values.length > 1) plan.duplicates.set(`serial:${values[0]}`, { value: values[0], kind: 'serial', rows: values.length });
+  }
+
+  for (const row of rows) {
+    const identifier = (row.hwa ?? '').trim();
+    const mode = fold(row.azonosito_mod);
+    // A CSV export of the survey has no `azonosito_mod` column at all. A row carrying an
+    // identifier is then read as an HWA row: guessing "not in ITSM" instead would create a
+    // fresh local asset for a device that is already there — 65 duplicates on the one
+    // CSV-only export in hand. An explicit `EGYEB` still wins, because somebody said so.
+    const isHwa = !!identifier && (mode === 'hwa' || mode === '');
     if (isHwa) plan.hwaRows++; else plan.otherRows++;
+
+    // The identifier is resolved BEFORE the place, and reported whether or not the place
+    // works out. They are independent problems, and doing it the other way round meant one
+    // hid the other: on the real survey 612 of 735 rows have no building yet, so a run
+    // reported six identifier problems out of the 33 that are actually there — and the
+    // reader would have had to fix every building before finding out.
+    const found = isHwa ? resolveIdentifier(identifier) : null;
+    if (isHwa) {
+      if (found) plan.matchedBy[found.by]++;
+      else {
+        plan.unmatchedHwa.push({
+          hwa: identifier,
+          note: (row.megjegyzes ?? '').trim(),
+          kind: identifierKind(identifier),
+        });
+      }
+    }
 
     const building = matchBuilding(index, row.epulet, corrections);
     const floor = building ? matchFloor(index, building.id, row.emelet, corrections) : null;
@@ -545,18 +712,16 @@ async function planInternal(rows: SurveyRow[], corrections: Corrections): Promis
     };
 
     if (isHwa) {
-      const existing = existingByHwa.get(fold(row.hwa!.trim()));
-      if (!existing) {
-        plan.unmatchedHwa.push({ hwa: row.hwa!.trim(), note: (row.megjegyzes ?? '').trim() });
-        continue;
-      }
-      plan.toUpdate.push({ assetId: existing.id, display: existing.display_name, fields: placementFields });
+      // Already resolved and reported above; nothing to place if it found nothing.
+      if (!found) continue;
+      plan.toUpdate.push({ assetId: found.asset.id, display: found.asset.display_name, fields: placementFields });
       continue;
     }
 
     const deviceType = classifyDeviceType(row.eszkoz_tipus);
-    const serial = (row.sorozatszam ?? '').trim() || null;
+    const serial = usableSerial(row.sorozatszam);
     const existing = serial ? existingBySerial.get(fold(serial)) : undefined;
+    if (existing) plan.matchedBy.serial++;
     if (existing) {
       // Never clobber a value that may since have come from ITSM (e.g. if this local
       // asset got linked to a real HWA between survey runs) — only fill these two if
@@ -792,6 +957,14 @@ export async function planSurveyImport(input: SurveyImportInput): Promise<Survey
       .sort((a, b) => b[1] - a[1])
       .map(([name, rows]) => ({ name, rows, suggestion: bestSuggestion(name, personNames) })),
     unmatched_hwa: internal.unmatchedHwa,
+    matched_by: {
+      hwa: internal.matchedBy.hwa,
+      hwa_prefixed: internal.matchedBy['hwa-prefixed'],
+      device_name: internal.matchedBy['device-name'],
+      serial: internal.matchedBy.serial,
+    },
+    placeholder_serials: internal.placeholderSerials,
+    duplicates: [...internal.duplicates.values()].sort((a, b) => b.rows - a.rows),
     create_sample: internal.toCreate.slice(0, 25).map((c) => ({
       display: c.display,
       asset_type: String(c.fields.asset_type ?? 'other'),

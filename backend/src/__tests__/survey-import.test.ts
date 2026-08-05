@@ -38,6 +38,12 @@ const createdAssetIds: string[] = [];
 const ROOM = `${PREFIX} Recepció`;
 /** A person as the ITSM export writes them: surname, comma, forename, with diacritics. */
 const PERSON_AS_ITSM = 'Móder, Hajnalka';
+/**
+ * A real-shaped HWA number, unique to this run. It cannot carry the suite's usual text
+ * prefix: the point of the case below is that `HWA1234567` and `1234567` are one device, and
+ * that only holds for an identifier that looks like an HWA number.
+ */
+const HWA_DIGITS = PREFIX.replace(/\D/g, '').slice(-7);
 
 async function seedAsset(name: string, hwa: string | null, extra: Record<string, unknown> = {}) {
   const res = await request(app).post('/api/assets').set(auth()).send({
@@ -197,7 +203,9 @@ describe('POST /api/inventory/survey/import', () => {
       apply: true,
     });
     expect(res.body.data.unmatched_hwa).toEqual([
-      { hwa: `${PREFIX}-GHOST`, note: 'read off a label' },
+      // `kind` tells "a number we do not have" from "a name we have never seen"; this one
+      // is neither a bare number nor an HWA number, so it reads as a name.
+      { hwa: `${PREFIX}-GHOST`, note: 'read off a label', kind: 'name' },
     ]);
     expect(res.body.data.to_create).toBe(0);
     expect(await AppDataSource.getRepository(Asset).count()).toBe(before);
@@ -467,5 +475,147 @@ describe('/api/inventory/corrections', () => {
     // is plainly a bad request.
     const res = await request(app).delete('/api/inventory/corrections/not-an-id').set(auth());
     expect(res.status).toBe(400);
+  });
+});
+
+/**
+ * How the survey writes the identifier it found on the device.
+ *
+ * All of these come from the real exports, and every one of them was going to be read
+ * wrongly: 122 devices the app already holds would have been reported as unknown, and one
+ * CSV-only export would have created 65 duplicates. The numbers in the comments are what
+ * the 735-device survey actually contains.
+ */
+describe('POST /api/inventory/survey/import — the identifier column', () => {
+  it('finds the device when the HWA prefix was left off', async () => {
+    // 95 rows of the real survey carry the number alone, because that is what somebody
+    // reads off a label. 92 of them are devices the app already has.
+    const asset = await seedAsset('prefix', `HWA${HWA_DIGITS}`);
+    const res = await importSurvey({
+      rows: [row({ azonosito_mod: 'HWA', hwa: HWA_DIGITS })],
+      apply: false,
+    });
+    expect(res.body.data.to_update).toBe(1);
+    expect(res.body.data.unmatched_hwa).toEqual([]);
+    expect(res.body.data.matched_by.hwa_prefixed).toBe(1);
+    expect(res.body.data.matched_by.hwa).toBe(0);
+    expect(asset._id).toBeTruthy();
+  });
+
+  it('finds an older device by the name on its asset tag, however it is spelled', async () => {
+    // HWA is the current convention; older devices carry MMHIPC…, MMH PRINTER …, MMH LABEL …
+    // and those live in `asset_tag`. The same name appears with underscores, with spaces and
+    // run together in different rows of the same survey.
+    const tag = `${PREFIX}_PRINTER_1039`;
+    const res0 = await request(app).post('/api/assets').set(auth()).send({
+      basic_info: { display_name: `${PREFIX}-old-printer`, type: 'printer', asset_tag: tag },
+    });
+    expect(res0.status).toBe(201);
+    createdAssetIds.push(res0.body.data._id);
+
+    for (const spelling of [tag, tag.replace(/_/g, ' '), tag.replace(/_/g, '')]) {
+      const res = await importSurvey({
+        rows: [row({ azonosito_mod: 'HWA', hwa: spelling })],
+        apply: false,
+      });
+      expect(res.body.data.unmatched_hwa).toEqual([]);
+      expect(res.body.data.matched_by.device_name).toBe(1);
+      expect(res.body.data.to_update).toBe(1);
+    }
+  });
+
+  it('reads a row as an HWA row when the export has no mode column at all', async () => {
+    // A CSV export of the survey has no `azonosito_mod`. Falling through to the "not in
+    // ITSM" branch would create a second asset for a device that is already there — 65 of
+    // them on the one CSV-only export in hand.
+    const asset = await seedAsset('nomode', `${PREFIX}-HWA55555`);
+    const res = await importSurvey({
+      rows: [row({ hwa: `${PREFIX}-HWA55555`, sorozatszam: 'SER-NOMODE' })],
+      apply: false,
+    });
+    expect(res.body.data.to_update).toBe(1);
+    expect(res.body.data.to_create).toBe(0);
+    expect(res.body.data.hwa_rows).toBe(1);
+    expect(asset._id).toBeTruthy();
+  });
+
+  it('still reads an explicit EGYEB as one, identifier or not', async () => {
+    // Somebody said it is not in ITSM. That beats the inference.
+    const res = await importSurvey({
+      rows: [row({ azonosito_mod: 'EGYEB', hwa: 'HWA00001', sorozatszam: `${PREFIX}-EGYEB-SER` })],
+      apply: false,
+    });
+    expect(res.body.data.other_rows).toBe(1);
+    expect(res.body.data.to_create).toBe(1);
+  });
+
+  it('reports an unresolved identifier even when the building is unknown', async () => {
+    // The two problems are independent, and doing the place first meant one hid the other:
+    // 612 of 735 real rows have no building yet, so a run reported six identifier problems
+    // out of the 33 that were there — and only after every building had been fixed.
+    const res = await importSurvey({
+      rows: [row({ epulet: 'Nowhere', azonosito_mod: 'HWA', hwa: 'HWA98765' })],
+      apply: false,
+    });
+    expect(res.body.data.unmatched_place).toHaveLength(1);
+    expect(res.body.data.unmatched_hwa).toEqual([
+      { hwa: 'HWA98765', note: '', kind: 'number' },
+    ]);
+  });
+
+  it('separates a number it does not have from a name it has never seen', async () => {
+    const res = await importSurvey({
+      rows: [
+        row({ azonosito_mod: 'HWA', hwa: 'HWA98765' }),
+        row({ azonosito_mod: 'HWA', hwa: 'MMHIPC7402' }),
+      ],
+      apply: false,
+    });
+    const kinds = res.body.data.unmatched_hwa.map((u: any) => u.kind).sort();
+    // Different problems, different next step: check the number, or go and identify the box.
+    expect(kinds).toEqual(['name', 'number']);
+  });
+});
+
+describe('POST /api/inventory/survey/import — serials that are not serials', () => {
+  it('treats "..." and "N/A 2" as no serial, counts them, and does not merge devices', async () => {
+    const res = await importSurvey({
+      rows: [
+        row({ azonosito_mod: 'EGYEB', eszkoz_tipus: 'Monitor', sorozatszam: '...', megjegyzes: `${PREFIX} junkserial one` }),
+        row({ azonosito_mod: 'EGYEB', eszkoz_tipus: 'Monitor', sorozatszam: '...', megjegyzes: `${PREFIX} junkserial two` }),
+        row({ azonosito_mod: 'EGYEB', eszkoz_tipus: 'Monitor', sorozatszam: 'N/A 2', megjegyzes: `${PREFIX} junkserial three` }),
+      ],
+      apply: true,
+    });
+    expect(res.body.data.placeholder_serials).toBe(3);
+    // Three unknown devices, not one device and not three rows sharing a serial.
+    expect(res.body.data.to_create).toBe(3);
+    const created = await AppDataSource.getRepository(Asset).createQueryBuilder('a')
+      .where('a.display_name LIKE :p', { p: `${PREFIX} junkserial %` }).getMany();
+    expect(created).toHaveLength(3);
+    for (const a of created) {
+      expect(a.serial_number).toBeNull();
+      createdAssetIds.push(a.id);
+    }
+  });
+});
+
+describe('POST /api/inventory/survey/import — the same device twice', () => {
+  it('reports it once with a count, including a pair written two different ways', async () => {
+    await seedAsset('dup', `${PREFIX}-HWA24680`);
+    const res = await importSurvey({
+      rows: [
+        row({ azonosito_mod: 'HWA', hwa: `${PREFIX}-HWA24680` }),
+        row({ azonosito_mod: 'HWA', hwa: `${PREFIX}-HWA24680` }),
+        // "HWA20767" and "20767" are one device recorded twice — the real survey has such a
+        // pair, and comparing the raw strings misses it.
+        row({ azonosito_mod: 'HWA', hwa: 'HWA20767' }),
+        row({ azonosito_mod: 'HWA', hwa: '20767' }),
+      ],
+      apply: false,
+    });
+    const dups = res.body.data.duplicates;
+    expect(dups).toHaveLength(2);
+    expect(dups.every((d: any) => d.rows === 2 && d.kind === 'identifier')).toBe(true);
   });
 });

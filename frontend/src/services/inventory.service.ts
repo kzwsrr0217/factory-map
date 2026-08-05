@@ -52,7 +52,21 @@ export interface SurveyImportPlan {
     suggestion: string | null;
   }>;
   unmatched_persons: Array<{ name: string; rows: number; suggestion: string | null }>;
-  unmatched_hwa: Array<{ hwa: string; note: string }>;
+  /**
+   * Identifiers that resolved to nothing. `kind` separates "an HWA number we do not have"
+   * from "a device name we have never seen" — different problems, different next step.
+   */
+  unmatched_hwa: Array<{ hwa: string; note: string; kind: 'number' | 'name' | 'none' }>;
+  /**
+   * How the identifier column resolved. `hwa_prefixed` counts the rows where somebody wrote
+   * the number without its prefix, `device_name` the older devices found by the name on
+   * their asset tag.
+   */
+  matched_by: { hwa: number; hwa_prefixed: number; device_name: number; serial: number };
+  /** Rows whose serial was `...`, `N/A` or similar — read as no serial, and counted. */
+  placeholder_serials: number;
+  /** The same device recorded twice, once per value with a row count. */
+  duplicates: Array<{ value: string; kind: 'identifier' | 'serial'; rows: number }>;
   create_sample: Array<{ display: string; asset_type: string; serial: string | null }>;
   created_areas: { zones: number; work_areas: number; duplicate_names: string[] } | null;
   applied: boolean;

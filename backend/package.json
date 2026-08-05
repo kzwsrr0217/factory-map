@@ -16,6 +16,7 @@
     "import:itsm": "ts-node src/scripts/import-itsm-snapshot.ts",
     "backfill:itsm": "ts-node src/scripts/backfill-itsm-fields.ts",
     "import:inventory": "ts-node src/scripts/import-inventory-survey.ts",
+    "convert:survey-csv": "ts-node src/scripts/convert-survey-csv.ts",
     "reconcile:report": "ts-node src/scripts/reconcile-report.ts",
     "report:network": "ts-node src/scripts/network-gaps-report.ts",
     "report:quality": "ts-node src/scripts/data-quality-report.ts",

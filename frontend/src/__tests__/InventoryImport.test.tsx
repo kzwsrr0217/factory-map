@@ -43,6 +43,9 @@ const EMPTY_PLAN = {
   missing_work_areas: [],
   unmatched_persons: [],
   unmatched_hwa: [],
+  matched_by: { hwa: 1, hwa_prefixed: 0, device_name: 0, serial: 0 },
+  placeholder_serials: 0,
+  duplicates: [],
   create_sample: [],
   created_areas: null,
   applied: false,
@@ -187,5 +190,64 @@ describe('InventoryImport', () => {
 
     await waitFor(() => expect(imports).toHaveLength(1));
     expect(imports[0]).toMatchObject({ create_missing_workareas: true, apply: false });
+  });
+});
+
+describe('InventoryImport — what the survey wrote in its identifier column', () => {
+  it('says how the identifier resolved, including the rules that had to work for it', async () => {
+    // Two of these rules exist only because the survey writes the same number three ways.
+    // Stating the counts is how anyone notices when a later export stops needing them.
+    seed({
+      ...EMPTY_PLAN,
+      matched_by: { hwa: 300, hwa_prefixed: 92, device_name: 30, serial: 4 },
+      placeholder_serials: 14,
+    });
+    renderPage();
+    chooseFile();
+    await waitFor(() => expect(previewButton()).toBeEnabled());
+    fireEvent.click(previewButton());
+
+    expect(await screen.findByText(/300/)).toBeInTheDocument();
+    expect(screen.getByText(/after supplying the missing/)).toBeInTheDocument();
+    expect(screen.getByText(/by the older name on the asset tag/)).toBeInTheDocument();
+    // A placeholder serial is not a serial, and the devices behind them still need a number.
+    expect(screen.getByText(/14 serial\(s\) were placeholders/)).toBeInTheDocument();
+  });
+
+  it('shows a device recorded twice before anything is applied', async () => {
+    seed({
+      ...EMPTY_PLAN,
+      duplicates: [
+        { value: 'HWA20767', kind: 'identifier', rows: 2 },
+        { value: 'SN-4', kind: 'serial', rows: 3 },
+      ],
+    });
+    renderPage();
+    chooseFile();
+    await waitFor(() => expect(previewButton()).toBeEnabled());
+    fireEvent.click(previewButton());
+
+    expect(await screen.findByText(/The same device recorded twice/)).toBeInTheDocument();
+    expect(screen.getByText('HWA20767')).toBeInTheDocument();
+    expect(screen.getByText(/identifier · 2 rows/)).toBeInTheDocument();
+    expect(screen.getByText(/serial · 3 rows/)).toBeInTheDocument();
+  });
+
+  it('tells a number it does not have from a name it has never seen', async () => {
+    seed({
+      ...EMPTY_PLAN,
+      unmatched_hwa: [
+        { hwa: 'HWA98765', note: '', kind: 'number' },
+        { hwa: 'MMHIPC7402', note: 'in the cell', kind: 'name' },
+      ],
+    });
+    renderPage();
+    chooseFile();
+    await waitFor(() => expect(previewButton()).toBeEnabled());
+    fireEvent.click(previewButton());
+
+    // Different problems, different next step — so the row says which it is.
+    expect(await screen.findByText(/a number nothing has/)).toBeInTheDocument();
+    expect(screen.getByText(/an older device name · in the cell/)).toBeInTheDocument();
   });
 });

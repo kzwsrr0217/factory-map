@@ -43,22 +43,35 @@ The merged file is `eszkoz/_merged-735-rows.json`, in the tool's own shape.
 This is the finding that matters most. The `hwa` column holds **three different kinds of
 value**, and the importer currently understands only the first:
 
-| What is in the column | Rows | Resolves to an asset? |
+| What is in the column | Rows | Where it resolves |
 |---|---|---|
-| `HWA` + digits | 307 | 300 yes |
-| bare digits, no prefix | 95 | **92 yes — but only if the prefix is added first** |
-| a hostname / device name (`MMH…`) | 53 | 10 yes by name; 43 no |
+| `HWA` + digits | 307 | 300 on `hardware_asset_id` |
+| the same number, prefix left off | 95 | 92 — **but only once the prefix is supplied** |
+| an older device name (`MMHIPC…`, `MMH PRINTER …`, `MMH LABEL …`, `MMHWSBDE…`) | 53 | 30 on **`asset_tag`**, none on the display name |
 
-Of 455 rows carrying something there: **300 match as written, 92 after normalising, 10 by
-device name, 53 unresolved.** Of the unresolved:
+HWA is the current convention. The names are what older devices carry and they still have
+to resolve — they are not errors. **In the app they live in `asset_tag`**, which is where
+the ITSM export's own asset tag landed; measured, not assumed. The same name is written
+with underscores, with spaces and run together in different rows of the same survey, so the
+comparison has to ignore separators entirely.
 
-- **8 look like proper HWA numbers but exist neither in the app nor in the ITSM export.**
-  One is a single missing letter (`HW…` for `HWA…`) — a suggestion, not a silent fix.
-- **45 are device names** the app and the export have never seen.
+Row by row, of the 455 that carry an identifier:
 
-The importer compares the survey's `hwa` against `hardware_asset_id` after folding case
-and accents only. `17838` and `HWA17838` therefore do not match, and **92 devices that are
-already in the app would be reported as unknown.**
+| | rows |
+|---|---|
+| matched as written | 300 |
+| matched after supplying the `HWA` prefix | 92 |
+| matched by the older name, via `asset_tag` | 30 |
+| resolved to nothing | 33 — 10 number-shaped, 23 name-shaped |
+
+The 23 name-shaped misses are almost all `MMHIPC…` industrial PCs, which is plausible:
+nobody registered them in ITSM. One of the number-shaped misses is a single missing letter
+(`HW…` for `HWA…`).
+
+**Before this was fixed** the importer compared the survey's value against
+`hardware_asset_id` after folding case and accents only. `17838` did not match `HWA17838`
+and no name matched anything, so **122 devices the app already holds would have been
+reported as unknown** — a task list full of work that does not exist.
 
 ---
 
@@ -71,8 +84,32 @@ already in the app would be reported as unknown.**
 | Zone (`helyszin`) | 36 distinct | 0 |
 | Room (`work_area`) | 118 distinct | 1, and **none of the 118 matches it** |
 
-So ~560 rows name a building the app does not have, ~270 name a floor that does not exist,
-and every room has to be created. **181 rows have no room at all** — they can be placed on
+Which building and floor the survey actually uses, and how many rows each:
+
+| | Ground floor | First floor |
+|---|---|---|
+| **Werk 1** | 123 | 50 |
+| **Werk 2** | 343 | 219 |
+
+**Decided**: the buildings are `Werk 1` and `Werk 2`, the floors `Ground floor` (0) and
+`First floor` (1). The existing `Werk1` is renamed to `Werk 1` — folding ignores the space,
+so both `werk 1` and `Werk 1` in the survey then match it without a correction.
+
+**Four corrections cover all 735 rows**, and that is not an estimate — it was rehearsed
+against a scratch database: place failures went 735 → 478 with the buildings and floors
+alone → **0** with these four.
+
+| Scope | The survey says | Read it as |
+|---|---|---|
+| building | `W2` | `Werk 2` |
+| building | `BZYSRM3Werk 2` | `Werk 2` |
+| floor | `foldszint` | `Ground floor` |
+| floor | `1. emelet` | `First floor` |
+
+`1. Emelet` needs no separate row: folding makes it the same key as `1. emelet`. `0` and `1`
+match by floor number without a correction.
+
+Every room still has to be created. **181 rows have no room at all** — they can be placed on
 a floor and no closer.
 
 ---
@@ -89,21 +126,24 @@ a floor and no closer.
 
 ---
 
-## 5. What would happen if this were imported today
+## 5. What would have happened if this had been imported as it stood
 
-Ranked by damage:
+Ranked by damage. All four are fixed now (§6, phase 1); they are kept here because they are
+the reason the fixes exist, and because a future export can bring them back.
 
-1. **Set E creates 123 duplicate assets.** The CSV has no `azonosito_mod` column, so every
-   row falls to the "not in ITSM" branch and is created as a new local asset — including
-   the 65 that carry an HWA number and already exist.
-2. **92 devices are reported as unknown HWAs** because of the missing prefix, and land in
-   the task list as work that does not exist.
-3. **Placeholder serials create junk assets** and merge unrelated devices.
-4. ~560 rows are skipped entirely for want of a building, and their floor names are never
-   even looked up.
+1. **Set E would create 123 duplicate assets.** Its CSV has no `azonosito_mod` column, so
+   every row fell to the "not in ITSM" branch — including the 65 that carry an HWA number and
+   already exist.
+2. **92 devices would be reported as unknown HWAs** because the prefix was missing, and 30
+   more because their older name was never looked for: 122 tasks describing work that does
+   not exist.
+3. **Placeholder serials would create junk assets** and merge unrelated devices.
+4. ~560 rows are skipped for want of a building, and their floor names were never even
+   looked up — and while that was true, the identifier problems above were invisible, because
+   the place check ran first and stopped the row.
 
-None of this is silent — the preview reports all of it — but items 1–3 are the app reading
-the data wrongly, not the data being wrong, and those are worth fixing in code first.
+None of it was silent — the preview reported it — but items 1–3 were the app reading the data
+wrongly rather than the data being wrong, which is a different kind of problem.
 
 ---
 
@@ -111,45 +151,62 @@ the data wrongly, not the data being wrong, and those are worth fixing in code f
 
 ### Phase 0 — one file instead of twelve *(done)*
 Keep the newest of each set, drop the CSV twins and the superseded `zg` export, merge by
-row id. `eszkoz/_merged-735-rows.json`.
+row id: `eszkoz/_merged-735-rows.json`.
 
-**Open question for set E**: it has no row ids and no `azonosito_mod`. Ask whoever exported
-it for the tool's JSON. If that is not available, convert it, deriving `azonosito_mod` from
-whether the HWA column holds a number, and mint stable row ids so a re-import can dedupe.
+Set E had no JSON to be had, so it is converted:
 
-### Phase 1 — make the importer read the data as it actually is *(code)*
-1. **Normalise the HWA column**: bare digits get the `HWA` prefix. Recovers 92 devices.
-2. **Tell a number from a name**: a value like `MMH…` is a device name, so match it against
-   the app's and the export's `display_name` instead of `hardware_asset_id`. Recovers 10,
-   and turns the other 43 into honest tasks instead of unknown-HWA noise.
-3. **Infer the row mode when the column is missing**: HWA column holds a number → an HWA
-   row. This is what stops set E from creating 123 duplicates.
-4. **Reject placeholder serials** (`...`, `N/A`, `N/A 2`, …): treat them as no serial at
-   all, so they neither create junk nor merge devices, and report them.
-5. **Report duplicate rows in the preview**: the same HWA or serial twice, before applying.
+```bash
+npm run convert:survey-csv -- eszkoz/eszkozok_20260729_MMHBABA.csv
+```
 
-Each is a small, testable change to `services/inventory/surveyImport.ts` with the numbers
-above as the test fixtures.
+`convert-survey-csv.ts` maps the Hungarian headers, derives `azonosito_mod` from whether the
+identifier column holds anything usable, and **mints each row id from the row's own content**
+— so converting twice gives the same ids and a re-import updates instead of duplicating.
+Verified on the file: 123 entries, 65 read as ITSM rows, identical ids on a second run.
 
-### Phase 2 — the hierarchy *(human decisions, then bulk)*
-1. Decide the canonical building names, then create the missing building and floors.
-2. Store the spelling variants as corrections (`W2` → the canonical name, `foldszint` → the
-   ground floor, `1. emelet` → the first) on the **Inventory import** page. Five building
-   and five floor corrections cover every row.
-3. Preview, then apply with **“also create the rooms the survey names”**: 118 rooms and 36
-   zones appear as default rectangles below what is already drawn.
-4. Drag the rectangles into place on the map, floor by floor. This is the long manual part
-   and it cannot be automated — only a person knows where a room is.
+### Phase 1 — make the importer read the data as it actually is *(done)*
+In `services/inventory/surveyImport.ts`, each with tests using the numbers above as fixtures:
+
+1. **The `HWA` prefix is supplied** when the survey wrote the number alone. Recovers 92.
+2. **A name is looked up as a name**, against `asset_tag` then the display name, ignoring
+   separators so `MMH_PRINTER_1039`, `MMH PRINTER 1039` and `MMHPRINTER1039` are one device.
+   Recovers 30, and turns the rest into honest "go and identify this" tasks.
+3. **The row mode is inferred when the column is missing**: an identifier means an ITSM row.
+   An explicit `EGYEB` still wins. This is what stops set E creating 123 duplicates.
+4. **Placeholder serials are read as no serial** and counted, so they neither create junk nor
+   merge devices.
+5. **Duplicate rows are named in the preview** — the same identifier or serial on more than
+   one row, before applying rather than explained afterwards. This found a fifth pair the
+   file-level analysis had missed: one device recorded once with the prefix and once without.
+
+The preview also now says **how** each row resolved, so if `hwa_prefixed` drops to zero on a
+later export, the survey tool has started writing full numbers and the rule can go.
+
+One further fix that fell out of it: **the identifier is resolved before the place**, and
+reported either way. Doing it the other way round meant 612 of 735 rows were dropped at the
+building check, so a run reported 6 identifier problems out of the 33 that were there — and
+only after every building had been fixed would the rest have appeared.
+
+### Phase 2 — the hierarchy *(next, and the long part)*
+1. Rename `Werk1` → `Werk 1`; create `Werk 2`; create `Ground floor` (0) and `First floor`
+   (1) under both.
+2. Enter the four corrections from §3 on the **Inventory import** page. Rehearsed: place
+   failures go to zero.
+3. Preview, then apply with **“also create the rooms the survey names”** — 118 room names
+   across the four floors (127 rooms, since a name reused on another floor is another room)
+   and 36 zones appear as default rectangles below whatever is already drawn.
+4. Drag the rectangles into place, floor by floor. This cannot be automated: only a person
+   knows where a room is. It is the bulk of the remaining effort.
 
 ### Phase 3 — import
-Preview on `/inventory-import`, fix the flagged names inline (26 unknown persons, whatever
-rooms remain), re-preview until the list stops shrinking, then apply. Expect roughly 400
-updates and 200+ new local-only assets.
+Preview on `/inventory-import`, fix what is flagged inline (26 unknown persons, whatever
+rooms remain), re-preview until the list stops shrinking, then apply. On the current data
+expect roughly 420 updates and 280 new local-only assets.
 
 ### Phase 4 — work the list
 Re-derive on `/normalisation`, then:
-- the 43 unresolved device names → *identify the device*
-- the 8 unknown HWA numbers → *check an HWA* (one is a one-letter typo)
+- the 23 unresolved device names (mostly `MMHIPC…` industrial PCs) → *identify the device*
+- the 10 unknown numbers, one a single missing letter → *check an HWA*
 - the new local-only assets → *register in ITSM*, worked from the worksheet CSV
 - the labelling round → the printed worksheet, room by room
 
@@ -159,15 +216,15 @@ The round is finished when the task list is empty and was derived after the last
 
 ## 7. Order of work
 
-| # | What | Who |
-|---|---|---|
-| 1 | Phase 1, items 1–5 (importer) | code |
-| 2 | Get set E as JSON, or convert it | ask, then code |
-| 3 | Canonical building and floor names | decision |
-| 4 | Corrections + create the hierarchy | app |
-| 5 | Preview → apply | app |
-| 6 | Position the rooms on the map | manual, per floor |
-| 7 | Re-derive and work the tasks | app + Alemba |
+| # | What | Who | State |
+|---|---|---|---|
+| 1 | Read the identifier column properly (phase 1) | code | **done** |
+| 2 | Convert set E | code | **done** |
+| 3 | Canonical building and floor names | decision | **done** |
+| 4 | Create the hierarchy + the four corrections | app | next |
+| 5 | Preview → apply | app | |
+| 6 | Position the rooms on the map | manual, per floor | the long part |
+| 7 | Re-derive and work the tasks | app + Alemba | |
 
-Steps 1–2 are what stop the import from producing work that does not exist. Nothing should
-be applied before them.
+Steps 1–3 were what stood between the import and a task list worth trusting. Step 6 is where
+the time goes.

@@ -285,6 +285,41 @@ const InventoryImport: React.FC = () => {
             <li><strong>{plan.no_room}</strong> would sit on a floor but in no room</li>
           </ul>
 
+          {/* How the identifier column resolved. Worth stating rather than assuming: two of
+              these rules exist only because the survey writes the same number three ways,
+              and if they stop firing on a later export the tool has changed. */}
+          <p className={styles.note}>
+            Identified <strong>{plan.matched_by.hwa}</strong> by HWA number
+            {plan.matched_by.hwa_prefixed > 0 && <>, <strong>{plan.matched_by.hwa_prefixed}</strong> after supplying the missing “HWA” prefix</>}
+            {plan.matched_by.device_name > 0 && <>, <strong>{plan.matched_by.device_name}</strong> by the older name on the asset tag</>}
+            {plan.matched_by.serial > 0 && <>, <strong>{plan.matched_by.serial}</strong> by serial</>}.
+            {plan.placeholder_serials > 0 && (
+              <> {plan.placeholder_serials} serial(s) were placeholders (“…”, “N/A”) and read as no serial —
+              those devices still need a number read off them.</>
+            )}
+          </p>
+
+          {plan.duplicates.length > 0 && (
+            <section className={styles.section}>
+              <h2>The same device recorded twice</h2>
+              <p className={styles.sectionHint}>
+                Each of these appears on more than one survey row. Applying is safe — the
+                later row wins — but if a pair is really two devices, one of them is about to
+                lose its own record.
+              </p>
+              <ul className={styles.plainList}>
+                {plan.duplicates.map((d) => (
+                  <li key={`${d.kind}-${d.value}`}>
+                    <strong>{d.value}</strong>{' '}
+                    <span className={styles.fixMeta}>
+                      {d.kind === 'identifier' ? 'identifier' : 'serial'} · {d.rows} rows
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
           {plan.created_areas && (
             <p className={styles.note}>
               Created {plan.created_areas.work_areas} room(s) and {plan.created_areas.zones} zone(s).
@@ -392,15 +427,23 @@ const InventoryImport: React.FC = () => {
 
           {plan.unmatched_hwa.length > 0 && (
             <section className={styles.section}>
-              <h2>HWA numbers with no asset</h2>
+              <h2>Identifiers that resolved to nothing</h2>
               <p className={styles.sectionHint}>
-                Not a naming problem: either the number was read wrong on the device, or the record
-                is in ITSM but not yet in the app. The{' '}
-                <Link to="/itsm">ITSM Reconcile page</Link> creates the missing ones from the export.
+                Not a naming problem, and two different problems at that. A{' '}
+                <strong>number</strong> was either misread off the device or is in ITSM but not
+                yet in the app — the <Link to="/itsm">ITSM Reconcile page</Link> creates those
+                from the export. A <strong>name</strong> is an older device (MMHIPC…, MMH
+                PRINTER…) that nothing has on record: it needs identifying, then registering.
               </p>
               <ul className={styles.plainList}>
                 {plan.unmatched_hwa.slice(0, 50).map((h) => (
-                  <li key={h.hwa}><strong>{h.hwa}</strong> {h.note && <span className={styles.fixMeta}>{h.note}</span>}</li>
+                  <li key={h.hwa}>
+                    <strong>{h.hwa}</strong>{' '}
+                    <span className={styles.fixMeta}>
+                      {h.kind === 'number' ? 'a number nothing has' : 'an older device name'}
+                      {h.note ? ` · ${h.note}` : ''}
+                    </span>
+                  </li>
                 ))}
                 {plan.unmatched_hwa.length > 50 && <li>…and {plan.unmatched_hwa.length - 50} more.</li>}
               </ul>
