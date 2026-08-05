@@ -713,19 +713,41 @@ async function planInternal(rows: SurveyRow[], corrections: Corrections): Promis
       plan.unmatchedPerson.set(name, (plan.unmatchedPerson.get(name) ?? 0) + 1);
     }
 
+    /**
+     * What the survey recorded — and only that.
+     *
+     * A blank column in the survey means "not written down", not "nobody" and not "nothing".
+     * Writing the blanks through would erase what the ITSM export already knew: measured on
+     * the real survey, 310 of the 455 identified rows carry no person, and 233 of those are
+     * devices whose person came from ITSM. Clearing them would have destroyed 233 assignments
+     * and then reported 233 fresh "differs from ITSM" tasks to put them back.
+     *
+     * The walkers were recording rooms, not asking who sits where, so silence there is
+     * expected rather than a correction. Where a name IS given it wins — the survey is the
+     * physical truth about who is at that desk now, and the difference against ITSM is a real
+     * task rather than a mistake.
+     */
     const placementFields: Partial<Asset> = {
       building_id: building.id,
       floor_id: floor.id,
-      workarea_id: workArea?.id ?? null,
       // Sections deliberately unused — see matchWorkArea. The room is the WorkArea, so
-      // there is no finer level left for the survey to fill.
+      // there is no finer level left for the survey to fill, and a leftover section would
+      // contradict the placement this row is making.
       section_id: null,
-      person_full_name: person.fullName,
-      person_itsm_id: person.itsmId,
-      person_id: person.personId,
-      network_domain: (row.terulet ?? '').trim() || null,
-      notes: (row.megjegyzes ?? '').trim() || null,
     };
+    // A room only when one was found. A row naming no room, or a room that does not exist
+    // yet, leaves any existing placement alone rather than knocking the device back out to
+    // the floor — the missing room is reported, and a re-run after creating it lands right.
+    if (workArea) placementFields.workarea_id = workArea.id;
+    if (person.fullName) {
+      placementFields.person_full_name = person.fullName;
+      placementFields.person_itsm_id = person.itsmId;
+      placementFields.person_id = person.personId;
+    }
+    const area = (row.terulet ?? '').trim();
+    if (area) placementFields.network_domain = area;
+    const note = (row.megjegyzes ?? '').trim();
+    if (note) placementFields.notes = note;
 
     if (isHwa) {
       // Already resolved and reported above; nothing to place if it found nothing.

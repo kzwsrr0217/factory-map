@@ -622,3 +622,85 @@ describe('POST /api/inventory/survey/import — the same device twice', () => {
     expect(dups.every((d: any) => d.rows === 2 && d.kind === 'identifier')).toBe(true);
   });
 });
+
+/**
+ * A blank column in the survey means "not written down" — not "nobody", and not "nothing".
+ *
+ * Measured on the real survey: 310 of the 455 identified rows carry no person, and 233 of
+ * those are devices whose person came from the ITSM export. Writing the blanks through would
+ * have destroyed 233 assignments and then reported 233 "differs from ITSM" tasks to put them
+ * back. The walkers were recording rooms, not asking who sits where.
+ */
+describe('POST /api/inventory/survey/import — what the survey did not record', () => {
+  it('leaves the person alone when the survey names nobody', async () => {
+    const asset = await seedAsset('keepperson', `${PREFIX}-KEEP1`);
+    await AppDataSource.getRepository(Asset).update(asset._id, {
+      person_full_name: PERSON_AS_ITSM,
+      person_id: 'mmhmoder',
+    });
+
+    await importSurvey({
+      rows: [row({ azonosito_mod: 'HWA', hwa: `${PREFIX}-KEEP1` })], // no szemely at all
+      apply: true,
+    });
+
+    const after = await AppDataSource.getRepository(Asset)
+      .findOne({ where: { hardware_asset_id: `${PREFIX}-KEEP1` } });
+    expect(after!.person_full_name).toBe(PERSON_AS_ITSM);
+    expect(after!.person_id).toBe('mmhmoder');
+    // And it did land where the survey said, so the row was not simply skipped.
+    expect(after!.floor_id).toBe(floorId);
+  });
+
+  it('replaces the person when the survey does name one', async () => {
+    const asset = await seedAsset('newperson', `${PREFIX}-KEEP2`);
+    await AppDataSource.getRepository(Asset).update(asset._id, {
+      person_full_name: PERSON_AS_ITSM,
+      person_id: 'mmhmoder',
+    });
+
+    await importSurvey({
+      rows: [row({ azonosito_mod: 'HWA', hwa: `${PREFIX}-KEEP2`, szemely: 'Somebody Else' })],
+      apply: true,
+    });
+
+    const after = await AppDataSource.getRepository(Asset)
+      .findOne({ where: { hardware_asset_id: `${PREFIX}-KEEP2` } });
+    // The survey is the physical truth about who is at that desk now; the disagreement with
+    // ITSM becomes a task rather than being hidden.
+    expect(after!.person_full_name).toBe('Somebody Else');
+    expect(after!.person_id).toBeNull();
+  });
+
+  it('does not knock a device back out of its room when the survey names none', async () => {
+    const asset = await seedAsset('keeproom', `${PREFIX}-KEEP3`);
+    await AppDataSource.getRepository(Asset).update(asset._id, { workarea_id: roomId });
+
+    await importSurvey({
+      rows: [row({ azonosito_mod: 'HWA', hwa: `${PREFIX}-KEEP3`, work_area: '' })],
+      apply: true,
+    });
+
+    const after = await AppDataSource.getRepository(Asset)
+      .findOne({ where: { hardware_asset_id: `${PREFIX}-KEEP3` } });
+    expect(after!.workarea_id).toBe(roomId);
+  });
+
+  it('keeps notes and the network area that the survey left blank', async () => {
+    const asset = await seedAsset('keepnotes', `${PREFIX}-KEEP4`);
+    await AppDataSource.getRepository(Asset).update(asset._id, {
+      notes: 'typed in the app by a person',
+      network_domain: 'Operation Technology',
+    });
+
+    await importSurvey({
+      rows: [row({ azonosito_mod: 'HWA', hwa: `${PREFIX}-KEEP4` })],
+      apply: true,
+    });
+
+    const after = await AppDataSource.getRepository(Asset)
+      .findOne({ where: { hardware_asset_id: `${PREFIX}-KEEP4` } });
+    expect(after!.notes).toBe('typed in the app by a person');
+    expect(after!.network_domain).toBe('Operation Technology');
+  });
+});
