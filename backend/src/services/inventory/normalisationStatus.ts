@@ -21,6 +21,7 @@ import { AuditLog } from '../../entities/AuditLog.entity';
 import { ItsmHardwareSnapshot } from '../../entities/ItsmHardwareSnapshot.entity';
 import { NormalisationTask } from '../../entities/NormalisationTask.entity';
 import { lastGenerationAt } from '../itsm/taskGenerator';
+import { driftSummary, lastReconcileRunAt } from '../itsm/ReconcileService';
 
 /** The audit `entity_type` written once per survey import — see inventory.controller.ts. */
 const SURVEY_RUN_ENTITY = 'inventory_survey';
@@ -45,6 +46,24 @@ export interface NormalisationStatus {
     /** Placed on a floor. Anything else is only findable through a list. */
     placed: number;
     total: number;
+  };
+  /**
+   * The last comparison of every linked asset against the loaded export.
+   *
+   * Reported for the same reason as the task list's age, and it was the worse of the two:
+   * the drift overview showed whatever had last been checked by hand, so after an export
+   * and a survey landed it said all 1057 linked assets were `missing` — a verdict from a
+   * run made before the export existed. A number that wrong needs to say how old it is.
+   */
+  comparison: {
+    compared_at: string | null;
+    never_checked: number;
+    in_sync: number;
+    differences: number;
+    missing: number;
+    error: number;
+    /** Compared before the newest export or survey, so the verdicts describe the past. */
+    stale: boolean;
   };
   tasks: {
     open: number;
@@ -112,6 +131,9 @@ export async function getNormalisationStatus(): Promise<NormalisationStatus> {
   const surveyAt = iso(lastSurveyRun?.timestamp ?? null);
   const newestInput = [exportAt, surveyAt].filter(Boolean).sort().pop() ?? null;
 
+  const drift = await driftSummary();
+  const comparedAt = iso(await lastReconcileRunAt());
+
   return {
     itsm_export: { records, loaded_at: exportAt },
     survey: {
@@ -120,6 +142,17 @@ export async function getNormalisationStatus(): Promise<NormalisationStatus> {
       assets_created: surveyDiff?.assets_created ?? null,
     },
     app: { linked, local_only: localOnly, placed, total },
+    comparison: {
+      compared_at: comparedAt,
+      never_checked: drift.never_checked,
+      in_sync: drift.in_sync,
+      differences: drift.differences,
+      missing: drift.missing,
+      error: drift.error,
+      // Never compared counts as stale as soon as there is anything to compare: the
+      // difference between "nothing disagrees" and "nobody has looked" is the whole point.
+      stale: linked > 0 && (comparedAt === null || (!!newestInput && comparedAt < newestInput)),
+    },
     tasks: {
       open,
       done,

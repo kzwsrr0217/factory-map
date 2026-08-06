@@ -20,6 +20,9 @@
     "reconcile:report": "ts-node src/scripts/reconcile-report.ts",
     "report:network": "ts-node src/scripts/network-gaps-report.ts",
     "report:quality": "ts-node src/scripts/data-quality-report.ts",
+    "report:monitors": "ts-node src/scripts/monitor-plan-report.ts",
+    "reclassify:types": "ts-node src/scripts/reclassify-catalog-types.ts",
+    "record:replacement": "ts-node src/scripts/record-replacement.ts",
     "link:redeployments": "ts-node src/scripts/link-redeployments.ts",
     "normalise:macs": "ts-node src/scripts/normalise-macs.ts",
     "seed:network-demo": "ts-node src/scripts/seed-network-demo.ts",
@@ -31,7 +34,8 @@
     "migration:generate": "typeorm-ts-node-commonjs migration:generate -d src/data-source.ts",
     "migration:run": "typeorm-ts-node-commonjs migration:run -d src/data-source.ts",
     "migration:revert": "typeorm-ts-node-commonjs migration:revert -d src/data-source.ts",
-    "migration:show": "typeorm-ts-node-commonjs migration:show -d src/data-source.ts"
+    "migration:show": "typeorm-ts-node-commonjs migration:show -d src/data-source.ts",
+    "verify:migrations": "ts-node src/scripts/verify-migrations.ts"
   },
   "jest": {
     "preset": "ts-jest",

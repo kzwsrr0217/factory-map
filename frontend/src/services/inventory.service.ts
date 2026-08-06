@@ -133,6 +133,21 @@ export interface NormalisationStatus {
     assets_created: number | null;
   };
   app: { linked: number; local_only: number; placed: number; total: number };
+  /**
+   * The last comparison of every linked asset against the loaded export. Reported because
+   * the drift numbers on the ITSM page say nothing about their own age, and after an export
+   * and a survey landed they were describing a run made before either existed.
+   */
+  comparison: {
+    compared_at: string | null;
+    never_checked: number;
+    in_sync: number;
+    differences: number;
+    missing: number;
+    error: number;
+    /** Compared before the newest export or survey, so the verdicts describe the past. */
+    stale: boolean;
+  };
   tasks: {
     open: number;
     done: number;

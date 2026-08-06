@@ -117,6 +117,7 @@ import {
   unlinkedMmh,
   importSnapshotFromUpload,
   createUnlinkedMmhAssets,
+  reconcileCompareAll,
 } from '../controllers/itsm.controller';
 import { requireOperator } from '../middleware/auth.middleware';
 import { auditLog, captureAuditBefore } from '../middleware/audit.middleware';
@@ -148,6 +149,12 @@ router.post('/snapshot/import', requireOperator, importSnapshotFromUpload);
 // than via auditLog('asset') — that middleware expects a single created
 // entity or an array of them, not this endpoint's {created, skipped} shape.
 router.post('/reconcile/unlinked-mmh/create', requireOperator, createUnlinkedMmhAssets);
+
+// Compare everything against the LOADED EXPORT. Declared before '/reconcile/:id/check'
+// so 'all' cannot be read as an asset id. Not an ITSM call: it reads the imported
+// snapshot table, which is the only way to answer "is any of this still true?" without
+// a thousand requests at Alemba.
+router.post('/reconcile/all', requireOperator, reconcileCompareAll);
 
 // Per-asset check: the ONLY endpoint that reads ITSM, and only for one asset,
 // on explicit user action. Nothing is ever written back to ITSM.

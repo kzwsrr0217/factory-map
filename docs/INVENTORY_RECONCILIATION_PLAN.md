@@ -246,7 +246,7 @@ the time goes.
 
 ## 8. Runbook — dev first, then the VM
 
-### Where this stands on dev (5 Aug 2026)
+### Where this stands on dev (6 Aug 2026)
 
 | Step | State |
 |---|---|
@@ -254,10 +254,23 @@ the time goes.
 | 2. Convert the CSV-only export | **done** — `eszkoz/eszkozok_20260729_MMHBABA.converted.json`, 123 rows |
 | 3. Hierarchy | **done** — `Werk 1` / `Werk 2`, each with a ground floor (0) and a first floor (1) |
 | 4. The four corrections | **done** — place failures are at 0 |
-| 5. Preview | **done** — 735 entries, 0 place failures, 431 updates / 271 creates |
+| 5. Preview | **done** — 735 entries, 0 place failures |
 | 6. Person names | **mostly done** — 19 of 22 corrections resolve; see below |
-| 7. Apply | **not yet** — this is the next action |
-| 8–9. Re-derive, position the rooms | not yet |
+| 7. Apply | **done** — 702 updates / 0 creates on the second run, so it is idempotent |
+| 8. Fresh ITSM export loaded | **done** — 1074 records (17 new, 36 changed, 1021 unchanged) |
+| 9. Compare everything | **done** — 1053 checked: 859 in sync, 194 with differences, 0 missing |
+| 10. Position the 128 rooms on the map | not yet — the long part |
+
+The comparison is where the round now stands, and what it found is worth reading as a
+shape rather than a total:
+
+| Differences | Count | What it is |
+|---|---|---|
+| Display Name | 156 | Mostly screens the survey named after their machine (`HWA16727 U2412M`) against ITSM's own name for them. Cosmetic, and a candidate for accepting in bulk. |
+| Assigned Person | 33 | The real disagreement: the survey found somebody else at the desk. Needs deciding one by one. |
+| Organization | 15 | |
+| Status | 9 | |
+| Catalog Item | 2 | |
 
 Three person corrections are stored and still find nobody, which is a real state rather
 than a mistake: `ALEX` → `Hettman, Alex` where the export writes `Hettmann` with two n's,
@@ -265,6 +278,34 @@ and `amrein kata` / `CSÁSZÁR DÁNIEL` whose people have no device in this expo
 The export's person list only holds people something in it is assigned to. `DIAK` and the
 `MMHGEN…` technical accounts are deliberately left empty — a responsible person belongs
 there, not a generic account, and free text loses nothing.
+
+Three person corrections are stored and still find nobody, which is a real state rather
+than a mistake: `ALEX` → `Hettman, Alex` where the export writes `Hettmann` with two n's,
+and `amrein kata` / `CSÁSZÁR DÁNIEL` whose people have no device in this export at all.
+The export's person list only holds people something in it is assigned to. `DIAK` and the
+`MMHGEN…` technical accounts are deliberately left empty — a responsible person belongs
+there, not a generic account, and free text loses nothing.
+
+### Two things the data turned out to be wrong about (6 Aug 2026)
+
+Both were found by dry runs rather than by reading code, and both would have been invisible
+in a total:
+
+**The catalogue's `Type` field is not reliable, and the map into it was incomplete.** The
+item `DELL CAD Docking Station USB-C (WD19DCS)` carries Type = Monitor in Alemba, which put
+five docking stations into the monitor count — and the monitor count is what the screen
+redistribution is planned from. The name is the better guide where it names a product
+outright, so it now wins (`classifyFromCatalogName`). Separately, the Type→bucket table was
+missing the words this catalogue actually uses — `Desktop`, `Phone`, `Generic IPC`,
+`Dockingstation` — so a re-import would have dropped **569 records** to 'other'. Both fixed;
+`npm run reclassify:types` corrected 75 stored records (59 docks, 13 switches, 3 firewalls).
+
+**A re-import could silently lose a classification it could no longer derive.** `asset_type`
+comes from the Catalog Items CSV, which is a separate hand-made export that goes stale on its
+own schedule, and the import replaces the whole table. A device whose catalogue item is
+missing from today's CSV came back as 'other', on an import reporting "1021 unchanged". The
+importer now keeps a type it already knew when this run cannot derive one, and says how many
+times it did (`type_kept`).
 
 The rooms are being taken as the survey spells them, and tidied later when they are
 positioned on the map. The one cost of that: renaming a room in the app needs a stored

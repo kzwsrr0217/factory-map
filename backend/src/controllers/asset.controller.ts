@@ -50,6 +50,7 @@ import { Section } from '../entities/Section.entity';
 import { Workstation } from '../entities/Workstation.entity';
 import { io } from '../server';
 import { chunkForEntity, findByIn } from '../utils/mssqlBatch';
+import { ReplacementError, replaceAssetWith } from '../services/asset/replacement';
 
 const repo = () => AppDataSource.getRepository(Asset);
 const masterAssetRepo = () => AppDataSource.getRepository(MasterAsset);
@@ -1075,88 +1076,27 @@ export const replaceAsset = async (req: Request, res: Response, next: NextFuncti
   try {
     const oldId = req.params.id;
     const { replacement_id: newId } = req.body as { replacement_id: string };
-    if (!newId) { res.status(400).json({ success: false, error: 'replacement_id is required' }); return; }
-    if (newId === oldId) { res.status(422).json({ success: false, error: 'An asset cannot replace itself' }); return; }
-
-    const oldAsset = await repo().findOne({ where: { id: oldId } });
-    const newAsset = await repo().findOne({ where: { id: newId } });
-    if (!oldAsset) { res.status(404).json({ success: false, error: 'Asset to replace not found' }); return; }
-    if (!newAsset) { res.status(404).json({ success: false, error: 'Replacement asset not found' }); return; }
-
-    // Transfer position, hierarchy, and physical wiring to the replacement.
-    newAsset.building_id = oldAsset.building_id;
-    newAsset.floor_id = oldAsset.floor_id;
-    newAsset.workarea_id = oldAsset.workarea_id;
-    newAsset.section_id = oldAsset.section_id;
-    newAsset.workstation_id = oldAsset.workstation_id;
-    newAsset.rack_id = oldAsset.rack_id;
-    newAsset.u_position = oldAsset.u_position;
-    newAsset.rack_u_size = oldAsset.rack_u_size;
-    newAsset.loc_x = oldAsset.loc_x;
-    newAsset.loc_y = oldAsset.loc_y;
-    newAsset.loc_rotation = oldAsset.loc_rotation;
-    newAsset.loc_footprint = oldAsset.loc_footprint;
-    newAsset.is_placed = oldAsset.is_placed;
-    newAsset.wall_port_id = oldAsset.wall_port_id;
-    newAsset.predecessor_id = oldId;
-    await repo().save(newAsset);
-
-    // Clear the old asset out of its physical slot — it's been removed.
-    oldAsset.successor_id = newId;
-    oldAsset.is_placed = false;
-    oldAsset.loc_x = 0;
-    oldAsset.loc_y = 0;
-    oldAsset.workarea_id = null;
-    oldAsset.section_id = null;
-    oldAsset.workstation_id = null;
-    oldAsset.rack_id = null;
-    oldAsset.u_position = null;
-    await repo().save(oldAsset);
-    // wall_port_id=null bypasses the same TypeORM identity-map quirk worked
-    // around in updateAsset — see the comment there.
-    await AppDataSource.createQueryBuilder().update(Asset).set({ wall_port_id: () => 'NULL' }).where('id = :id', { id: oldId }).execute();
-
-    // Re-point every connection (either direction) from the old asset to the
-    // replacement. A row that would become self-referencing (the old asset
-    // was directly connected to its own replacement) is dropped instead.
-    await connRepo().createQueryBuilder().update().set({ asset_id: newId })
-      .where('asset_id = :oldId AND connected_asset_id != :newId', { oldId, newId }).execute();
-    await connRepo().createQueryBuilder().update().set({ connected_asset_id: newId })
-      .where('connected_asset_id = :oldId AND asset_id != :newId', { oldId, newId }).execute();
-    await connRepo().delete({ asset_id: newId, connected_asset_id: newId });
-
-    // If the old asset was itself a switch, every WallPort wired into one of
-    // its ports (switch_asset_id) needs to follow it to the replacement too —
-    // otherwise those wall ports keep pointing at the now-retired switch.
-    await wallPortRepo().createQueryBuilder().update().set({ switch_asset_id: newId })
-      .where('switch_asset_id = :oldId', { oldId }).execute();
+    // What a swap consists of lives in services/asset/replacement.ts, because it also has to
+    // happen from a list of HWA numbers with no browser in sight — see record-replacement.ts.
+    const user = (req as AuthRequest).user;
+    await replaceAssetWith(oldId, newId, user ? { id: user.id, username: user.username } : undefined);
 
     const fullOld = (await loadWithRelations(oldId))!;
     const fullNew = (await loadWithRelations(newId))!;
     io.emit('asset:updated', fullOld.toApiResponse());
     io.emit('asset:updated', fullNew.toApiResponse());
 
-    // Written manually rather than via the auditLog middleware — that
-    // middleware infers create/update/delete from req.method alone (this is
-    // a POST, so it would be misfiled as "create") and expects a single
-    // flat asset in the response body, not this endpoint's { old, new } pair.
-    const user = (req as AuthRequest).user;
-    if (user) {
-      const logRepo = AppDataSource.getRepository(AuditLog);
-      await logRepo.save(logRepo.create({
-        user_id: user.id, username: user.username, action: 'update',
-        entity_type: 'asset', document_id: oldId,
-        diff: { replaced_by: newId, note: 'Asset replaced — cleared to unplaced, connections transferred to replacement' },
-      })).catch(() => { /* audit failure must never fail the request */ });
-      await logRepo.save(logRepo.create({
-        user_id: user.id, username: user.username, action: 'update',
-        entity_type: 'asset', document_id: newId,
-        diff: { replaces: oldId, note: 'Inherited position, hierarchy, wall-port assignment, and connections from replaced asset' },
-      })).catch(() => { /* audit failure must never fail the request */ });
-    }
-
     res.json({ success: true, data: { old: fullOld.toApiResponse(), new: fullNew.toApiResponse() }, message: 'Asset replaced successfully' });
-  } catch (error) { next(error); }
+  } catch (error) {
+    if (error instanceof ReplacementError) {
+      // 400 for a missing id, 422 for one that cannot mean anything, 404 for a real absence —
+      // the same three answers the inline version gave.
+      const status = error.kind === 'not-found' ? 404 : /required/.test(error.message) ? 400 : 422;
+      res.status(status).json({ success: false, error: error.message });
+      return;
+    }
+    next(error);
+  }
 };
 
 // ── ITSM mock sync ────────────────────────────────────────────────────────────

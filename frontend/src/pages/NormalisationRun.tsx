@@ -27,6 +27,7 @@ import Button from '../components/common/Button';
 import { useToast } from '../contexts/ToastContext';
 import { getApiErrorMessage } from '../utils/apiError';
 import { inventoryService, NormalisationStatus } from '../services/inventory.service';
+import { itsmService } from '../services/itsm.service';
 import { taskService } from '../services/task.service';
 import styles from '../styles/pages/NormalisationRun.module.css';
 
@@ -82,6 +83,7 @@ const NormalisationRun: React.FC = () => {
   const qc = useQueryClient();
   const toast = useToast();
   const [deriving, setDeriving] = React.useState(false);
+  const [comparing, setComparing] = React.useState(false);
 
   const status = useQuery<NormalisationStatus>({
     queryKey: ['inventory', 'status'],
@@ -101,6 +103,31 @@ const NormalisationRun: React.FC = () => {
       toast.error(getApiErrorMessage(err, 'Could not re-derive the list'));
     } finally {
       setDeriving(false);
+    }
+  };
+
+  /**
+   * Compares everything, then re-reads the round. The task list is invalidated too: a
+   * resolved or newly-found field difference is a task, so the two numbers on this page
+   * would otherwise disagree until somebody reloaded.
+   */
+  const compareAll = async () => {
+    setComparing(true);
+    try {
+      const r = await itsmService.compareAll();
+      // Named fields rather than only a total: "34 assigned person" is a list to walk, "1
+      // serial number" is a typo, and the same number says neither.
+      const kinds = r.by_field.slice(0, 3).map((f) => `${f.count} ${f.label.toLowerCase()}`).join(', ');
+      toast.success(
+        `${r.checked} checked · ${r.in_sync} in sync · ${r.differences} with differences`
+        + `${kinds ? ` (${kinds})` : ''} · ${r.missing} not in the export`,
+      );
+      qc.invalidateQueries({ queryKey: ['inventory', 'status'] });
+      qc.invalidateQueries({ queryKey: ['itsm'] });
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, 'Could not compare against the export'));
+    } finally {
+      setComparing(false);
     }
   };
 
@@ -131,6 +158,36 @@ const NormalisationRun: React.FC = () => {
 
       {s && (
         <>
+          {/*
+            Before the task-list warning, because this is upstream of it: a field difference
+            only becomes a task once something has compared the two sides.
+          */}
+          {s.comparison.stale && (
+            <Card padding="lg" className={styles.staleBanner}>
+              <AlertTriangle size={18} />
+              <div>
+                <strong>Nothing has been compared against the current export.</strong>{' '}
+                {s.comparison.compared_at ? (
+                  <>
+                    The last comparison ran {ago(s.comparison.compared_at)}, before the newest
+                    data arrived — so the {s.comparison.differences} difference(s) and{' '}
+                    {s.comparison.missing} “not in ITSM” shown on the ITSM page are verdicts
+                    about data that has since been replaced.
+                  </>
+                ) : (
+                  <>
+                    Nothing has ever been compared, so no difference has been found yet —
+                    including the ones worth acting on. {s.app.linked} linked asset(s) are
+                    waiting.
+                  </>
+                )}
+              </div>
+              <Button variant="primary" onClick={compareAll} loading={comparing} disabled={comparing}>
+                <RefreshCw size={15} /> Compare all
+              </Button>
+            </Card>
+          )}
+
           {s.tasks.stale && (
             <Card padding="lg" className={styles.staleBanner}>
               <AlertTriangle size={18} />
@@ -145,7 +202,7 @@ const NormalisationRun: React.FC = () => {
             </Card>
           )}
 
-          {!s.tasks.stale && s.tasks.consistent && (
+          {!s.tasks.stale && !s.comparison.stale && s.tasks.consistent && (
             <Card padding="lg" className={styles.doneBanner}>
               <CheckCircle2 size={18} />
               <div>
@@ -195,13 +252,32 @@ const NormalisationRun: React.FC = () => {
               <Step
                 index={3}
                 title="Look at what disagrees"
-                done={s.app.linked > 0}
+                done={s.app.linked > 0 && !s.comparison.stale}
                 action={<Link className={styles.link} to="/itsm">Field differences <ArrowRight size={14} /></Link>}
               >
                 <p>
                   <strong>{s.app.linked}</strong> asset(s) linked to ITSM ·{' '}
                   <strong>{s.app.local_only}</strong> local-only, still to register in Alemba ·{' '}
                   <strong>{s.app.placed}</strong> of {s.app.total} on a floor plan.
+                </p>
+                {s.comparison.compared_at ? (
+                  <p>
+                    Compared {when(s.comparison.compared_at)} —{' '}
+                    <strong>{s.comparison.in_sync}</strong> in sync,{' '}
+                    <strong>{s.comparison.differences}</strong> with differences,{' '}
+                    <strong>{s.comparison.missing}</strong> not in the export
+                    {s.comparison.never_checked > 0 && <>, {s.comparison.never_checked} never checked</>}.
+                  </p>
+                ) : (
+                  <p>Nothing has been compared yet, so no difference has been found.</p>
+                )}
+                <Button variant="outline" size="sm" onClick={compareAll} loading={comparing} disabled={comparing}>
+                  <RefreshCw size={14} /> Compare all against the export
+                </Button>
+                <p className={styles.hint}>
+                  This reads the export that was loaded in step 1, not Alemba — the app is
+                  read-only against ITSM and must not make a request per asset. So the
+                  verdicts are true of that export, not of ITSM this minute.
                 </p>
                 {s.app.placed < s.app.total && (
                   <p className={styles.hint}>

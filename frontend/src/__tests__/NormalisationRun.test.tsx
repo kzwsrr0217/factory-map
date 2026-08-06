@@ -33,6 +33,10 @@ const STATUS = {
   itsm_export: { records: 1057, loaded_at: DAY_AGO },
   survey: { applied_at: HOUR_AGO, assets_updated: 120, assets_created: 4 },
   app: { linked: 1054, local_only: 6, placed: 900, total: 1060 },
+  comparison: {
+    compared_at: HOUR_AGO, never_checked: 0, in_sync: 1000,
+    differences: 34, missing: 20, error: 0, stale: false,
+  },
   tasks: {
     open: 3, done: 1, dismissed: 0,
     derived_at: DAY_AGO, consistent: false, stale: true,
@@ -41,6 +45,7 @@ const STATUS = {
 
 function seed(status: Record<string, unknown> = STATUS) {
   const generated: unknown[] = [];
+  const compared: unknown[] = [];
   server.use(
     rest.get(`${API}/inventory/status`, (_req, res, ctx) =>
       res(ctx.json({ success: true, data: status }))),
@@ -51,8 +56,18 @@ function seed(status: Record<string, unknown> = STATUS) {
         data: { created: 2, reopened: 0, unchanged: 1, closed: 1, awaiting_human: 0 },
       }));
     }),
+    rest.post(`${API}/itsm/reconcile/all`, (_req, res, ctx) => {
+      compared.push(true);
+      return res(ctx.json({
+        success: true,
+        data: {
+          checked: 1054, in_sync: 1000, differences: 34, missing: 20, diff_fields: 41,
+          compared_at: new Date().toISOString(), export_loaded_at: DAY_AGO, export_records: 1057,
+        },
+      }));
+    }),
   );
-  return { generated };
+  return { generated, compared };
 }
 
 function renderPage() {
@@ -100,6 +115,10 @@ describe('NormalisationRun', () => {
       itsm_export: { records: 0, loaded_at: null },
       survey: { applied_at: null, assets_updated: null, assets_created: null },
       app: { linked: 0, local_only: 0, placed: 0, total: 0 },
+      comparison: {
+        compared_at: null, never_checked: 0, in_sync: 0,
+        differences: 0, missing: 0, error: 0, stale: false,
+      },
       tasks: { open: 0, done: 0, dismissed: 0, derived_at: null, consistent: false, stale: false },
     });
     renderPage();
@@ -109,12 +128,49 @@ describe('NormalisationRun', () => {
     expect(screen.queryByText(/This round is closed/)).not.toBeInTheDocument();
   });
 
+  it('warns when nothing has been compared against the current export, and compares from there', async () => {
+    const { compared } = seed({
+      ...STATUS,
+      comparison: { ...STATUS.comparison, compared_at: DAY_AGO, stale: true },
+    });
+    renderPage();
+
+    expect(await screen.findByText(/Nothing has been compared against the current export/))
+      .toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /^Compare all$/ }));
+    await waitFor(() => expect(compared).toHaveLength(1));
+  });
+
+  it('says nobody has ever compared, rather than showing a clean zero', async () => {
+    seed({
+      ...STATUS,
+      comparison: {
+        compared_at: null, never_checked: 1054, in_sync: 0,
+        differences: 0, missing: 0, error: 0, stale: true,
+      },
+    });
+    renderPage();
+    expect(await screen.findByText(/Nothing has ever been compared/)).toBeInTheDocument();
+  });
+
+  it('does not call the round closed while the comparison is older than the data', async () => {
+    seed({
+      ...STATUS,
+      tasks: { ...STATUS.tasks, open: 0, consistent: true, stale: false },
+      comparison: { ...STATUS.comparison, stale: true },
+    });
+    renderPage();
+    expect(await screen.findByText(/Nothing has been compared/)).toBeInTheDocument();
+    expect(screen.queryByText(/This round is closed/)).not.toBeInTheDocument();
+  });
+
   it('shows the age of each step rather than a raw date', async () => {
     seed();
     renderPage();
     // The two age chips: the export and the last derive, both a day old in this fixture.
     // Scoped to the chip rather than the whole page, since the stale warning says it too.
     expect(await screen.findAllByText('1 day ago', { selector: 'span' })).toHaveLength(2);
-    expect(screen.getByText('1 hour ago', { selector: 'span' })).toBeInTheDocument();
+    // Two hour-old chips now: the survey and the comparison.
+    expect(screen.getAllByText('1 hour ago', { selector: 'span' })).toHaveLength(2);
   });
 });

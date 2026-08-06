@@ -176,6 +176,18 @@ const ITSM_TYPE_TO_ASSET_TYPE: Record<string, string> = {
   Scanner: 'scanner',
   Camera: 'camera',
   'Network Device': 'network',
+  // Added after measuring the real catalogue against this table rather than reading it:
+  // these are the Type values it actually uses, and without them a re-import would have
+  // dropped the type of 569 records to 'other' — 237 desktops, 197 phones, 69 IPCs. The
+  // table it was written against evidently used different words.
+  Desktop: 'workstation',
+  'Generic PC': 'workstation',
+  Phone: 'phone',
+  IPC: 'ipc',
+  'Generic IPC': 'ipc',
+  Dockingstation: 'dock',
+  // No app bucket for these, and inventing one would be worse than 'other': Tablet,
+  // USB Stick, Accessory, Microscope, Security Device.
 };
 
 /** Switch, router or access point, told apart by what the name says. */
@@ -187,10 +199,50 @@ function classifyNetworkDevice(displayName: string): string {
   return 'network';
 }
 
+/**
+ * What the catalogue NAME says the product is, where it says it unambiguously.
+ *
+ * The `Type` dropdown on a catalogue item is set by hand and has been set wrongly: the item
+ * `DELL CAD Docking Station USB-C (WD19DCS)` carries Type = Monitor in Alemba, which put
+ * five docking stations into the monitor count — and the monitor count is what a screen
+ * redistribution is planned from. `Aruba Switches` has no usable Type at all, so thirteen
+ * switches sat in 'other'.
+ *
+ * The name is the more reliable of the two here, so it wins. Kept to words that name a
+ * product outright: `docking station` requires the noun, not the adjective, and a name that
+ * also says "monitor" is left to the Type — a docking monitor is a monitor.
+ *
+ * Nothing here writes to ITSM. The mistake stays in Alemba; the app just stops repeating it.
+ */
+const NAME_CATEGORIES: Array<{ word: RegExp; type: string; definitive: boolean }> = [
+  { word: /dock(ing)?\s*station/i, type: 'dock', definitive: true },
+  { word: /\bswitch(es)?\b/i, type: 'switch', definitive: true },
+  { word: /\b(firewall|fortigate)\b/i, type: 'router', definitive: true },
+  // The rest are here only so a name that mentions two categories can be spotted and left
+  // alone. `Switch / Server 19" Rack` is a rack; reading "Switch" out of it turned 23 of
+  // them into switches on the first dry run of this rule, which is what it is for.
+  { word: /\bmonitor\b/i, type: 'monitor', definitive: false },
+  { word: /\bserver\b/i, type: 'server', definitive: false },
+  { word: /\b(notebook|laptop)\b/i, type: 'laptop', definitive: false },
+  { word: /\bworkstation\b/i, type: 'workstation', definitive: false },
+  { word: /\brack\b/i, type: 'rack', definitive: false },
+];
+
+export function classifyFromCatalogName(catalogDisplayName: string | null): string | null {
+  const name = (catalogDisplayName ?? '').trim();
+  if (!name) return null;
+  const named = NAME_CATEGORIES.filter((c) => c.word.test(name));
+  const distinct = new Set(named.map((c) => c.type));
+  // Two categories in one name means the name is describing something else — a rack that
+  // holds them, a bundle — and the Type field is the better guide.
+  if (distinct.size !== 1) return null;
+  return named[0].definitive ? named[0].type : null;
+}
+
 export function classifyAssetType(itsmType: string | null, catalogDisplayName: string | null): string {
   const mapped = itsmType ? ITSM_TYPE_TO_ASSET_TYPE[itsmType] : undefined;
   if (mapped === 'network' && catalogDisplayName) return classifyNetworkDevice(catalogDisplayName);
-  return mapped ?? 'other';
+  return classifyFromCatalogName(catalogDisplayName) ?? mapped ?? 'other';
 }
 
 /** The first word of a catalogue name is the make, in this catalogue's conventions. */
@@ -276,6 +328,12 @@ export interface SnapshotImportPlan {
     persons_malformed: number;
     /** Excludes the 'other' fallback, which says nothing about whether the join worked. */
     classified: number;
+    /**
+     * Rows whose already-known type was kept because this run could not derive one — a
+     * stale Catalog Items CSV, usually. Reported rather than silent: it is the difference
+     * between "nothing changed" and "a hundred classifications were nearly lost".
+     */
+    type_kept: number;
     manufacturer: number;
     person_id_resolved: number;
     with_person_name: number;
@@ -316,12 +374,29 @@ export async function planSnapshotImport(input: SnapshotImportInput): Promise<Sn
   const added: SnapshotImportPlan['added'] = [];
   const changed: SnapshotChange[] = [];
   let unchanged = 0;
+  let typeKept = 0;
 
   for (const row of mapped) {
     const before = existingById.get(row.itsm_id!.toUpperCase());
     if (!before) {
       added.push({ itsm_id: row.itsm_id!, display_name: row.display_name ?? null });
       continue;
+    }
+    /**
+     * A type already worked out is not thrown away because this run could not work it out.
+     *
+     * `asset_type` is derived, not exported: it comes from the Catalog Items CSV, which is a
+     * separate hand-made export and goes stale on its own schedule. So a device whose
+     * catalogue item is missing from today's CSV would come back as 'other' — and since the
+     * import is a full replace, that is a silent loss of a hundred records' classification
+     * on an import that reports "1021 unchanged". Measured, not imagined: it happened on the
+     * first dry run of the current export.
+     *
+     * Only ever keeps; a run that DOES derive a type overwrites the old one as normal.
+     */
+    if ((row.asset_type ?? 'other') === 'other' && before.asset_type && before.asset_type !== 'other') {
+      row.asset_type = before.asset_type;
+      typeKept++;
     }
     const diffs: string[] = [];
     for (const field of COMPARED_FIELDS) {
@@ -350,6 +425,7 @@ export async function planSnapshotImport(input: SnapshotImportInput): Promise<Sn
       persons: persons.map.size,
       persons_malformed: persons.malformed,
       classified: mapped.filter((r) => r.asset_type && r.asset_type !== 'other').length,
+      type_kept: typeKept,
       manufacturer: mapped.filter((r) => r.manufacturer).length,
       person_id_resolved: mapped.filter((r) => r.person_id).length,
       with_person_name: mapped.filter((r) => r.assigned_person_name).length,

@@ -27,6 +27,16 @@ import { ItsmHardwareSnapshot } from '../../entities/ItsmHardwareSnapshot.entity
 import { Like } from 'typeorm';
 import config from '../../config/config';
 
+/**
+ * One imported export row, in the shape the reconcile rules compare against. Exported
+ * because the bulk comparison (ReconcileService.reconcileAllFromSnapshot) reads the whole
+ * table at once rather than through getHardware, and both must read a row the same way —
+ * two mappings would mean the bulk run and the per-asset check could disagree.
+ */
+export function snapshotRowToHardware(row: ItsmHardwareSnapshot): IITSMHardware {
+  return toHardware(row);
+}
+
 function toHardware(row: ItsmHardwareSnapshot): IITSMHardware {
   return {
     itsm_guid: row.itsm_guid,

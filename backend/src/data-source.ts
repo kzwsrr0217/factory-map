@@ -17,6 +17,10 @@ import * as path from 'path';
 import { DataSource } from 'typeorm';
 import { Building } from './entities/Building.entity';
 import { Floor } from './entities/Floor.entity';
+import { Zone } from './entities/Zone.entity';
+import { ItsmHardwareSnapshot } from './entities/ItsmHardwareSnapshot.entity';
+import { NormalisationTask } from './entities/NormalisationTask.entity';
+import { NameCorrection } from './entities/NameCorrection.entity';
 import { WorkArea } from './entities/WorkArea.entity';
 import { Section } from './entities/Section.entity';
 import { Workstation } from './entities/Workstation.entity';
@@ -49,9 +53,15 @@ export default new DataSource({
   database: process.env.MSSQL_DATABASE ?? 'factorymap',
   synchronize: false,
   logging: ['query', 'error'],
+  // Must stay the same set as config/database.ts. It had drifted — Zone,
+  // ItsmHardwareSnapshot, NormalisationTask and NameCorrection were missing here, which does
+  // not affect `migration:run` (migrations are explicit SQL) but makes `migration:generate`
+  // propose dropping four real tables, because an entity this file cannot see looks like a
+  // table nothing owns.
   entities: [
-    Building, Floor, WorkArea, Section, Workstation,
-    Asset, MasterAsset, AssetSoftware, AssetConnection,
+    Building, Floor, Zone, WorkArea, Section, Workstation,
+    Asset, MasterAsset, ItsmHardwareSnapshot, NormalisationTask, NameCorrection,
+    AssetSoftware, AssetConnection,
     User, AuditLog, AlertConfig, AlertLog, ScheduledAlert, ActiveSession,
     NetworkRoom, NetworkRack, PatchPanel, WallPort,
     ProductionLine, WorkCenter, EntityKind,

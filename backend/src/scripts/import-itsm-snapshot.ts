@@ -53,11 +53,20 @@ import 'reflect-metadata';
 import * as fs from 'fs';
 import * as path from 'path';
 import { AppDataSource } from '../config/database';
-import { planSnapshotImport } from '../services/itsm/snapshotImport';
+import { planSnapshotImport, parsePortalHardwareCsv } from '../services/itsm/snapshotImport';
 
 type Row = Record<string, unknown>;
 
 const HARDWARE_FILE = 'itsm-mmh-hardware.json';
+/**
+ * The other shape the export comes in.
+ *
+ * The OData call the JSON comes from needs a domain-joined machine and a working View API
+ * path; the ITSM web portal's own "Export to CSV" on the Hardware Assets grid needs neither,
+ * and is what has actually been used since. Same columns, different names — see
+ * parsePortalHardwareCsv, which the browser upload already goes through.
+ */
+const HARDWARE_CSV_FILE = 'hardware-assets.csv';
 const CATALOG_ITEMS_FILE = 'hardware-catalog-items.csv';
 const PERSONS_FILE = 'persons.csv';
 
@@ -88,18 +97,33 @@ function readTextIfPresent(dir: string, file: string): string | null {
  * and the write. This script is the file-reading and the printing; the same service answers
  * an upload from the browser, so there is one definition of what importing means.
  */
-async function importSnapshot(dir: string): Promise<void> {
-  const hardware = readRows(dir, HARDWARE_FILE);
+async function importSnapshot(dir: string, apply: boolean): Promise<void> {
+  // The JSON if it is there, otherwise the portal CSV. Read in that order because the JSON
+  // is the richer export; a directory holding both is a directory where somebody ran the
+  // OData script, and that answer should win.
+  let hardware = readRows(dir, HARDWARE_FILE);
+  let csvNote = '';
   if (hardware.length === 0) {
-    console.log(`  – ${HARDWARE_FILE}: not present or empty in ${dir}, nothing to import`);
+    const csv = readTextIfPresent(dir, HARDWARE_CSV_FILE);
+    if (csv) {
+      const parsed = parsePortalHardwareCsv(csv);
+      hardware = parsed.rows as Row[];
+      csvNote = `  ✔ ${HARDWARE_CSV_FILE}: ${parsed.rows.length} row(s) read`
+        + `${parsed.malformed > 0 ? `, ${parsed.malformed} skipped (wrong field count, or no HardwareAssetID)` : ''}`
+        + `${parsed.ignored.length > 0 ? `\n    columns not used: ${parsed.ignored.join(', ')}` : ''}`;
+    }
+  }
+  if (hardware.length === 0) {
+    console.log(`  – neither ${HARDWARE_FILE} nor ${HARDWARE_CSV_FILE} is present or non-empty in ${dir}, nothing to import`);
     return;
   }
+  if (csvNote) console.log(csvNote);
   const catalogItemsCsv = readTextIfPresent(dir, CATALOG_ITEMS_FILE);
   const personsCsv = readTextIfPresent(dir, PERSONS_FILE);
   if (!catalogItemsCsv) console.log(`  – ${CATALOG_ITEMS_FILE}: not present, skipping asset_type/manufacturer enrichment`);
   if (!personsCsv) console.log(`  – ${PERSONS_FILE}: not present, skipping person_id enrichment`);
 
-  const plan = await planSnapshotImport({ hardware, catalogItemsCsv, personsCsv, apply: true });
+  const plan = await planSnapshotImport({ hardware, catalogItemsCsv, personsCsv, apply });
   const e = plan.enrichment;
 
   if (catalogItemsCsv) {
@@ -110,12 +134,15 @@ async function importSnapshot(dir: string): Promise<void> {
   }
 
   const loaded = plan.parsed - plan.skipped;
-  console.log(`  ✔ itsm_hardware_snapshot: ${loaded} rows replaced${plan.skipped > 0 ? ` (${plan.skipped} skipped — missing HardwareAssetID/Guid)` : ''}`);
+  console.log(`  ${apply ? '✔' : '·'} itsm_hardware_snapshot: ${loaded} rows ${apply ? 'replaced' : 'would be replaced'}${plan.skipped > 0 ? ` (${plan.skipped} skipped — missing HardwareAssetID/Guid)` : ''}`);
   // Counts genuinely-classified rows, NOT just non-null ones — classifyAssetType() always
   // returns a bucket (falling back to 'other'), so a set asset_type says nothing about
   // whether the Catalog Items join resolved anything. Reporting that as "resolved" made a
   // run with no CSV at all still claim 100%.
   console.log(`    asset_type classified (excl. 'other' fallback): ${e.classified}/${loaded}, manufacturer derived: ${e.manufacturer}/${loaded}`);
+  if (e.type_kept > 0) {
+    console.log(`    ${e.type_kept} row(s) kept the type they already had — this run could not derive one (stale ${CATALOG_ITEMS_FILE}?)`);
+  }
   console.log(`    person_id resolved: ${e.person_id_resolved}/${e.with_person_name} assigned-person rows`);
   // What the replacement actually did to the table, which the old version never said.
   console.log(`    against the previous snapshot: ${plan.added.length} new, ${plan.removed.length} gone, ${plan.changed.length} changed, ${plan.unchanged} unchanged`);
@@ -125,17 +152,20 @@ async function importSnapshot(dir: string): Promise<void> {
 }
 
 function resolveDir(): string {
-  const arg = process.argv[2];
+  const arg = process.argv.slice(2).find((a) => !a.startsWith('--'));
   if (!arg) {
-    console.error('✖ Usage: import-itsm-snapshot.ts <export-directory>');
+    console.error('✖ Usage: import-itsm-snapshot.ts <export-directory> [--dry-run]');
     process.exit(1);
   }
   return path.resolve(arg);
 }
 
 async function main(): Promise<void> {
+  // This is a full replace of the table, so it can say what it would do first — the same
+  // discipline as every other importer here.
+  const apply = !process.argv.includes('--dry-run');
   const dir = resolveDir();
-  console.log(`📥 Importing ITSM MMH hardware snapshot from: ${dir}`);
+  console.log(`📥 ${apply ? 'Importing' : 'Dry run —'} ITSM MMH hardware snapshot from: ${dir}`);
   if (!fs.existsSync(dir)) {
     console.error(`✖ Directory not found: ${dir}`);
     process.exit(1);
@@ -144,8 +174,10 @@ async function main(): Promise<void> {
   await AppDataSource.initialize();
   console.log('✅ Connected to SQL Server\n');
   try {
-    await importSnapshot(dir);
-    console.log('\n✅ Import complete — app-owned asset data was not touched.');
+    await importSnapshot(dir, apply);
+    console.log(apply
+      ? '\n✅ Import complete — app-owned asset data was not touched.'
+      : '\n· Nothing written. Re-run without --dry-run to apply.');
   } finally {
     await AppDataSource.destroy();
   }

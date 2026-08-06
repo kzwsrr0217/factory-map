@@ -27,6 +27,7 @@ import {
   driftSummary,
   findUnlinkedMmhAssets,
   createAssetsFromUnlinkedMmh,
+  reconcileAllFromSnapshot,
 } from '../services/itsm/ReconcileService';
 import { planSnapshotImport, parsePortalHardwareCsv } from '../services/itsm/snapshotImport';
 import { AppDataSource } from '../config/database';
@@ -85,6 +86,29 @@ export const reconcileSummary = async (_req: Request, res: Response, next: NextF
   try {
     res.json({ success: true, data: await driftSummary() });
   } catch (error) { next(error); }
+};
+
+/**
+ * compareAll: compares every linked asset against the LOADED EXPORT in one pass.
+ *
+ * Not an ITSM call at all — it reads the imported snapshot table, which is what makes it
+ * safe to offer as a button: a thousand live lookups is exactly what this integration is
+ * forbidden to do. The response carries the export's own age so the caller can say what
+ * the verdicts are true of.
+ */
+export const reconcileCompareAll = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const result = await reconcileAllFromSnapshot({ by: req.user?.username ?? 'system' });
+    res.json({ success: true, data: result });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    // Nothing loaded is a state the caller can fix, not a server fault.
+    if (/no itsm export is loaded/i.test(message)) {
+      res.status(409).json({ success: false, error: message });
+      return;
+    }
+    next(error);
+  }
 };
 
 /**

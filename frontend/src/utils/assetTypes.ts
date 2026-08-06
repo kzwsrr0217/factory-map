@@ -32,6 +32,9 @@ export const ASSET_TYPE_MAP: Record<string, AssetTypeDefinition> = {
   plc:           { label: 'PLC',            icon: '⚙️',  color: '#15803d' },
   ups:           { label: 'UPS',            icon: '🔋',  color: '#dc2626' },
   monitor:       { label: 'Monitor',        icon: '🖵',  color: '#4f46e5' },
+  // A real bucket, not an accessory: 59 of them came out of the ITSM catalogue, and the
+  // reason anyone is counting is that the older ones are failing.
+  dock:          { label: 'Docking Station', icon: '🔌', color: '#7e22ce' },
   phone:         { label: 'IP Phone',       icon: '☎️',  color: '#0369a1' },
   scanner:       { label: 'Scanner',        icon: '📠',  color: '#92400e' },
   terminal:      { label: 'Terminal',       icon: '⌨️',  color: '#1d4ed8' },

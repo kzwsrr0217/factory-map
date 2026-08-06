@@ -155,6 +155,64 @@ describe('POST /api/itsm/snapshot/import', () => {
     expect(without.body.data.enrichment.with_person_name).toBe(1);
   });
 
+  it('keeps a type it already knew when this run cannot derive one', async () => {
+    // The Catalog Items CSV is a separate hand-made export and goes stale on its own. Since
+    // the import replaces the table, a device whose catalogue item is missing from today's
+    // CSV would come back as 'other' — a silent loss of classification on an import that
+    // reports "unchanged". On the real export that was 569 records.
+    await seedSnapshot([]);
+    const catalogCsv = [
+      '"#ID","Display Name","Status","Type","Time Added","Last Modified"',
+      '"CI-1","DELL OptiPlex 7060","Active","Desktop","x","y"',
+    ].join('\n');
+    const hardware = [exportRow(`${PREFIX}_KEEP`, { CatalogItem: 'DELL OptiPlex 7060' })];
+
+    const first = await request(app).post('/api/itsm/snapshot/import').set(auth())
+      .send({ hardware, catalogItemsCsv: catalogCsv, apply: true });
+    expect(first.body.data.enrichment.classified).toBe(1);
+    const stored = await AppDataSource.getRepository(ItsmHardwareSnapshot)
+      .findOne({ where: { itsm_id: `${PREFIX}_KEEP` } });
+    expect(stored?.asset_type).toBe('workstation');
+
+    // Same export, no catalogue CSV this time.
+    const second = await request(app).post('/api/itsm/snapshot/import').set(auth())
+      .send({ hardware, apply: true });
+    expect(second.body.data.enrichment.type_kept).toBe(1);
+    const after = await AppDataSource.getRepository(ItsmHardwareSnapshot)
+      .findOne({ where: { itsm_id: `${PREFIX}_KEEP` } });
+    expect(after?.asset_type).toBe('workstation');
+  });
+
+  it('reads the Type values this catalogue actually uses', async () => {
+    // Not a hypothetical: the table this maps through was missing Desktop, Phone and IPC,
+    // which between them are more than half the estate.
+    await seedSnapshot([]);
+    const catalogCsv = [
+      '"#ID","Display Name","Status","Type","Time Added","Last Modified"',
+      '"CI-1","DELL OptiPlex 7060","Active","Desktop","x","y"',
+      '"CI-2","Samsung Galaxy XCover 5","Active","Phone","x","y"',
+      '"CI-3","IPC Small","Active","Generic IPC","x","y"',
+      '"CI-4","DELL Dockingstation USB-C (WD19S)","Active","Dockingstation","x","y"',
+    ].join('\n');
+    const res = await request(app).post('/api/itsm/snapshot/import').set(auth()).send({
+      hardware: [
+        exportRow(`${PREFIX}_T1`, { CatalogItem: 'DELL OptiPlex 7060' }),
+        exportRow(`${PREFIX}_T2`, { CatalogItem: 'Samsung Galaxy XCover 5' }),
+        exportRow(`${PREFIX}_T3`, { CatalogItem: 'IPC Small' }),
+        exportRow(`${PREFIX}_T4`, { CatalogItem: 'DELL Dockingstation USB-C (WD19S)' }),
+      ],
+      catalogItemsCsv: catalogCsv,
+      apply: true,
+    });
+    expect(res.body.data.enrichment.classified).toBe(4);
+    const repo = AppDataSource.getRepository(ItsmHardwareSnapshot);
+    const typeOf = async (id: string) => (await repo.findOne({ where: { itsm_id: id } }))?.asset_type;
+    expect(await typeOf(`${PREFIX}_T1`)).toBe('workstation');
+    expect(await typeOf(`${PREFIX}_T2`)).toBe('phone');
+    expect(await typeOf(`${PREFIX}_T3`)).toBe('ipc');
+    expect(await typeOf(`${PREFIX}_T4`)).toBe('dock');
+  });
+
   it('accepts the export unchanged from a previous load without reporting churn', async () => {
     // Re-uploading the same file is something people will do; it must look like nothing.
     await seedSnapshot([]);

@@ -260,16 +260,29 @@ in its own transaction), so this is safe to hit — fix it once, in order:
    migrations would have produced, since the entities are the current source
    of truth and migrations were written to keep pace with them.
 2. **Baseline the migration history** so TypeORM knows these are already
-   accounted for (get the exact list from `backend/src/migrations/*.ts`'s
-   exported class names — the migration below matches the set as of this
-   writing; add any newer ones the same way):
+   accounted for. Do not copy a list out of this document — an earlier version
+   of it listed 7 of the 13 migrations and would have left six of them to be
+   applied on top of a schema that already had them. Print the current list
+   instead:
+   ```bash
+   docker exec factory-map-backend npm run verify:migrations
+   ```
+   That builds a throwaway database, walks these very steps on it, checks the
+   result against the entities, and ends by printing the `INSERT INTO
+   typeorm_migrations …` statement for exactly the migrations in the repo. Run
+   the statement it prints:
    ```powershell
-   podman exec factory-map-mssql /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "<MSSQL_PASSWORD>" -No -d factorymap -Q "INSERT INTO typeorm_migrations (timestamp, name) VALUES (1732000000000,'AddMasterAssetAndIfsJoin1732000000000'),(1732100000000,'AddOrgHierarchyAndEntityKind1732100000000'),(1732200000000,'AddConnectionPairId1732200000000'),(1732300000000,'AddIfsExportOptionalColumns1732300000000'),(1732400000000,'AddItsmHardwareSnapshot1732400000000'),(1732500000000,'AddItsmSnapshotCatalogAndPersonIds1732500000000'),(1732600000000,'AddItsmSnapshotPersonId1732600000000')"
+   podman exec factory-map-mssql /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "<MSSQL_PASSWORD>" -No -d factorymap -Q "<the INSERT it printed>"
    ```
 3. Re-run `docker exec factory-map-backend npm run migration:run` — it
    should now say "No migrations are pending". Every *future* migration
    (added after this point) will apply normally from here on; this baseline
    step is only ever needed once, on the first deploy to a fresh database.
+
+`npm run verify:migrations` is worth running before any deploy, not just the
+first: it is the only check that notices when a migration has fallen behind an
+entity, because every test suite runs against a `synchronize`d database and so
+cannot.
 
 Verify:
 

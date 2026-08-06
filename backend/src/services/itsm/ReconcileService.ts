@@ -16,11 +16,14 @@
  * (which fields matter, how they compare, how they are written back) are all in
  * one place. Status and MAC comparisons route through `statusMapping.ts`.
  */
+import { randomUUID } from 'crypto';
 import { AppDataSource } from '../../config/database';
-import { chunkForEntity, findByIn } from '../../utils/mssqlBatch';
+import { chunkForEntity, chunked, findByIn, MSSQL_PARAM_BUDGET } from '../../utils/mssqlBatch';
 import { Asset } from '../../entities/Asset.entity';
+import { AuditLog } from '../../entities/AuditLog.entity';
 import { ItsmHardwareSnapshot } from '../../entities/ItsmHardwareSnapshot.entity';
 import itsmService from './ITSMService';
+import { snapshotRowToHardware } from './SnapshotITSMAdapter';
 import config from '../../config/config';
 import {
   IITSMHardware,
@@ -724,6 +727,169 @@ export async function backfillAssetsFromSnapshot(): Promise<IBackfillResult> {
   }
 
   return result;
+}
+
+// ── Comparing everything at once ────────────────────────────────────────────
+//
+// The per-asset check above is the honest unit of work — one asset, one ITSM read, a
+// person looking at the answer. It is also why the overview went stale without saying
+// so: nobody clicks it a thousand times, so the drift summary described whatever had
+// last been checked by hand, and after an export and a survey landed it was describing
+// the past. Every linked asset read `missing` from a run made before the export existed.
+//
+// So this compares the lot in one pass, against the LOADED EXPORT rather than against
+// live ITSM. That is the only way to do it within the rule this whole feature is built
+// on — read-only, and never a thousand requests at Alemba — and it is why the result
+// carries the export's own timestamp: "in sync" means in sync with an export somebody
+// loaded, which is a different claim from "in sync with ITSM right now".
+
+/** The audit `entity_type` that marks one bulk comparison. */
+export const RECONCILE_RUN_ENTITY = 'reconcile_run';
+
+export interface IReconcileAllResult {
+  checked: number;
+  in_sync: number;
+  differences: number;
+  /** Linked locally, absent from the loaded export. */
+  missing: number;
+  /** Field-level differences across all assets — the size of the work, not of the list. */
+  diff_fields: number;
+  /**
+   * Differences per field, most first. A total says how much there is to do; this says what
+   * kind of work it is, and they call for different answers — 34 assets whose assignee has
+   * moved on is a list to walk, one wrong serial is a typo to fix.
+   */
+  by_field: Array<{ field: string; label: string; count: number }>;
+  compared_at: Date;
+  /** When the export it compared against was loaded, and how much of it there was. */
+  export_loaded_at: Date | null;
+  export_records: number;
+}
+
+async function recordReconcileRun(by: string, result: IReconcileAllResult): Promise<void> {
+  const repo = AppDataSource.getRepository(AuditLog);
+  await repo.save(repo.create({
+    user_id: by,
+    username: by,
+    action: 'compare',
+    entity_type: RECONCILE_RUN_ENTITY,
+    // Not an entity id: the run is what this row is about, and it needs an identity to be
+    // referred to at all. Same reasoning as the task generator's run record.
+    document_id: randomUUID(),
+    diff: {
+      checked: result.checked,
+      in_sync: result.in_sync,
+      differences: result.differences,
+      missing: result.missing,
+      diff_fields: result.diff_fields,
+      by_field: result.by_field,
+      export_records: result.export_records,
+    },
+  })).catch(() => { /* the comparison happened; failing to log it must not undo it */ });
+}
+
+/**
+ * Compares every ITSM-linked asset against the loaded export, in one pass.
+ *
+ * Local reads and local writes only — zero requests to ITSM, by construction rather than
+ * by discipline: it never goes through the adapter. The per-asset verdicts it stores are
+ * the same ones the "Check ITSM" button stores, computed by the same rules on the same
+ * row shape, so the two cannot drift apart.
+ *
+ * Refuses to run with no export loaded. Marking a thousand assets `missing` because the
+ * table is empty is exactly the wrong answer, and it is the answer this used to give.
+ */
+export async function reconcileAllFromSnapshot(
+  { by = 'system' }: { by?: string } = {},
+): Promise<IReconcileAllResult> {
+  const assetRepo = AppDataSource.getRepository(Asset);
+  const snapshotRepo = AppDataSource.getRepository(ItsmHardwareSnapshot);
+
+  const rows = await snapshotRepo.find();
+  if (rows.length === 0) {
+    throw new Error('No ITSM export is loaded, so there is nothing to compare against. Load one first.');
+  }
+  const byItsmId = new Map(rows.map((r) => [r.itsm_id.toUpperCase(), r]));
+  const loadedAt = rows.reduce<Date | null>((newest, r) => {
+    const at = r.imported_at ? new Date(r.imported_at) : null;
+    if (!at || Number.isNaN(at.getTime())) return newest;
+    return !newest || at > newest ? at : newest;
+  }, null);
+
+  const linked = await assetRepo
+    .createQueryBuilder('a')
+    .where('a.hardware_asset_id IS NOT NULL')
+    .andWhere('a.successor_id IS NULL')
+    .getMany();
+
+  const comparedAt = new Date();
+  const result: IReconcileAllResult = {
+    checked: linked.length,
+    in_sync: 0,
+    differences: 0,
+    missing: 0,
+    diff_fields: 0,
+    by_field: [],
+    compared_at: comparedAt,
+    export_loaded_at: loadedAt,
+    export_records: rows.length,
+  };
+  const perField = new Map<string, number>();
+
+  // Grouped by the verdict they end up with, so the write is a handful of UPDATEs over id
+  // lists rather than one round-trip per asset. There are only a few distinct verdicts, and
+  // one statement per asset is what made the bulk report take minutes.
+  const buckets = new Map<string, string[]>();
+  for (const asset of linked) {
+    const row = byItsmId.get(asset.hardware_asset_id!.toUpperCase());
+    let status: string;
+    let count = 0;
+    if (!row) {
+      status = 'missing';
+      result.missing++;
+    } else {
+      const { active } = splitByIgnored(asset, computeDiffs(asset, snapshotRowToHardware(row)));
+      count = active.length;
+      status = count > 0 ? 'differences' : 'in_sync';
+      if (count > 0) { result.differences++; result.diff_fields += count; } else { result.in_sync++; }
+      for (const d of active) perField.set(d.field, (perField.get(d.field) ?? 0) + 1);
+    }
+    const key = `${status}|${count}`;
+    const list = buckets.get(key);
+    if (list) list.push(asset.id); else buckets.set(key, [asset.id]);
+  }
+
+  result.by_field = [...perField.entries()]
+    .map(([field, count]) => ({ field, label: FIELD_BY_KEY.get(field)?.label ?? field, count }))
+    .sort((a, b) => b.count - a.count);
+
+  for (const [key, ids] of buckets) {
+    const [status, count] = key.split('|');
+    // One parameter per id, so the budget IS the row count — see utils/mssqlBatch.ts.
+    for (const chunk of chunked(ids, MSSQL_PARAM_BUDGET)) {
+      await assetRepo.createQueryBuilder()
+        .update(Asset)
+        .set({
+          reconcile_last_at: comparedAt,
+          reconcile_last_status: status,
+          reconcile_diff_count: Number(count),
+        })
+        .whereInIds(chunk)
+        .execute();
+    }
+  }
+
+  await recordReconcileRun(by, result);
+  return result;
+}
+
+/** When everything was last compared at once. Null only when it never has been. */
+export async function lastReconcileRunAt(): Promise<Date | null> {
+  const row = await AppDataSource.getRepository(AuditLog).findOne({
+    where: { entity_type: RECONCILE_RUN_ENTITY },
+    order: { timestamp: 'DESC' },
+  });
+  return row?.timestamp ?? null;
 }
 
 /**

@@ -120,6 +120,23 @@ export interface UnlinkedMmhAsset {
   serial_match: { asset_id: string; display_name: string } | null;
 }
 
+/** What one bulk comparison found. See ReconcileService.reconcileAllFromSnapshot. */
+export interface ReconcileAllResult {
+  checked: number;
+  in_sync: number;
+  differences: number;
+  /** Linked locally, absent from the loaded export. */
+  missing: number;
+  /** Field-level differences in total — the size of the work, not of the list. */
+  diff_fields: number;
+  /** Per field, most first: what KIND of work the total is made of. */
+  by_field: Array<{ field: string; label: string; count: number }>;
+  compared_at: string;
+  /** When the export it compared against was loaded. */
+  export_loaded_at: string | null;
+  export_records: number;
+}
+
 export const itsmService = {
   /**
    * Loads an ITSM export, or (with `apply: false`) says what loading it would change.
@@ -148,6 +165,19 @@ export const itsmService = {
   },
   createFromUnlinkedMmh: async (itsmGuids: string[]): Promise<{ created: unknown[]; linked: unknown[]; skipped: { itsm_guid: string; error: string }[] }> => {
     const res = await api.post('/itsm/reconcile/unlinked-mmh/create', { itsm_guids: itsmGuids });
+    return res.data.data;
+  },
+
+  /**
+   * Compares every linked asset against the loaded export, in one pass.
+   *
+   * Also not an ITSM call, despite the name of the page it lives on: the comparison reads
+   * the imported export, because a thousand live lookups is the one thing this integration
+   * must never do. What it returns is therefore true of that export, not of Alemba right
+   * now — which is why the result carries the export's age.
+   */
+  compareAll: async (): Promise<ReconcileAllResult> => {
+    const res = await api.post('/itsm/reconcile/all');
     return res.data.data;
   },
 
