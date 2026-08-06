@@ -311,7 +311,7 @@ eleven deltas the schema already has.
    it prints the exact `RESTORE` statement and what the target currently holds,
    which is the last chance to notice that the target is not what you thought:
    ```powershell
-   .\ops\restore-factorymap.ps1 -EnvFile C:\factorymap\.env.prod `
+   .\ops\restore-factorymap.ps1 -EnvFile C:\factory-map\.env.prod `
        -BakFile D:\transfer\factorymap-20260806-143939.bak `
        -SafetyBackupTo D:\backups\factorymap -DryRun
    ```
@@ -421,14 +421,14 @@ small** — a nightly task that reports success while producing nothing is worse
 than no task.
 
 ```powershell
-C:\factorymap\ops\backup-factorymap.ps1 -EnvFile C:\factorymap\.env.prod -Destination D:\backups\factorymap
+C:\factory-map\ops\backup-factorymap.ps1 -EnvFile C:\factory-map\.env.prod -Destination D:\backups\factorymap
 ```
 
 Register it (run once, as the same account that owns the podman machine):
 
 ```powershell
 $action  = New-ScheduledTaskAction -Execute 'powershell.exe' `
-  -Argument '-NoProfile -ExecutionPolicy Bypass -File "C:\factorymap\ops\backup-factorymap.ps1" -EnvFile "C:\factorymap\.env.prod" -Destination "D:\backups\factorymap"'
+  -Argument '-NoProfile -ExecutionPolicy Bypass -File "C:\factory-map\ops\backup-factorymap.ps1" -EnvFile "C:\factory-map\.env.prod" -Destination "D:\backups\factorymap"'
 $trigger = New-ScheduledTaskTrigger -Daily -At 01:30
 Register-ScheduledTask -TaskName 'factorymap-backup' -Action $action -Trigger $trigger `
   -Description 'Nightly factorymap DB backup' -RunLevel Highest

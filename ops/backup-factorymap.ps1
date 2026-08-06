@@ -35,7 +35,7 @@
   Delete host backups older than this many days. Default 14.
 
 .EXAMPLE
-  .\backup-factorymap.ps1 -EnvFile C:\factorymap\.env.prod -Destination D:\backups\factorymap
+  .\backup-factorymap.ps1 -EnvFile C:\factory-map\.env.prod -Destination D:\backups\factorymap
 
 .NOTES
   Scheduled-task caveat: podman on Windows runs inside the user's WSL2 session,

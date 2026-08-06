@@ -50,12 +50,12 @@
   nothing.
 
 .EXAMPLE
-  .\restore-factorymap.ps1 -EnvFile C:\factorymap\.env.prod `
+  .\restore-factorymap.ps1 -EnvFile C:\factory-map\.env.prod `
       -BakFile D:\transfer\factorymap-20260806-101500.bak `
       -SafetyBackupTo D:\backups\factorymap
 
 .EXAMPLE
-  .\restore-factorymap.ps1 -EnvFile C:\factorymap\.env.prod `
+  .\restore-factorymap.ps1 -EnvFile C:\factory-map\.env.prod `
       -BakFile D:\transfer\factorymap-20260806-101500.bak -DryRun
 #>
 [CmdletBinding()]
