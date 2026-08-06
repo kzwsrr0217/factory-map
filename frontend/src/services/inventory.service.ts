@@ -72,11 +72,29 @@ export interface SurveyImportPlan {
    * the number without its prefix, `device_name` the older devices found by the name on
    * their asset tag.
    */
-  matched_by: { hwa: number; hwa_prefixed: number; device_name: number; serial: number };
+  matched_by: {
+    hwa: number;
+    hwa_prefixed: number;
+    device_name: number;
+    serial: number;
+    /** Recognised by the survey row it came from — the only key some devices have. */
+    survey_row: number;
+  };
   /** Rows whose serial was `...`, `N/A` or similar — read as no serial, and counted. */
   placeholder_serials: number;
   /** New assets with neither an HWA nor a serial — they come back as "read a number off it". */
   create_without_serial: number;
+  /**
+   * Monitors the comment column attaches to a machine. The survey tool has no parent/child
+   * field, so "this screen belongs to HWA16775" was written in prose; the app has the
+   * relationship, so it becomes a link.
+   */
+  parent_links: {
+    would_link: number;
+    already_linked: number;
+    parent_unknown: Array<{ hwa: string; rows: number }>;
+    sample: Array<{ device: string; parent: string }>;
+  };
   /** The same device recorded twice, once per value with a row count. */
   duplicates: Array<{ value: string; kind: 'identifier' | 'serial'; rows: number }>;
   create_sample: Array<{ display: string; asset_type: string; serial: string | null }>;

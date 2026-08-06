@@ -301,7 +301,11 @@ const InventoryImport: React.FC = () => {
             Identified <strong>{plan.matched_by.hwa}</strong> by HWA number
             {plan.matched_by.hwa_prefixed > 0 && <>, <strong>{plan.matched_by.hwa_prefixed}</strong> after supplying the missing “HWA” prefix</>}
             {plan.matched_by.device_name > 0 && <>, <strong>{plan.matched_by.device_name}</strong> by the older name on the asset tag</>}
-            {plan.matched_by.serial > 0 && <>, <strong>{plan.matched_by.serial}</strong> by serial</>}.
+            {plan.matched_by.serial > 0 && <>, <strong>{plan.matched_by.serial}</strong> by serial</>}
+            {plan.matched_by.survey_row > 0 && (
+              <>, <strong>{plan.matched_by.survey_row}</strong> by the survey row they were first
+              created from — devices with no number of their own</>
+            )}.
             {plan.placeholder_serials > 0 && (
               <> {plan.placeholder_serials} serial(s) were placeholders (“…”, “N/A”) and read as no serial.</>
             )}
@@ -311,6 +315,47 @@ const InventoryImport: React.FC = () => {
               off it” tasks, which is the only honest thing to do with them.</>
             )}
           </p>
+
+          {(plan.parent_links.would_link > 0
+            || plan.parent_links.already_linked > 0
+            || plan.parent_links.parent_unknown.length > 0) && (
+            <section className={styles.section}>
+              <h2>Screens linked to their machine</h2>
+              <p className={styles.sectionHint}>
+                The survey tool has no field for “this screen belongs to that machine”, so the
+                machine’s HWA number was written in the comment. The app does have that
+                relationship, so those become <strong>parent-child</strong> links — visible on
+                each device’s page. Only read from rows that name no device of their own: on a
+                row that does, a number in the comment means something else.
+              </p>
+              <ul className={styles.counts}>
+                <li><strong>{plan.parent_links.would_link}</strong>{' '}
+                  {plan.applied ? 'linked to their machine' : 'would be linked to their machine'}</li>
+                {plan.parent_links.already_linked > 0 && (
+                  <li><strong>{plan.parent_links.already_linked}</strong> already linked from an earlier run</li>
+                )}
+              </ul>
+              {plan.parent_links.parent_unknown.length > 0 && (
+                <p className={styles.note}>
+                  {plan.parent_links.parent_unknown.length} comment(s) name a machine the app
+                  does not have — reported rather than guessed at:{' '}
+                  {plan.parent_links.parent_unknown.map((p) => `${p.hwa} (${p.rows})`).join(', ')}.
+                </p>
+              )}
+              {plan.parent_links.sample.length > 0 && (
+                <details className={styles.details}>
+                  <summary>Which screen goes with which machine ({plan.parent_links.sample.length} shown)</summary>
+                  <ul className={styles.plainList}>
+                    {plan.parent_links.sample.map((s) => (
+                      <li key={`${s.device}-${s.parent}`}>
+                        {s.device} <span className={styles.fixMeta}>→ {s.parent}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+            </section>
+          )}
 
           {plan.duplicates.length > 0 && (
             <section className={styles.section}>

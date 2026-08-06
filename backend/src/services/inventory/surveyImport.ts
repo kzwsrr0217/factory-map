@@ -36,6 +36,7 @@
  */
 import { AppDataSource } from '../../config/database';
 import { Asset } from '../../entities/Asset.entity';
+import { AssetConnection } from '../../entities/AssetConnection.entity';
 import { Building } from '../../entities/Building.entity';
 import { Floor } from '../../entities/Floor.entity';
 import { WorkArea } from '../../entities/WorkArea.entity';
@@ -159,6 +160,26 @@ export function identifierKeys(raw: string): string[] {
   if (!match) return [fold(value)];
   const digits = match[1];
   return [...new Set([fold(value), `hwa${digits}`])];
+}
+
+/**
+ * An HWA number sitting in the survey's comment column.
+ *
+ * The walk-around tool has no field for "this monitor belongs to that machine" — the
+ * inventory app it grew out of had no parent/child relationship at all — so the walkers wrote
+ * the machine's HWA into the comment instead. On the real survey that is 62 rows: monitors
+ * with their own serial, tagged with the PC they hang off, and 47 distinct machines because
+ * some have two screens.
+ *
+ * The app does have that relationship, so the prose becomes a real `parent-child` link. It is
+ * read only from rows that carry no identifier of their own — on a row that already names its
+ * own device, a number in the comment means something else.
+ */
+const HWA_IN_COMMENT = /\bhwa\s*(\d{3,})\b/i;
+
+export function parentHwaFromComment(comment: string | undefined): string | null {
+  const m = HWA_IN_COMMENT.exec(comment ?? '');
+  return m ? `HWA${m[1]}` : null;
 }
 
 /**
@@ -486,7 +507,7 @@ interface InternalPlan {
   /** Rows that will land on a floor but in no room. */
   noRoom: number;
   /** How each matched row was found — the report says when a rule earned its keep. */
-  matchedBy: Record<'hwa' | 'hwa-prefixed' | 'device-name' | 'serial', number>;
+  matchedBy: Record<'hwa' | 'hwa-prefixed' | 'device-name' | 'serial' | 'survey-row', number>;
   /** Serial values that were not serial numbers at all. */
   placeholderSerials: number;
   /**
@@ -500,6 +521,10 @@ interface InternalPlan {
   createWithoutSerial: number;
   /** The same identifier or serial on more than one row. */
   duplicates: Map<string, { value: string; kind: 'identifier' | 'serial'; rows: number }>;
+  /** Monitor -> machine links the comment column asks for. */
+  parentLinks: Array<{ childSurveyRowId: string | null; childAssetId: string | null; parentAssetId: string; device: string; parent: string }>;
+  /** Comments naming a machine the app does not have. */
+  parentUnknown: Map<string, number>;
 }
 
 /** What a caller outside this module sees. Serialisable on purpose — it goes over HTTP. */
@@ -551,9 +576,29 @@ export interface SurveyImportPlan {
    * their keep, and if `hwa_prefixed` drops to zero on a later export, the survey tool has
    * started writing full numbers.
    */
-  matched_by: { hwa: number; hwa_prefixed: number; device_name: number; serial: number };
+  matched_by: {
+    hwa: number;
+    hwa_prefixed: number;
+    device_name: number;
+    serial: number;
+    /** Recognised by the survey row it came from — the only key some devices have. */
+    survey_row: number;
+  };
   /** Rows whose serial was `...`, `N/A` or similar — counted, not silently dropped. */
   placeholder_serials: number;
+  /**
+   * Monitors the comment column attaches to a machine.
+   *
+   * The survey tool has no parent/child field, so "this screen belongs to HWA16775" was
+   * written in prose. The app has the relationship, so the prose becomes a link.
+   */
+  parent_links: {
+    would_link: number;
+    already_linked: number;
+    /** Comments naming a machine nothing has — reported, never invented. */
+    parent_unknown: Array<{ hwa: string; rows: number }>;
+    sample: Array<{ device: string; parent: string }>;
+  };
   /**
    * How many of the new assets would have neither an HWA nor a serial. Those come back as
    * "read a number off it" tasks, which is the only honest thing to do with a device nobody
@@ -595,11 +640,13 @@ async function planInternal(rows: SurveyRow[], corrections: Corrections): Promis
   const existingByTag = new Map<string, Asset>();
   const existingByName = new Map<string, Asset>();
   const existingBySerial = new Map<string, Asset>();
+  const existingBySurveyRow = new Map<string, Asset>();
   for (const a of allAssets) {
     if (a.hardware_asset_id) existingByHwa.set(fold(a.hardware_asset_id), a);
     if (a.asset_tag) existingByTag.set(nameKey(a.asset_tag), a);
     if (a.display_name) existingByName.set(nameKey(a.display_name), a);
     if (a.serial_number) existingBySerial.set(fold(a.serial_number), a);
+    if (a.survey_row_id) existingBySurveyRow.set(a.survey_row_id, a);
   }
 
   /**
@@ -636,9 +683,11 @@ async function planInternal(rows: SurveyRow[], corrections: Corrections): Promis
     unmatchedPerson: new Map(),
     unmatchedHwa: [],
     noRoom: 0,
-    matchedBy: { hwa: 0, 'hwa-prefixed': 0, 'device-name': 0, serial: 0 },
+    matchedBy: { hwa: 0, 'hwa-prefixed': 0, 'device-name': 0, serial: 0, 'survey-row': 0 },
     placeholderSerials: 0,
     createWithoutSerial: 0,
+    parentLinks: [],
+    parentUnknown: new Map(),
     duplicates: new Map(),
   };
 
@@ -794,8 +843,33 @@ async function planInternal(rows: SurveyRow[], corrections: Corrections): Promis
 
     const deviceType = classifyDeviceType(row.eszkoz_tipus);
     const serial = usableSerial(row.sorozatszam);
-    const existing = serial ? existingBySerial.get(fold(serial)) : undefined;
-    if (existing) plan.matchedBy.serial++;
+    /**
+     * The survey row's own id, tried before the serial.
+     *
+     * A device with no HWA and no serial has nothing else to be recognised by, so every
+     * import created another copy of it — 14 per run on the real survey. The walk-around
+     * tool gives each entry a stable id, and that is the identity those rows do have.
+     * Tried first even when there IS a serial: the id is the more specific claim, and a
+     * serial that has since been corrected in the survey would otherwise look like a
+     * different device.
+     */
+    const existing = (row.id ? existingBySurveyRow.get(row.id) : undefined)
+      ?? (serial ? existingBySerial.get(fold(serial)) : undefined);
+    if (existing) {
+      if (row.id && existingBySurveyRow.has(row.id)) plan.matchedBy['survey-row']++;
+      else plan.matchedBy.serial++;
+    }
+
+    /**
+     * "This screen belongs to that machine", written in the comment because the survey tool
+     * has nowhere else to put it. Resolved through the same rules as the identifier column,
+     * so a comment saying `hwa16775` works as well as `HWA16775`.
+     */
+    const parentHwa = parentHwaFromComment(row.megjegyzes);
+    const parent = parentHwa ? resolveIdentifier(parentHwa) : null;
+    if (parentHwa && !parent) {
+      plan.parentUnknown.set(parentHwa, (plan.parentUnknown.get(parentHwa) ?? 0) + 1);
+    }
     if (existing) {
       // Never clobber a value that may since have come from ITSM (e.g. if this local
       // asset got linked to a real HWA between survey runs) — only fill these two if
@@ -808,13 +882,35 @@ async function planInternal(rows: SurveyRow[], corrections: Corrections): Promis
           ...placementFields,
           ...(existing.asset_type ? {} : { asset_type: deviceType }),
           ...(existing.serial_number ? {} : { serial_number: serial }),
+          // Stamped on the way past, so a device first matched by serial is recognisable by
+          // its row from then on — including after somebody corrects that serial.
+          ...(row.id && !existing.survey_row_id ? { survey_row_id: row.id } : {}),
         },
       });
+      if (parent && parent.asset.id !== existing.id) {
+        plan.parentLinks.push({
+          childSurveyRowId: row.id ?? null,
+          childAssetId: existing.id,
+          parentAssetId: parent.asset.id,
+          device: existing.display_name,
+          parent: parent.asset.display_name,
+        });
+      }
       continue;
     }
 
     if (!serial) plan.createWithoutSerial++;
     const displayName = (row.megjegyzes ?? '').trim() || row.eszkoz_tipus || serial || 'Survey device';
+    if (parent) {
+      // The child does not exist yet; it is looked up by its survey row after the save.
+      plan.parentLinks.push({
+        childSurveyRowId: row.id ?? null,
+        childAssetId: null,
+        parentAssetId: parent.asset.id,
+        device: displayName,
+        parent: parent.asset.display_name,
+      });
+    }
     plan.toCreate.push({
       display: displayName,
       fields: {
@@ -822,6 +918,8 @@ async function planInternal(rows: SurveyRow[], corrections: Corrections): Promis
         display_name: displayName,
         asset_type: deviceType,
         serial_number: serial,
+        // Without this a device with no number is created again on every import.
+        survey_row_id: row.id ?? null,
         source_of_truth: 'local',
         is_managed: false,
         sync_status: 'never',
@@ -965,6 +1063,8 @@ export async function planSurveyImport(input: SurveyImportInput): Promise<Survey
 
   const created: Asset[] = [];
   const updatedIds: string[] = [];
+  let linksMade = 0;
+  let linkedAlready = 0;
   if (input.apply) {
     // One transaction, so a failure part-way cannot leave half the survey applied — the
     // operator would otherwise have no way to tell which rows landed.
@@ -981,6 +1081,38 @@ export async function planSurveyImport(input: SurveyImportInput): Promise<Survey
           { chunk: chunkForEntity(Asset) },
         );
         created.push(...saved);
+      }
+
+      /**
+       * The monitor-to-machine links the comment column asked for.
+       *
+       * Inside the same transaction as the placements, because a link to a device that was
+       * not created is worse than no link. One directed row, `bidirectional: false`: the
+       * direction carries the meaning here — an outbound `parent-child` row names the
+       * asset's PARENT (see AssetRelationships.tsx) — so a mirrored row would claim the
+       * machine's parent is its own screen.
+       */
+      const connRepo = manager.getRepository(AssetConnection);
+      const byRow = new Map(created.filter((a) => a.survey_row_id).map((a) => [a.survey_row_id!, a]));
+      for (const link of internal.parentLinks) {
+        const childId = link.childAssetId
+          ?? (link.childSurveyRowId ? byRow.get(link.childSurveyRowId)?.id : undefined);
+        if (!childId) continue;
+        // Idempotent: a re-import must not add a second copy of the same relationship.
+        const already = await connRepo.createQueryBuilder('c')
+          .where('c.asset_id = :child', { child: childId })
+          .andWhere('c.connected_asset_id = :parent', { parent: link.parentAssetId })
+          .andWhere('c.connection_type = :t', { t: 'parent-child' })
+          .getCount();
+        if (already > 0) { linkedAlready++; continue; }
+        await connRepo.save(connRepo.create({
+          asset_id: childId,
+          connected_asset_id: link.parentAssetId,
+          connection_type: 'parent-child',
+          description: 'From the physical survey: the comment named this machine',
+          bidirectional: false,
+        }));
+        linksMade++;
       }
     });
   }
@@ -1044,8 +1176,18 @@ export async function planSurveyImport(input: SurveyImportInput): Promise<Survey
       hwa_prefixed: internal.matchedBy['hwa-prefixed'],
       device_name: internal.matchedBy['device-name'],
       serial: internal.matchedBy.serial,
+      survey_row: internal.matchedBy['survey-row'],
     },
     placeholder_serials: internal.placeholderSerials,
+    parent_links: {
+      // Before an apply this is what WOULD be linked; after one, what was.
+      would_link: input.apply ? linksMade : internal.parentLinks.length,
+      already_linked: linkedAlready,
+      parent_unknown: [...internal.parentUnknown.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .map(([hwa, rows]) => ({ hwa, rows })),
+      sample: internal.parentLinks.slice(0, 15).map((l) => ({ device: l.device, parent: l.parent })),
+    },
     create_without_serial: internal.createWithoutSerial,
     duplicates: [...internal.duplicates.values()].sort((a, b) => b.rows - a.rows),
     create_sample: internal.toCreate.slice(0, 25).map((c) => ({

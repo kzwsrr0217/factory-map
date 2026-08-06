@@ -18,6 +18,7 @@
 import request from 'supertest';
 import { AppDataSource } from '../config/database';
 import { Asset } from '../entities/Asset.entity';
+import { AssetConnection } from '../entities/AssetConnection.entity';
 import { ItsmHardwareSnapshot } from '../entities/ItsmHardwareSnapshot.entity';
 import { NameCorrection } from '../entities/NameCorrection.entity';
 import { WorkArea } from '../entities/WorkArea.entity';
@@ -757,5 +758,148 @@ describe('POST /api/inventory/survey/import — a correction that is saved and s
     expect(row0.suggestion).toBeNull();
 
     await AppDataSource.getRepository(ItsmHardwareSnapshot).delete({ itsm_id: `${PREFIX}-GEN` });
+  });
+});
+
+/**
+ * The one key a serial-less row does have.
+ *
+ * A device with no HWA and no serial has nothing for a second import to recognise it by, so
+ * every run created another copy — 14 per re-import on the real survey, which is exactly the
+ * kind of quiet multiplication that makes people stop trusting an importer. The walk-around
+ * tool gives each entry a stable id.
+ */
+describe('POST /api/inventory/survey/import — a device with no number at all', () => {
+  it('is created once and recognised on every later run', async () => {
+    const surveyRow = row({
+      azonosito_mod: 'EGYEB',
+      eszkoz_tipus: 'Monitor',
+      sorozatszam: 'N/A',
+      megjegyzes: `${PREFIX} nameless monitor`,
+    });
+
+    const first = await importSurvey({ rows: [surveyRow], apply: true });
+    expect(first.body.data.to_create).toBe(1);
+    expect(first.body.data.create_without_serial).toBe(1);
+
+    const created = await AppDataSource.getRepository(Asset)
+      .findOne({ where: { survey_row_id: surveyRow.id } });
+    expect(created).not.toBeNull();
+    expect(created!.serial_number).toBeNull();
+    createdAssetIds.push(created!.id);
+
+    // The same row again: recognised, not duplicated.
+    const second = await importSurvey({ rows: [surveyRow], apply: true });
+    expect(second.body.data.to_create).toBe(0);
+    expect(second.body.data.to_update).toBe(1);
+    expect(second.body.data.matched_by.survey_row).toBe(1);
+
+    const all = await AppDataSource.getRepository(Asset)
+      .find({ where: { survey_row_id: surveyRow.id } });
+    expect(all).toHaveLength(1);
+  });
+
+  it('stamps the row id on a device it first found by serial, so a corrected serial does not split it', async () => {
+    const first = row({
+      azonosito_mod: 'EGYEB',
+      eszkoz_tipus: 'Monitor',
+      sorozatszam: `${PREFIX}-SER-STAMP`,
+      megjegyzes: `${PREFIX} stamped`,
+    });
+    await importSurvey({ rows: [first], apply: true });
+
+    const created = await AppDataSource.getRepository(Asset)
+      .findOne({ where: { serial_number: `${PREFIX}-SER-STAMP` } });
+    expect(created!.survey_row_id).toBe(first.id);
+    createdAssetIds.push(created!.id);
+
+    // Somebody re-read the label and corrected the serial in the survey. Same row, same
+    // device — without the stamp this looked like a second monitor.
+    const corrected = { ...first, sorozatszam: `${PREFIX}-SER-FIXED` };
+    const again = await importSurvey({ rows: [corrected], apply: true });
+    expect(again.body.data.to_create).toBe(0);
+    expect(again.body.data.matched_by.survey_row).toBe(1);
+  });
+});
+
+/**
+ * "This screen belongs to that machine", written in the comment.
+ *
+ * The walk-around tool has no parent/child field — the inventory app it grew out of had no
+ * such relationship — so the walkers put the machine's HWA in the comment instead. On the real
+ * survey that is 62 rows and 47 distinct machines, since some desks have two screens. The app
+ * does have the relationship, so the prose becomes a link.
+ */
+describe('POST /api/inventory/survey/import — the machine named in a comment', () => {
+  it('links a created monitor to the machine, in the direction that means "its parent"', async () => {
+    const pc = await seedAsset('thepc', `HWA${HWA_DIGITS}9`);
+    const res = await importSurvey({
+      rows: [row({
+        azonosito_mod: 'EGYEB',
+        eszkoz_tipus: 'Monitor',
+        sorozatszam: `${PREFIX}-MON-SER`,
+        megjegyzes: `HWA${HWA_DIGITS}9 DELL U2412M`,
+      })],
+      apply: true,
+    });
+    expect(res.body.data.parent_links.would_link).toBe(1);
+
+    const monitor = await AppDataSource.getRepository(Asset)
+      .findOne({ where: { serial_number: `${PREFIX}-MON-SER` } });
+    createdAssetIds.push(monitor!.id);
+
+    const links = await AppDataSource.getRepository(AssetConnection)
+      .find({ where: { asset_id: monitor!.id } });
+    expect(links).toHaveLength(1);
+    // Outbound parent-child names the asset's PARENT (see AssetRelationships.tsx), so the
+    // row goes monitor -> machine. A mirrored row would claim the PC's parent is its screen.
+    expect(links[0].connected_asset_id).toBe(pc._id);
+    expect(links[0].connection_type).toBe('parent-child');
+    expect(links[0].bidirectional).toBe(false);
+  });
+
+  it('does not add the link twice on a re-import', async () => {
+    const rows = [row({
+      azonosito_mod: 'EGYEB',
+      eszkoz_tipus: 'Monitor',
+      sorozatszam: `${PREFIX}-MON-SER2`,
+      megjegyzes: `HWA${HWA_DIGITS}9 second screen`,
+    })];
+    await importSurvey({ rows, apply: true });
+    const again = await importSurvey({ rows, apply: true });
+    expect(again.body.data.parent_links.would_link).toBe(0);
+    expect(again.body.data.parent_links.already_linked).toBe(1);
+
+    const monitor = await AppDataSource.getRepository(Asset)
+      .findOne({ where: { serial_number: `${PREFIX}-MON-SER2` } });
+    createdAssetIds.push(monitor!.id);
+    expect(await AppDataSource.getRepository(AssetConnection)
+      .count({ where: { asset_id: monitor!.id } })).toBe(1);
+  });
+
+  it('reports a machine it does not have rather than inventing the link', async () => {
+    const res = await importSurvey({
+      rows: [row({
+        azonosito_mod: 'EGYEB',
+        eszkoz_tipus: 'Monitor',
+        sorozatszam: `${PREFIX}-MON-SER3`,
+        megjegyzes: 'HWA99999123 belongs to a machine nothing has',
+      })],
+      apply: false,
+    });
+    expect(res.body.data.parent_links.would_link).toBe(0);
+    expect(res.body.data.parent_links.parent_unknown)
+      .toEqual([{ hwa: 'HWA99999123', rows: 1 }]);
+  });
+
+  it('ignores a number in the comment when the row names its own device', async () => {
+    // On a row that already says what it is, a number in the comment means something else —
+    // a neighbour, a note, a ticket. Guessing there would invent relationships.
+    await seedAsset('ownid', `${PREFIX}-OWN`);
+    const res = await importSurvey({
+      rows: [row({ azonosito_mod: 'HWA', hwa: `${PREFIX}-OWN`, megjegyzes: `next to HWA${HWA_DIGITS}9` })],
+      apply: false,
+    });
+    expect(res.body.data.parent_links.would_link).toBe(0);
   });
 });

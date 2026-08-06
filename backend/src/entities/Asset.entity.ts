@@ -318,6 +318,21 @@ export class Asset {
   @Index()
   object_id!: string | null;
 
+  /**
+   * The physical survey row this device came from, for the ones that have no other key.
+   *
+   * A device with no HWA and no serial cannot be recognised on a second import: there is
+   * nothing to match on, so every run created another copy of it — 14 of them on the real
+   * survey, every time. The walk-around tool gives each entry a stable id, which is exactly
+   * the identity those rows do have, so it is stored and matched on.
+   *
+   * Only written for rows that need it (see services/inventory/surveyImport.ts). It is not
+   * provenance for everything — an HWA or a serial is a better key when there is one.
+   */
+  @Column({ name: 'survey_row_id', type: 'nvarchar', length: 64, nullable: true })
+  @Index('IDX_assets_survey_row_id', { where: 'survey_row_id IS NOT NULL' })
+  survey_row_id!: string | null;
+
   @Column({ name: 'serial_object', type: 'nvarchar', length: 100, nullable: true })
   @Index()
   serial_object!: string | null;

@@ -43,9 +43,10 @@ const EMPTY_PLAN = {
   missing_work_areas: [],
   unmatched_persons: [],
   unmatched_hwa: [],
-  matched_by: { hwa: 1, hwa_prefixed: 0, device_name: 0, serial: 0 },
+  matched_by: { hwa: 1, hwa_prefixed: 0, device_name: 0, serial: 0, survey_row: 0 },
   placeholder_serials: 0,
   create_without_serial: 0,
+  parent_links: { would_link: 0, already_linked: 0, parent_unknown: [], sample: [] },
   duplicates: [],
   create_sample: [],
   created_areas: null,
@@ -200,7 +201,7 @@ describe('InventoryImport — what the survey wrote in its identifier column', (
     // Stating the counts is how anyone notices when a later export stops needing them.
     seed({
       ...EMPTY_PLAN,
-      matched_by: { hwa: 300, hwa_prefixed: 92, device_name: 30, serial: 4 },
+      matched_by: { hwa: 300, hwa_prefixed: 92, device_name: 30, serial: 4, survey_row: 0 },
       placeholder_serials: 14,
       create_without_serial: 14,
     });
@@ -253,5 +254,28 @@ describe('InventoryImport — what the survey wrote in its identifier column', (
     // Different problems, different next step — so the row says which it is.
     expect(await screen.findByText(/a number nothing has/)).toBeInTheDocument();
     expect(screen.getByText(/an older device name · in the cell/)).toBeInTheDocument();
+  });
+});
+
+describe('InventoryImport — screens linked to their machine', () => {
+  it('says how many links the comment column asks for, and names a machine it does not have', async () => {
+    seed({
+      ...EMPTY_PLAN,
+      parent_links: {
+        would_link: 61,
+        already_linked: 0,
+        parent_unknown: [{ hwa: 'HWA25204', rows: 1 }],
+        sample: [{ device: 'HWA16775 DELL P2422H', parent: 'HWA16775' }],
+      },
+    });
+    renderPage();
+    chooseFile();
+    await waitFor(() => expect(previewButton()).toBeEnabled());
+    fireEvent.click(previewButton());
+
+    expect(await screen.findByText(/Screens linked to their machine/)).toBeInTheDocument();
+    expect(screen.getByText(/would be linked to their machine/)).toBeInTheDocument();
+    // Named, not silently dropped: a comment can point at a machine nobody has.
+    expect(screen.getByText(/HWA25204 \(1\)/)).toBeInTheDocument();
   });
 });
