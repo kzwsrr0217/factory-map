@@ -108,6 +108,32 @@ async function main(): Promise<void> {
 
     console.log('\nBaseline for a fresh production database — the current set, in full:\n');
     console.log(`INSERT INTO typeorm_migrations (timestamp, name) VALUES ${values}`);
+
+    // And the other route to production: restoring a copy of this database onto the server.
+    // Its schema is already right (synchronize made it), but its migration history is not —
+    // dev never needed one — so `migration:run` would try to apply deltas the schema already
+    // has. Reported off the live database, read-only.
+    const live = dataSourceFor(config.mssql.database, { synchronize: false });
+    await live.initialize();
+    const recorded: Array<{ name: string }> = await live.query(
+      "SELECT name FROM typeorm_migrations WHERE OBJECT_ID('typeorm_migrations') IS NOT NULL",
+    ).catch(() => []);
+    await live.destroy();
+    const known = new Set(recorded.map((r) => r.name));
+    const unrecorded = all.filter((m) => !known.has(m.name));
+    console.log(`\nThe live ${config.mssql.database} has ${known.size} of ${all.length} migration(s) recorded.`);
+    if (unrecorded.length === 0) {
+      console.log('Nothing to baseline — a restored copy of it would need no fixing up.');
+    } else {
+      console.log(
+        `If this database is restored onto a server, mark these ${unrecorded.length} first, or\n`
+        + 'migration:run will try to apply changes the schema already has:\n',
+      );
+      console.log(
+        'INSERT INTO typeorm_migrations (timestamp, name) VALUES '
+        + unrecorded.map((m) => `(${m.timestamp},'${m.name}')`).join(','),
+      );
+    }
   } finally {
     if (!keep) {
       const cleanup = dataSourceFor('master', { synchronize: false });

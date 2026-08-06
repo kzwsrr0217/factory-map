@@ -284,6 +284,45 @@ first: it is the only check that notices when a migration has fallen behind an
 entity, because every test suite runs against a `synchronize`d database and so
 cannot.
 
+### Alternative: starting from a copy of the development database
+
+The normalisation round — the survey, the 128 rooms, the name corrections, the
+recorded machine swaps — is a fortnight of judgement calls that live in the
+development database and nowhere else. Redoing it against an empty production
+database would mean making every one of those calls a second time, so the first
+deployment starts from a restored copy instead.
+
+Its **schema** is already correct: `synchronize` built it from the current
+entities, which is exactly what `verify:migrations` confirms. Its **migration
+history** is not, because development never needed one — only 2 of the 13
+migrations are recorded, so `migration:run` on the server would try to apply
+eleven deltas the schema already has.
+
+1. Back up development and restore onto the server (`ops/backup-factorymap.ps1`
+   takes the database name and a destination; it reads the password from the env
+   file rather than taking one on the command line).
+2. **Mark the migrations the restored schema already contains.** Do not copy a
+   list from here — print the current one, which is computed from the database
+   you are about to copy:
+   ```bash
+   docker exec factory-map-backend npm run verify:migrations
+   ```
+   Its last section names the unrecorded migrations and gives the `INSERT INTO
+   typeorm_migrations …` for exactly those. Run it against the restored database.
+3. `docker exec factory-map-backend npm run migration:run` — expect "No
+   migrations are pending".
+4. **Clear out what only belonged in development.** The test suites leave users
+   behind (`bulk_viewer_*`, `rbactest_viewer`) and the seeded `admin` /
+   `operator` / `viewer` accounts have development passwords. Change the admin
+   password and delete the rest before anyone can reach the server:
+   ```bash
+   docker exec -it factory-map-backend npm run set:password -- --username admin
+   ```
+5. Confirm `ITSM_MODE=snapshot` in `.env.prod`. With `mock` the per-asset "Check
+   ITSM" button compares real assets against fabricated data and writes
+   `missing` onto every one of them — the reconcile page reports the mode for
+   this reason, and it is worth a look at after the first start.
+
 Verify:
 
 ```bash
