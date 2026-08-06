@@ -30,5 +30,15 @@ COPY --from=build /app/build /usr/share/nginx/html
 
 EXPOSE 80
 
+# 127.0.0.1, not `localhost`. nginx.conf listens on IPv4 only, and the base image's
+# 10-listen-on-ipv6-by-default.sh refuses to add `listen [::]:80` to a conf it does not
+# recognise as the packaged one — it says so in the container log. So musl resolves
+# `localhost` to ::1, tries that first, and the check fails with "Connection refused"
+# while the site itself serves perfectly through the published port. The container spent
+# days reporting unhealthy for that reason alone.
+#
+# The listen directive is deliberately left alone: `listen [::]:80` stops nginx from
+# starting at all where the kernel has no IPv6, which is exactly what that entrypoint
+# script exists to avoid.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD wget -qO- http://localhost:80/ >/dev/null || exit 1
+  CMD wget -qO- http://127.0.0.1:80/ >/dev/null || exit 1
