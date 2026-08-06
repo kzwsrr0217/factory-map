@@ -29,6 +29,7 @@
     "report:match": "ts-node src/scripts/match-report.ts",
     "tasks:generate": "ts-node src/scripts/generate-tasks.ts",
     "set:password": "ts-node src/scripts/set-password.ts",
+    "prune:dev-accounts": "ts-node src/scripts/prune-dev-accounts.ts",
     "test": "jest --runInBand --forceExit --passWithNoTests",
     "test:watch": "jest --watch",
     "migration:generate": "typeorm-ts-node-commonjs migration:generate -d src/data-source.ts",

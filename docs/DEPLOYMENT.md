@@ -298,10 +298,30 @@ history** is not, because development never needed one — only 2 of the 13
 migrations are recorded, so `migration:run` on the server would try to apply
 eleven deltas the schema already has.
 
-1. Back up development and restore onto the server (`ops/backup-factorymap.ps1`
-   takes the database name and a destination; it reads the password from the env
-   file rather than taking one on the command line).
-2. **Mark the migrations the restored schema already contains.** Do not copy a
+1. **Back up development.** Both parameters are required; the password comes out
+   of the env file rather than the command line:
+   ```powershell
+   .\ops\backup-factorymap.ps1 -EnvFile .env -Destination C:\temporary\factorymap-backups
+   ```
+2. **Copy the `.bak` to the VM** — network share or RDP file copy. It is around
+   25 MB and it contains real names and assignments, so it is Confidential:
+   put it somewhere with the same protection as the server itself, and delete
+   the transfer copy afterwards.
+3. **Restore it, over whatever is on the server now.** Read the dry run first —
+   it prints the exact `RESTORE` statement and what the target currently holds,
+   which is the last chance to notice that the target is not what you thought:
+   ```powershell
+   .\ops\restore-factorymap.ps1 -EnvFile C:\factorymap\.env.prod `
+       -BakFile D:\transfer\factorymap-20260806-143939.bak `
+       -SafetyBackupTo D:\backups\factorymap -DryRun
+   ```
+   Then without `-DryRun`. It backs up the database it is about to overwrite
+   first and refuses to continue if that backup fails, stops the backend so the
+   restore can take the database exclusively, reads the logical file names out of
+   the `.bak` rather than assuming them, and starts the backend again. It ends by
+   printing the two steps below, because both need a decision and neither should
+   happen automatically.
+4. **Mark the migrations the restored schema already contains.** Do not copy a
    list from here — print the current one, which is computed from the database
    you are about to copy:
    ```bash
@@ -309,19 +329,30 @@ eleven deltas the schema already has.
    ```
    Its last section names the unrecorded migrations and gives the `INSERT INTO
    typeorm_migrations …` for exactly those. Run it against the restored database.
-3. `docker exec factory-map-backend npm run migration:run` — expect "No
-   migrations are pending".
-4. **Clear out what only belonged in development.** The test suites leave users
-   behind (`bulk_viewer_*`, `rbactest_viewer`) and the seeded `admin` /
-   `operator` / `viewer` accounts have development passwords. Change the admin
-   password and delete the rest before anyone can reach the server:
+5. `docker exec factory-map-backend npm run migration:run` — expect "No
+   migrations are pending". If it instead starts applying things, stop: the
+   baseline did not take, and the safety backup from step 3 is the way back.
+6. **Clear out what only belonged in development.** The test suites leave users
+   behind, and the seeded accounts carry passwords that are in this repository.
+   Read the list first, then remove them, then change the admin password —
+   before anyone else can reach the server:
    ```bash
+   docker exec factory-map-backend npm run prune:dev-accounts
+   docker exec factory-map-backend npm run prune:dev-accounts -- --apply
    docker exec -it factory-map-backend npm run set:password -- --username admin
    ```
-5. Confirm `ITSM_MODE=snapshot` in `.env.prod`. With `mock` the per-asset "Check
+   The prune deliberately refuses to delete an admin and leaves `operator` /
+   `viewer` alone — they may be accounts somebody means to use — so change or
+   delete those by hand.
+7. Confirm `ITSM_MODE=snapshot` in `.env.prod`. With `mock` the per-asset "Check
    ITSM" button compares real assets against fabricated data and writes
    `missing` onto every one of them — the reconcile page reports the mode for
    this reason, and it is worth a look at after the first start.
+8. Open the **Normalisation run** page. It should say the export was loaded, the
+   survey applied, and the comparison is current. If it warns that nothing has
+   been compared against the current export, press **Compare all** — the stored
+   verdicts came over with the backup and are only as fresh as the last run on
+   development.
 
 Verify:
 
