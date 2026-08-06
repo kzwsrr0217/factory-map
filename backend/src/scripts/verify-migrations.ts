@@ -118,7 +118,27 @@ async function main(): Promise<void> {
     const recorded: Array<{ name: string }> = await live.query(
       "SELECT name FROM typeorm_migrations WHERE OBJECT_ID('typeorm_migrations') IS NOT NULL",
     ).catch(() => []);
+
+    /**
+     * And the question the scratch database cannot answer: does the schema of the database
+     * that has actually been running match the code?
+     *
+     * A fresh build proving migrations ≡ entities means no such gap *can* exist in a
+     * correctly-built database — but the live one has a history, and this asks it directly
+     * rather than reasoning about it. `log()` computes the statements without running any of
+     * them, so this stays read-only.
+     */
+    const liveDiff = await live.driver.createSchemaBuilder().log();
     await live.destroy();
+    console.log(`\nThe live ${config.mssql.database}, compared against the entities:`);
+    if (liveDiff.upQueries.length === 0) {
+      console.log('  ✔ nothing missing — its schema is what the code expects.');
+    } else {
+      problems.push(`the live database is missing ${liveDiff.upQueries.length} schema change(s):`);
+      for (const q of liveDiff.upQueries.slice(0, 20)) problems.push(`     ${q.query}`);
+      console.log(`  ✖ ${liveDiff.upQueries.length} difference(s) — listed at the end.`);
+      console.log('    Usually this means a migration has not been run yet; try migration:run first.');
+    }
     const known = new Set(recorded.map((r) => r.name));
     const unrecorded = all.filter((m) => !known.has(m.name));
     console.log(`\nThe live ${config.mssql.database} has ${known.size} of ${all.length} migration(s) recorded.`);
