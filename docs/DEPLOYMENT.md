@@ -321,14 +321,18 @@ eleven deltas the schema already has.
    the `.bak` rather than assuming them, and starts the backend again. It ends by
    printing the two steps below, because both need a decision and neither should
    happen automatically.
-4. **Mark the migrations the restored schema already contains.** Do not copy a
-   list from here — print the current one, which is computed from the database
-   you are about to copy:
+4. **Mark the migrations the restored schema already contains:**
    ```bash
-   docker exec factory-map-backend npm run verify:migrations
+   docker exec factory-map-backend npm run verify:migrations -- --baseline
    ```
-   Its last section names the unrecorded migrations and gives the `INSERT INTO
-   typeorm_migrations …` for exactly those. Run it against the restored database.
+   It records exactly the unrecorded ones, and refuses if the live schema is
+   missing anything — because then a migration really does still need to run and
+   marking it applied would skip it forever. Run it without `--baseline` first if
+   you want to read what it would do.
+
+   Do not do this by hand. The manual version means pasting a generated
+   multi-line SQL statement and the database password into a shell, and the first
+   attempt at it put the password somewhere it should never have been.
 5. `docker exec factory-map-backend npm run migration:run` — expect "No
    migrations are pending". If it instead starts applying things, stop: the
    baseline did not take, and the safety backup from step 3 is the way back.

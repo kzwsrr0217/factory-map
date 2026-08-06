@@ -21,11 +21,21 @@
  * the deployment doc is a hand-copied one and had already fallen six migrations behind. A
  * generated list cannot.
  *
- * Creates and drops its own database (`<db>_migcheck`) and touches nothing else.
+ * Creates and drops its own database (`<db>_migcheck`) and touches nothing else — except
+ * with `--baseline`, which writes the missing rows into the live `typeorm_migrations`.
+ *
+ * That option exists because the manual alternative is pasting a generated multi-line SQL
+ * statement and a database password into a shell, and the first attempt at it put the
+ * password into a place it should never have been. There is a precondition that makes the
+ * write safe rather than convenient: it refuses unless the live schema already matches the
+ * entities. If nothing is missing from the schema, then every migration's changes are
+ * present, and recording them is a statement of fact. If something IS missing, a migration
+ * genuinely has not run, and marking it applied would skip it forever — so it stops.
  *
  * Usage:
  *   npx ts-node src/scripts/verify-migrations.ts
- *   npx ts-node src/scripts/verify-migrations.ts --keep    (leave the database for a look)
+ *   npx ts-node src/scripts/verify-migrations.ts --keep       (leave the database for a look)
+ *   npx ts-node src/scripts/verify-migrations.ts --baseline   (record the missing migrations)
  */
 import 'reflect-metadata';
 import { DataSource } from 'typeorm';
@@ -49,6 +59,7 @@ function dataSourceFor(database: string, opts: { synchronize: boolean }): DataSo
 
 async function main(): Promise<void> {
   const keep = process.argv.includes('--keep');
+  const baseline = process.argv.includes('--baseline');
   const scratch = `${config.mssql.database}_migcheck`;
   const problems: string[] = [];
 
@@ -129,7 +140,6 @@ async function main(): Promise<void> {
      * them, so this stays read-only.
      */
     const liveDiff = await live.driver.createSchemaBuilder().log();
-    await live.destroy();
     console.log(`\nThe live ${config.mssql.database}, compared against the entities:`);
     if (liveDiff.upQueries.length === 0) {
       console.log('  ✔ nothing missing — its schema is what the code expects.');
@@ -144,16 +154,42 @@ async function main(): Promise<void> {
     console.log(`\nThe live ${config.mssql.database} has ${known.size} of ${all.length} migration(s) recorded.`);
     if (unrecorded.length === 0) {
       console.log('Nothing to baseline — a restored copy of it would need no fixing up.');
-    } else {
+    } else if (!baseline) {
       console.log(
         `If this database is restored onto a server, mark these ${unrecorded.length} first, or\n`
-        + 'migration:run will try to apply changes the schema already has:\n',
+        + 'migration:run will try to apply changes the schema already has. Either re-run this\n'
+        + 'with --baseline, which writes them itself, or run this by hand:\n',
       );
       console.log(
         'INSERT INTO typeorm_migrations (timestamp, name) VALUES '
         + unrecorded.map((m) => `(${m.timestamp},'${m.name}')`).join(','),
       );
+    } else if (liveDiff.upQueries.length > 0) {
+      // The precondition, and the reason this is safe at all. A missing schema change means a
+      // migration genuinely has not run; recording it would skip it permanently.
+      console.log(
+        `\n✖ Refusing to baseline: the live schema is missing ${liveDiff.upQueries.length} change(s),\n`
+        + '  so at least one of these migrations really does still need to run. Fix that first.',
+      );
+      process.exitCode = 1;
+    } else {
+      // Parameterised rather than interpolated, and inside a transaction: this writes to the
+      // table TypeORM trusts to know what has been applied.
+      await live.transaction(async (manager) => {
+        for (const m of unrecorded) {
+          await manager.query(
+            'INSERT INTO typeorm_migrations (timestamp, name) VALUES (@0, @1)',
+            [m.timestamp, m.name],
+          );
+        }
+      });
+      console.log(`\n✔ Recorded ${unrecorded.length} migration(s) as already applied:`);
+      for (const m of unrecorded) console.log(`   - ${m.name}`);
+      console.log('\n  The schema already contained every one of their changes — that is the');
+      console.log('  precondition this checked before writing. Now run migration:run; it should');
+      console.log('  report nothing pending.');
     }
+    await live.destroy();
   } finally {
     if (!keep) {
       const cleanup = dataSourceFor('master', { synchronize: false });
