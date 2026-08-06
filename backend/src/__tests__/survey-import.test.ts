@@ -903,3 +903,86 @@ describe('POST /api/inventory/survey/import — the machine named in a comment',
     expect(res.body.data.parent_links.would_link).toBe(0);
   });
 });
+
+/**
+ * The type column, when it does not hold a type.
+ *
+ * Where a device has no HWA the walkers wrote what they could read in whichever field was to
+ * hand, and for monitors that is often the type column: `U2421E`, `U2412Mb`, `Lenovo
+ * ThinkVision`. On the real survey that is ten devices, all monitors, all of which ended up
+ * typed "other" and so fell out of every monitor count — along with 12 scanners, 2 desktop
+ * PCs and a dock whose Hungarian words the map simply did not have.
+ */
+describe('POST /api/inventory/survey/import — a model where the type belongs', () => {
+  it('reads a monitor model as a monitor, and keeps the model', async () => {
+    const res = await importSurvey({
+      rows: [row({
+        azonosito_mod: 'EGYEB',
+        eszkoz_tipus: 'U2421E',
+        sorozatszam: `${PREFIX}-MODEL-SER`,
+      })],
+      apply: true,
+    });
+    expect(res.body.data.to_create).toBe(1);
+
+    const created = await AppDataSource.getRepository(Asset)
+      .findOne({ where: { serial_number: `${PREFIX}-MODEL-SER` } });
+    createdAssetIds.push(created!.id);
+    expect(created!.asset_type).toBe('monitor');
+    // The survey's own words, in the field meant for them rather than used once and dropped.
+    expect(created!.model).toBe('U2421E');
+  });
+
+  it('knows the words the walkers actually typed', async () => {
+    for (const [typed, expected] of [
+      ['Szkenner', 'scanner'],
+      ['Asztali PC', 'workstation'],
+      ['DOKKOLO', 'dock'],
+      ['Nyomtató', 'printer'],
+    ] as const) {
+      const res = await importSurvey({
+        rows: [row({ azonosito_mod: 'EGYEB', eszkoz_tipus: typed, sorozatszam: `${PREFIX}-${expected}` })],
+        apply: true,
+      });
+      expect(res.body.data.to_create).toBe(1);
+      const created = await AppDataSource.getRepository(Asset)
+        .findOne({ where: { serial_number: `${PREFIX}-${expected}` } });
+      createdAssetIds.push(created!.id);
+      expect(created!.asset_type).toBe(expected);
+    }
+  });
+
+  it('corrects a local asset stuck on "other" from an earlier, worse reading', async () => {
+    // The type is normally left alone — it may have come from ITSM since. But a local
+    // asset's type came from this same survey, and "other" means the importer misread the
+    // column, so a better reading should replace it rather than being politely declined.
+    const surveyRow = row({
+      azonosito_mod: 'EGYEB',
+      eszkoz_tipus: 'U2424HE',
+      sorozatszam: `${PREFIX}-STUCK`,
+    });
+    await importSurvey({ rows: [surveyRow], apply: true });
+    const repo = AppDataSource.getRepository(Asset);
+    const created = await repo.findOne({ where: { serial_number: `${PREFIX}-STUCK` } });
+    createdAssetIds.push(created!.id);
+    await repo.update(created!.id, { asset_type: 'other' });
+
+    await importSurvey({ rows: [surveyRow], apply: true });
+    const after = await repo.findOne({ where: { serial_number: `${PREFIX}-STUCK` } });
+    expect(after!.asset_type).toBe('monitor');
+  });
+
+  it('leaves an ITSM-owned type alone', async () => {
+    const asset = await seedAsset('itsmtyped', `${PREFIX}-TYPED`);
+    await AppDataSource.getRepository(Asset)
+      .update(asset._id, { asset_type: 'workstation', source_of_truth: 'itsm' });
+
+    await importSurvey({
+      rows: [row({ azonosito_mod: 'HWA', hwa: `${PREFIX}-TYPED`, eszkoz_tipus: 'Monitor' })],
+      apply: true,
+    });
+    const after = await AppDataSource.getRepository(Asset)
+      .findOne({ where: { hardware_asset_id: `${PREFIX}-TYPED` } });
+    expect(after!.asset_type).toBe('workstation');
+  });
+});

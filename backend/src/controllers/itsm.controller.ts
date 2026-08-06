@@ -28,7 +28,7 @@ import {
   findUnlinkedMmhAssets,
   createAssetsFromUnlinkedMmh,
 } from '../services/itsm/ReconcileService';
-import { planSnapshotImport } from '../services/itsm/snapshotImport';
+import { planSnapshotImport, parsePortalHardwareCsv } from '../services/itsm/snapshotImport';
 import { AppDataSource } from '../config/database';
 import { Asset } from '../entities/Asset.entity';
 import { AuditLog } from '../entities/AuditLog.entity';
@@ -292,10 +292,35 @@ export const importSnapshotFromUpload = async (req: Request, res: Response, next
   try {
     const body = req.body as {
       hardware?: unknown;
+      hardwareCsv?: string | null;
       catalogItemsCsv?: string | null;
       personsCsv?: string | null;
       apply?: boolean;
     };
+
+    /**
+     * Either the OData JSON's rows, or the portal's own "Export to CSV" as text.
+     *
+     * The CSV matters because of who can produce it: the OData export needs PowerShell on a
+     * domain-joined machine, while the CSV is two clicks in the portal by whoever is already
+     * looking at the list. Parsed here rather than in the browser so that one place knows the
+     * portal's column names, next to the mapper that consumes them.
+     */
+    let csv: { malformed: number; ignored: string[] } | null = null;
+    if (!Array.isArray(body.hardware) && typeof body.hardwareCsv === 'string') {
+      try {
+        const parsed = parsePortalHardwareCsv(body.hardwareCsv);
+        body.hardware = parsed.rows;
+        csv = { malformed: parsed.malformed, ignored: parsed.ignored };
+      } catch (err) {
+        res.status(400).json({
+          success: false,
+          error: err instanceof Error ? err.message : 'Could not read that CSV',
+        });
+        return;
+      }
+    }
+
     if (!Array.isArray(body.hardware)) {
       res.status(400).json({ success: false, error: 'hardware must be an array of exported rows' });
       return;
@@ -316,6 +341,8 @@ export const importSnapshotFromUpload = async (req: Request, res: Response, next
       personsCsv: body.personsCsv ?? null,
       apply: body.apply === true,
     });
-    res.json({ success: true, data: plan });
+    // The CSV's own notes travel in meta: how many rows did not fit the header, and which
+    // columns this parser has no use for. A changed export should be noticed, not absorbed.
+    res.json({ success: true, data: plan, ...(csv ? { meta: { csv } } : {}) });
   } catch (error) { next(error); }
 };

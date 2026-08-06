@@ -82,7 +82,45 @@ const DEVICE_TYPE_MAP: Record<string, string> = {
   kamera: 'camera',
   switch: 'switch',
   router: 'router',
+  // Added after reading the real survey rather than guessed at: these are the words the
+  // walkers actually typed, and without them 15 devices landed on 'other'.
+  szkenner: 'scanner',
+  scanner: 'scanner',
+  'asztalipc': 'workstation', // "Asztali PC" — fold() strips the space
+  pc: 'workstation',
+  dokkolo: 'dock',
+  dokkolt: 'dock',
 };
+
+/**
+ * A monitor model written where the type belongs.
+ *
+ * Where a device has no HWA number the walkers put what they could read off it in whichever
+ * field was to hand, and for monitors that is often the type column: `U2421E`, `U2412Mb`,
+ * `U2424HE`, `Lenovo ThinkVision`. Ten devices on the real survey, all monitors, all of which
+ * ended up typed as "other" and so fell out of every monitor count.
+ *
+ * Recognised by shape — Dell's U/P four-digit families and the handful of vendor lines the
+ * survey names — and the text is kept as the model, because that is what it is. Anything not
+ * matching here still falls to 'other': a model this does not know is better left untyped
+ * than typed wrongly.
+ */
+const MONITOR_MODEL = /^(?:dell\s*)?[up]\d{4}[a-z]*$|thinkvision|ultrasharp|viewsonic|proart/i;
+
+/**
+ * What the type column really held: a type, or a model that implies one.
+ *
+ * Returns the classified `asset_type` and, when the text was a model, that model — so the
+ * survey's own words end up in the field meant for them instead of being used once for
+ * classification and dropped.
+ */
+export function classifyFromTypeColumn(raw: string | undefined): { asset_type: string; model: string | null } {
+  const text = (raw ?? '').trim();
+  const mapped = DEVICE_TYPE_MAP[fold(text)];
+  if (mapped) return { asset_type: mapped, model: null };
+  if (MONITOR_MODEL.test(text)) return { asset_type: 'monitor', model: text };
+  return { asset_type: 'other', model: text || null };
+}
 
 /**
  * Lowercase, diacritic-folded ("á" -> "a"), whitespace-stripped — handles the survey's
@@ -106,7 +144,7 @@ function correct(map: Record<string, string> | undefined, raw: string): string {
 }
 
 export function classifyDeviceType(eszkozTipus: string | undefined): string {
-  return DEVICE_TYPE_MAP[fold(eszkozTipus)] ?? 'other';
+  return classifyFromTypeColumn(eszkozTipus).asset_type;
 }
 
 // ── What the survey writes in its identifier column ───────────────────────────
@@ -841,7 +879,8 @@ async function planInternal(rows: SurveyRow[], corrections: Corrections): Promis
       continue;
     }
 
-    const deviceType = classifyDeviceType(row.eszkoz_tipus);
+    const fromType = classifyFromTypeColumn(row.eszkoz_tipus);
+    const deviceType = fromType.asset_type;
     const serial = usableSerial(row.sorozatszam);
     /**
      * The survey row's own id, tried before the serial.
@@ -880,8 +919,22 @@ async function planInternal(rows: SurveyRow[], corrections: Corrections): Promis
         display: existing.display_name,
         fields: {
           ...placementFields,
-          ...(existing.asset_type ? {} : { asset_type: deviceType }),
+          /**
+           * The type is normally left alone — it may have come from ITSM since. But a
+           * LOCAL asset's type came from this same survey in the first place, and if it
+           * currently reads "other" then the importer misread the column: the walkers wrote
+           * a model or a word it did not know. A better reading of the same source should
+           * replace that rather than being politely declined; 25 devices on the real survey
+           * were stuck as "other", ten of them monitors that fell out of every count.
+           */
+          ...(existing.asset_type && !(existing.source_of_truth === 'local'
+              && existing.asset_type === 'other' && deviceType !== 'other')
+            ? {}
+            : { asset_type: deviceType }),
           ...(existing.serial_number ? {} : { serial_number: serial }),
+          // The survey's own words for the model, kept where they belong rather than used
+          // once for classification and dropped.
+          ...(fromType.model && !existing.model ? { model: fromType.model } : {}),
           // Stamped on the way past, so a device first matched by serial is recognisable by
           // its row from then on — including after somebody corrects that serial.
           ...(row.id && !existing.survey_row_id ? { survey_row_id: row.id } : {}),
@@ -917,6 +970,7 @@ async function planInternal(rows: SurveyRow[], corrections: Corrections): Promis
         ...placementFields,
         display_name: displayName,
         asset_type: deviceType,
+        model: fromType.model,
         serial_number: serial,
         // Without this a device with no number is created again on every import.
         survey_row_id: row.id ?? null,

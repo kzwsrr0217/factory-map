@@ -50,6 +50,68 @@ function parseCsvLine(line: string): string[] {
   return s.split('","');
 }
 
+/**
+ * The Hardware Assets view, exported straight from the ITSM portal's own "Export to CSV".
+ *
+ * Worth accepting because of who can produce it: the OData export needs PowerShell on a
+ * domain-joined machine, while this is two clicks in the portal by whoever is already
+ * looking at the list. Same records — 1074 in the export this was written against.
+ *
+ * The columns are mapped onto the names `mapRow` already understands, so the whole tested
+ * import path is reused rather than duplicated. A row has no GUID here; `mapRow` falls back
+ * to the HWA id, which is unique anyway and is what every other table joins on.
+ *
+ * The export quotes every data field but not the header, and it does not escape a quote
+ * inside a value (`IPC 19" Rack`). Splitting quoted fields on `","` survives both, which is
+ * why `parseCsvLine` is reused here rather than replaced with something stricter that would
+ * reject the file outright.
+ */
+const PORTAL_COLUMNS: Record<string, string> = {
+  '#id': 'HardwareAssetID',
+  'display name': 'DisplayName',
+  status: 'Status',
+  'serial number': 'SerialNumber',
+  'mac address': 'MACAddress',
+  'company asset tag': 'AssetTag',
+  'catalog item': 'CatalogItem',
+  person: 'AssignedPersonName',
+  location: 'Location',
+  'last modified': 'ItsmModifiedAt',
+};
+
+export interface PortalCsvResult {
+  rows: Array<Record<string, string>>;
+  /** Rows whose field count does not match the header — reported, never guessed at. */
+  malformed: number;
+  /** Header columns this parser has no use for. Named so a changed export is noticed. */
+  ignored: string[];
+}
+
+export function parsePortalHardwareCsv(text: string): PortalCsvResult {
+  const lines = text.replace(/^﻿/, '').split(/\r?\n/).filter((l) => l.trim() !== '');
+  if (lines.length < 2) return { rows: [], malformed: 0, ignored: [] };
+
+  // The header is not quoted in this export, so it is split plainly.
+  const header = lines[0].split(',').map((h) => h.trim().replace(/^"|"$/g, '').toLowerCase());
+  const mapped = header.map((h) => PORTAL_COLUMNS[h]);
+  const ignored = header.filter((_, i) => !mapped[i]);
+  if (!mapped.includes('HardwareAssetID')) {
+    throw new Error('That CSV has no "#ID" column — is it the Hardware Assets export?');
+  }
+
+  const rows: Array<Record<string, string>> = [];
+  let malformed = 0;
+  for (const line of lines.slice(1)) {
+    const fields = parseCsvLine(line);
+    if (fields.length !== header.length) { malformed++; continue; }
+    const row: Record<string, string> = {};
+    mapped.forEach((name, i) => { if (name) row[name] = fields[i].trim(); });
+    if (!row.HardwareAssetID) { malformed++; continue; }
+    rows.push(row);
+  }
+  return { rows, malformed, ignored };
+}
+
 export interface CsvParseResult<T> {
   map: Map<string, T>;
   /** Rows with an unexpected field count — reported rather than guessed at. */

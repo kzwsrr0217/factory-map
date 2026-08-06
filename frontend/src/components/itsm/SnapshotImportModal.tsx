@@ -69,6 +69,8 @@ function rowsFromJson(text: string, fileName: string): Array<Record<string, unkn
 
 const SnapshotImportModal: React.FC<SnapshotImportModalProps> = ({ isOpen, onClose, onApplied }) => {
   const [hardware, setHardware] = useState<Array<Record<string, unknown>> | null>(null);
+  /** Set instead of `hardware` when the chosen file is the portal's CSV export. */
+  const [hardwareCsv, setHardwareCsv] = useState<string | null>(null);
   const [hardwareName, setHardwareName] = useState('');
   const [catalogCsv, setCatalogCsv] = useState<string | null>(null);
   const [catalogName, setCatalogName] = useState('');
@@ -80,7 +82,7 @@ const SnapshotImportModal: React.FC<SnapshotImportModalProps> = ({ isOpen, onClo
   const toast = useToast();
 
   const reset = () => {
-    setHardware(null); setHardwareName('');
+    setHardware(null); setHardwareCsv(null); setHardwareName('');
     setCatalogCsv(null); setCatalogName('');
     setPersonsCsv(null); setPersonsName('');
     setPlan(null);
@@ -89,9 +91,24 @@ const SnapshotImportModal: React.FC<SnapshotImportModalProps> = ({ isOpen, onClo
   const pickHardware = async (file?: File) => {
     if (!file) return;
     try {
-      const rows = rowsFromJson(await readText(file), file.name);
-      setHardware(rows);
-      setHardwareName(`${file.name} — ${rows.length} row(s)`);
+      const text = await readText(file);
+      // A CSV is the portal's own export; the server maps its columns. Detected by content
+      // rather than by extension, since either can be renamed and the content cannot lie.
+      const looksJson = text.trimStart().startsWith('{') || text.trimStart().startsWith('[');
+      if (looksJson) {
+        const rows = rowsFromJson(text, file.name);
+        setHardware(rows);
+        setHardwareCsv(null);
+        setHardwareName(`${file.name} — ${rows.length} row(s)`);
+      } else {
+        const lines = text.split(/\r?\n/).filter((l) => l.trim() !== '');
+        if (!/#?id/i.test(lines[0] ?? '')) {
+          throw new Error(`${file.name} is neither the JSON export nor a CSV with an "#ID" column.`);
+        }
+        setHardware(null);
+        setHardwareCsv(text);
+        setHardwareName(`${file.name} — ${lines.length - 1} row(s)`);
+      }
       // Any previous preview described a different file.
       setPlan(null);
     } catch (err) {
@@ -100,11 +117,12 @@ const SnapshotImportModal: React.FC<SnapshotImportModalProps> = ({ isOpen, onClo
   };
 
   const run = async (apply: boolean) => {
-    if (!hardware) return;
+    if (!hardware && !hardwareCsv) return;
     setBusy(true);
     try {
       const result = await itsmService.importSnapshot({
-        hardware, catalogItemsCsv: catalogCsv, personsCsv: personsCsv, apply,
+        ...(hardware ? { hardware } : { hardwareCsv }),
+        catalogItemsCsv: catalogCsv, personsCsv: personsCsv, apply,
       });
       setPlan(result);
       if (apply) {
@@ -137,7 +155,9 @@ const SnapshotImportModal: React.FC<SnapshotImportModalProps> = ({ isOpen, onClo
             <FileJson size={16} />
             <span className={styles.fileLabel}>
               Hardware Assets <em>(required)</em>
-              <span className={styles.fileName}>{hardwareName || 'itsm-mmh-hardware.json'}</span>
+              <span className={styles.fileName}>
+                {hardwareName || 'itsm-mmh-hardware.json, or the portal’s Export to CSV'}
+              </span>
             </span>
             <input
               ref={hardwareInput}
@@ -187,7 +207,7 @@ const SnapshotImportModal: React.FC<SnapshotImportModalProps> = ({ isOpen, onClo
         </div>
 
         <div className={styles.actions}>
-          <Button variant="outline" onClick={() => run(false)} disabled={!hardware || busy} loading={busy && !plan}>
+          <Button variant="outline" onClick={() => run(false)} disabled={(!hardware && !hardwareCsv) || busy} loading={busy && !plan}>
             <Upload size={15} /> What would this change?
           </Button>
           <Button variant="primary" onClick={() => run(true)} disabled={!plan || busy || plan.applied}>

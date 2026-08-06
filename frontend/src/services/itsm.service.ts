@@ -68,7 +68,15 @@ export interface SnapshotImportPlan {
 
 export interface SnapshotImportInput {
   /** The Hardware Asset export, parsed in the browser — the file never leaves it. */
-  hardware: Array<Record<string, unknown>>;
+  hardware?: Array<Record<string, unknown>>;
+  /**
+   * The portal's own "Export to CSV" of the Hardware Assets view, as text.
+   *
+   * An alternative to `hardware` and the easier one to come by: the OData JSON needs
+   * PowerShell on a domain-joined machine, this is two clicks by whoever is looking at the
+   * list. The server maps the columns, so only one place knows the portal's header names.
+   */
+  hardwareCsv?: string | null;
   catalogItemsCsv?: string | null;
   personsCsv?: string | null;
   apply: boolean;
