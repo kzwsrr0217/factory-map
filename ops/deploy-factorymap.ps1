@@ -22,9 +22,11 @@
        the deploy is reachable
 
   On failure it says which step failed AND what state that leaves behind - a
-  half-done deploy is worse than a failed one, so it must not be silent. In
-  particular, if it dies between steps 2 and 6 the portproxy rules are down and
-  the script says so explicitly.
+  half-done deploy is worse than a failed one, so it must not be silent. If it dies
+  between steps 2 and 6 it puts the portproxy rules back itself before reporting:
+  whether the app is reachable is a fact about the network, not about whether the
+  migration succeeded, and an earlier version that only printed the commands turned
+  a failed migration into an outage.
 
   NOTE: deliberately ASCII-only. Windows PowerShell 5.1 reads .ps1 files as ANSI
   unless they carry a UTF-8 BOM, so an accented or box-drawing character in here
@@ -236,6 +238,33 @@ try {
 } catch {
   Write-Output ""
   Write-Output ("DEPLOY FAILED: " + $_.Exception.Message)
+
+  <#
+    Put the portproxy back before giving up.
+
+    The previous version printed the two netsh commands and left it to the reader,
+    which turned a failed deploy into an outage: a migration that would not apply
+    left the app unreachable from every other machine, and the containers were
+    running the whole time. Whether the rules are up is a fact about the network,
+    not about whether the migration succeeded, so it is restored either way and the
+    failure is reported on its own terms.
+
+    Best effort: if netsh itself fails here there is nothing left to try, so it says
+    so and prints the commands as before.
+  #>
+  if ($proxyIsDown) {
+    Write-Output ""
+    Write-Output "Restoring the portproxy rules - the deploy failed, but the app should not"
+    Write-Output "also be unreachable from other machines."
+    try {
+      Add-PortProxy
+      $proxyIsDown = $false
+      Write-Output "Portproxy rules restored. The containers are running the code they were"
+      Write-Output "running before this step failed - fix the cause, then re-run this script."
+    } catch {
+      Write-Output ("Could not restore them automatically: " + $_.Exception.Message)
+    }
+  }
   if ($proxyIsDown) {
     Write-Output ""
     Write-Output "IMPORTANT: the portproxy rules are still removed, so the app is unreachable"
@@ -243,7 +272,6 @@ try {
     foreach ($port in $Ports) {
       Write-Output ("  netsh interface portproxy add v4tov4 listenport={0} listenaddress=0.0.0.0 connectport={0} connectaddress=127.0.0.1" -f $port)
     }
-    Write-Output "or re-run this script once the cause is fixed."
   }
   exit 1
 }
