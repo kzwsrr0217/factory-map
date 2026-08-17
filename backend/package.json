@@ -16,6 +16,7 @@
     "import:itsm": "ts-node src/scripts/import-itsm-snapshot.ts",
     "backfill:itsm": "ts-node src/scripts/backfill-itsm-fields.ts",
     "import:inventory": "ts-node src/scripts/import-inventory-survey.ts",
+    "import:nexthink": "ts-node src/scripts/import-nexthink-snapshot.ts",
     "convert:survey-csv": "ts-node src/scripts/convert-survey-csv.ts",
     "reconcile:report": "ts-node src/scripts/reconcile-report.ts",
     "report:network": "ts-node src/scripts/network-gaps-report.ts",
@@ -36,7 +37,10 @@
     "migration:run": "typeorm-ts-node-commonjs migration:run -d src/data-source.ts",
     "migration:revert": "typeorm-ts-node-commonjs migration:revert -d src/data-source.ts",
     "migration:show": "typeorm-ts-node-commonjs migration:show -d src/data-source.ts",
-    "verify:migrations": "ts-node src/scripts/verify-migrations.ts"
+    "verify:migrations": "ts-node src/scripts/verify-migrations.ts",
+    "nexthink:swap-check": "ts-node src/scripts/nexthink-swap-check.ts",
+    "nexthink:unknown": "ts-node src/scripts/nexthink-unknown-devices.ts",
+    "nexthink:person-mismatch": "ts-node src/scripts/nexthink-person-mismatch.ts"
   },
   "jest": {
     "preset": "ts-jest",

@@ -19,6 +19,8 @@ import { Building } from './entities/Building.entity';
 import { Floor } from './entities/Floor.entity';
 import { Zone } from './entities/Zone.entity';
 import { ItsmHardwareSnapshot } from './entities/ItsmHardwareSnapshot.entity';
+import { NexthinkDeviceSnapshot } from './entities/NexthinkDeviceSnapshot.entity';
+import { NexthinkLoginSnapshot } from './entities/NexthinkLoginSnapshot.entity';
 import { NormalisationTask } from './entities/NormalisationTask.entity';
 import { NameCorrection } from './entities/NameCorrection.entity';
 import { WorkArea } from './entities/WorkArea.entity';
@@ -60,7 +62,8 @@ export default new DataSource({
   // table nothing owns.
   entities: [
     Building, Floor, Zone, WorkArea, Section, Workstation,
-    Asset, MasterAsset, ItsmHardwareSnapshot, NormalisationTask, NameCorrection,
+    Asset, MasterAsset, ItsmHardwareSnapshot, NexthinkDeviceSnapshot, NexthinkLoginSnapshot,
+    NormalisationTask, NameCorrection,
     AssetSoftware, AssetConnection,
     User, AuditLog, AlertConfig, AlertLog, ScheduledAlert, ActiveSession,
     NetworkRoom, NetworkRack, PatchPanel, WallPort,

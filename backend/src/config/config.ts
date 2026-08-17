@@ -80,6 +80,27 @@ interface Config {
     clientSecret: string;
     redirectUri: string;
   };
+  /**
+   * Nexthink Infinity NQL API — the automated alternative to the hand-taken CSV exports.
+   *
+   * `instance` and `region` are the two halves of every Nexthink hostname and are read straight
+   * off the portal URL (`https://<instance>.<region>.nexthink.cloud`). They build two DIFFERENT
+   * hosts: the token comes from `<instance>-login.<region>`, the data from `<instance>.api.<region>`.
+   *
+   * The query IDs are not queries. The NQL API only runs queries that were saved in the Nexthink
+   * web interface and flagged for API use, referenced as `#some_id`. That is a constraint worth
+   * having: the two NQL queries live versioned in the product, with their entity filters and
+   * their 91-day/logins-precision limits, instead of as strings in this repo where nobody with
+   * Nexthink access can review them.
+   */
+  nexthink: {
+    instance: string;
+    region: string;
+    clientId: string;
+    clientSecret: string;
+    devicesQueryId: string;
+    loginsQueryId: string;
+  };
 }
 
 const config: Config = {
@@ -129,6 +150,16 @@ const config: Config = {
     clientId: process.env.AZURE_AD_CLIENT_ID || '',
     clientSecret: process.env.AZURE_AD_CLIENT_SECRET || '',
     redirectUri: process.env.AZURE_AD_REDIRECT_URI || 'http://localhost:3000/auth/callback',
+  },
+  nexthink: {
+    instance: process.env.NEXTHINK_INSTANCE || '',
+    region: process.env.NEXTHINK_REGION || 'eu',
+    clientId: process.env.NEXTHINK_CLIENT_ID || '',
+    // No default, deliberately. A placeholder secret would turn "not configured" into a 401 from
+    // Nexthink, which reads as a broken credential rather than a missing one.
+    clientSecret: process.env.NEXTHINK_CLIENT_SECRET || '',
+    devicesQueryId: process.env.NEXTHINK_DEVICES_QUERY_ID || '',
+    loginsQueryId: process.env.NEXTHINK_LOGINS_QUERY_ID || '',
   },
 };
 
