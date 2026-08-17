@@ -182,6 +182,64 @@ trust it, trust `netstat`.
 > Last-resort reset of podman's whole port-forwarding state:
 > `podman machine stop; podman machine start`.
 
+> ### ⚠️ A VM reboot does this to you on its own, with nobody deploying
+>
+> Same failure, no deploy involved — and this is the form it will actually reach
+> you in, because it needs no action to trigger. The portproxy rules live in the
+> registry, so they are back the instant the network stack is up. The containers
+> come up seconds later on their `restart: unless-stopped` policy, try to bind
+> the same ports, and lose. Nobody ran anything; the ordering rule above was
+> broken by the boot sequence itself.
+>
+> What makes this one expensive is that every instinct is wrong. The app looks
+> fine (`podman ps` → all three healthy — those healthchecks run inside the
+> container's own namespace and cannot see the host at all). `netsh interface
+> portproxy show all` looks fine, because the rules genuinely are correct — the
+> port they forward to is the problem, not the rule. `Test-NetConnection`
+> succeeds, because the portproxy answers the handshake. And `127.0.0.1` fails
+> identically to the external address, which reads like a network fault but is
+> the opposite: on Windows `0.0.0.0` covers loopback, so the portproxy is
+> intercepting the local test too.
+>
+> Two dead ends, both of which cost an hour here: **`podman machine stop; start`
+> does not fix it, and neither does `wsl --shutdown`.** They restart the thing
+> that was never broken, and the containers come back into the same occupied
+> ports. The listener you are looking for on the Windows side belongs to
+> `svchost.exe -k NetSvcs -p -s iphlpsvc` — the IP Helper service, i.e. the
+> portproxy — not to podman.
+>
+> Four commands settle it in a minute, from the outside in. Ports and the app are
+> fine; only the last hop is broken:
+> ```powershell
+> podman machine ssh
+> #  in the machine — the container on its own network:
+> podman inspect factory-map-frontend --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'
+> curl -sI http://<that ip>/          # 200 => app and container network fine
+> curl -sI http://localhost:8080/     # 200 => podman's publish inside the VM fine too
+> ```
+> Both 200 while the Windows host gets nothing means the break is host-side, and
+> the fix is the ordering fix — delete the rules, make podman rebind, put them
+> back:
+> ```powershell
+> netsh interface portproxy delete v4tov4 listenport=4000 listenaddress=0.0.0.0
+> netsh interface portproxy delete v4tov4 listenport=8080 listenaddress=0.0.0.0
+> docker-compose --env-file .env.prod -f docker-compose.prod.yml up -d --force-recreate backend frontend
+> netstat -an | findstr LISTENING | findstr ":4000 :8080"
+> netsh interface portproxy add v4tov4 listenport=4000 listenaddress=0.0.0.0 connectport=4000 connectaddress=127.0.0.1
+> netsh interface portproxy add v4tov4 listenport=8080 listenaddress=0.0.0.0 connectport=8080 connectaddress=127.0.0.1
+> Invoke-RestMethod http://127.0.0.1:4000/health
+> ```
+> `--force-recreate` is not optional: compose will otherwise leave a container it
+> considers up-to-date alone, and an untouched container keeps its broken port
+> config.
+>
+> The lasting fix is to stop the race rather than clean up after it: don't leave
+> the rules in the registry across a boot. Either drop them on shutdown and have
+> a scheduled task re-add them after the containers are up, or bind the published
+> ports to the VM's real address in `docker-compose.prod.yml`
+> (`10.5.8.112:8080:80`) so podman and the portproxy are no longer competing for
+> the same socket.
+
 Separately, only **two ports** need to be reachable from the VLAN — pick
 values (defaults `8080` and `4000`) and open exactly those:
 
