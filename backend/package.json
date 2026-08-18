@@ -31,7 +31,7 @@
     "tasks:generate": "ts-node src/scripts/generate-tasks.ts",
     "set:password": "ts-node src/scripts/set-password.ts",
     "prune:dev-accounts": "ts-node src/scripts/prune-dev-accounts.ts",
-    "test": "jest --runInBand --forceExit --passWithNoTests",
+    "test": "jest --passWithNoTests",
     "test:watch": "jest --watch",
     "migration:generate": "typeorm-ts-node-commonjs migration:generate -d src/data-source.ts",
     "migration:run": "typeorm-ts-node-commonjs migration:run -d src/data-source.ts",
@@ -41,22 +41,6 @@
     "nexthink:swap-check": "ts-node src/scripts/nexthink-swap-check.ts",
     "nexthink:unknown": "ts-node src/scripts/nexthink-unknown-devices.ts",
     "nexthink:person-mismatch": "ts-node src/scripts/nexthink-person-mismatch.ts"
-  },
-  "jest": {
-    "preset": "ts-jest",
-    "testEnvironment": "node",
-    "testMatch": [
-      "**/src/__tests__/**/*.test.ts"
-    ],
-    "setupFiles": [
-      "<rootDir>/src/__tests__/helpers/jestEnv.ts"
-    ],
-    "setupFilesAfterEnv": [
-      "<rootDir>/src/__tests__/helpers/jestSetup.ts"
-    ],
-    "moduleNameMapper": {
-      "^(\\.{1,2}/.*)\\.js$": "$1"
-    }
   },
   "keywords": [
     "factory-map",
