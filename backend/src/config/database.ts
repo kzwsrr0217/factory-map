@@ -59,6 +59,26 @@ export const AppDataSource = new DataSource({
   options: {
     encrypt: config.mssql.encrypt,
     trustServerCertificate: config.mssql.trustServerCertificate,
+    /**
+     * Dates come back as UTC, not as the Node process's local time.
+     *
+     * TypeORM's mssql driver leaves `useUTC` off, and then a `datetime2` column read into a JS Date
+     * is interpreted as LOCAL time. Where the value was written from JS the error is symmetric and
+     * cancels, which is why `datetime` columns looked fine — but a value the DATABASE generates,
+     * like every `@CreateDateColumn`, is only ever read, so nothing cancels it. Measured on
+     * 2026-08-18 against a UTC SQL Server from a CEST host: stored 13:38:22, read back 11:38:22.
+     *
+     * Two real consequences, both of which showed up as long-standing red tests:
+     *   - `comparison.stale` compares the reconcile run's audit timestamp against the ITSM export
+     *     time, so the run always looked two hours older than the export and the page reported the
+     *     comparison as stale permanently, immediately after comparing.
+     *   - The audit log's date-range filter found nothing for "the last hour", because every entry
+     *     read back two hours in the past.
+     *
+     * It only bites when the Node process and SQL Server disagree about the timezone — which is
+     * every developer machine here, and would be production the day the two containers differ.
+     */
+    useUTC: true,
   },
   extra: {
     pool: {

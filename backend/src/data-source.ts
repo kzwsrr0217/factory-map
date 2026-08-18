@@ -76,5 +76,9 @@ export default new DataSource({
   options: {
     encrypt: process.env.MSSQL_ENCRYPT === 'true',
     trustServerCertificate: process.env.MSSQL_TRUST_CERT !== 'false',
+    // Must match config/database.ts, which carries the reasoning: without it a datetime2 column
+    // reads back in the Node process's local time, so anything the DATABASE generates comes back
+    // wrong by the offset. Kept in step here so a migration run and the app agree about dates.
+    useUTC: true,
   },
 });
