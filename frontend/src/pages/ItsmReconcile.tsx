@@ -4,14 +4,17 @@
  * ITSM is the single source of truth; this screen never writes to ITSM, and — by
  * design for the demo/pilot — never bulk-queries it. The asset list and the drift
  * summary come from the local DB. ITSM is contacted only when the user clicks
- * "Check" on a single asset. For each field difference the user then decides,
- * individually: accept the ITSM value into the app, ignore it, or (for records
- * gone from ITSM) unlink. Fixing the value in ITSM is done by the user in ITSM.
+ * "Check" on a single asset. For each field difference the user then decides, individually:
+ * accept the ITSM value into the app, ignore the difference, or mark ITSM as the wrong one — which
+ * raises a task to correct Alemba and does NOT clear the difference here, because it is still real
+ * until an export proves the correction landed. Records gone from ITSM can be unlinked.
+ *
+ * The app never writes to ITSM. The third decision produces work for a person, not an API call.
  */
 import React, { useState, useCallback, useEffect } from 'react';
 import {
   RefreshCw, ExternalLink, Check, EyeOff, Eye, AlertTriangle, Upload,
-  CheckCircle2, XCircle, HelpCircle, Unlink, Search, PlusCircle,
+  CheckCircle2, XCircle, HelpCircle, Unlink, Search, PlusCircle, ArrowUpRight,
 } from 'lucide-react';
 import Card from '../components/common/Card';
 import SnapshotImportModal from '../components/itsm/SnapshotImportModal';
@@ -202,6 +205,61 @@ const ItsmReconcile: React.FC = () => {
       toggle(setBusy, key, false);
     }
   }, [refreshSummary, toast]);
+
+  /**
+   * The third decision: the app is right, Alemba is wrong.
+   *
+   * The row stays in `diffs` on purpose. An ignore says the difference does not matter and moves
+   * it out of the way; this says it matters and the OTHER system has to change, so it is still
+   * outstanding until an export proves it was corrected. Showing it as resolved here would be the
+   * page claiming something about Alemba that has not happened yet.
+   */
+  const markWrong = useCallback(async (r: ReconcileAssetResult, field: string, itsmValue: string | null) => {
+    const key = `${r.asset_id}:itsm-wrong:${field}`;
+    toggle(setBusy, key, true);
+    try {
+      await itsmService.markItsmWrong(r.asset_id, field, itsmValue);
+      setResults((prev) => {
+        const cur = prev[r.asset_id];
+        if (!cur) return prev;
+        return {
+          ...prev,
+          [r.asset_id]: {
+            ...cur,
+            to_fix_in_itsm: [...cur.to_fix_in_itsm.filter((f) => f !== field), field],
+            // Marking supersedes an ignore on the same field: they are opposite decisions about
+            // one difference, and the backend drops the ignore too.
+            ignored: cur.ignored.filter((d) => d.field !== field),
+          },
+        };
+      });
+      toast.success('Recorded — a task to correct it in Alemba is now on the list.');
+    } catch {
+      toast.error('Could not record it.');
+    } finally {
+      toggle(setBusy, key, false);
+    }
+  }, [toast]);
+
+  const withdrawWrong = useCallback(async (r: ReconcileAssetResult, field: string) => {
+    const key = `${r.asset_id}:withdraw:${field}`;
+    toggle(setBusy, key, true);
+    try {
+      await itsmService.withdrawItsmWrong(r.asset_id, field);
+      setResults((prev) => {
+        const cur = prev[r.asset_id];
+        if (!cur) return prev;
+        return {
+          ...prev,
+          [r.asset_id]: { ...cur, to_fix_in_itsm: cur.to_fix_in_itsm.filter((f) => f !== field) },
+        };
+      });
+    } catch {
+      toast.error('Could not withdraw it.');
+    } finally {
+      toggle(setBusy, key, false);
+    }
+  }, [toast]);
 
   const unlink = useCallback(async (assetId: string) => {
     const key = `${assetId}:unlink`;
@@ -407,7 +465,16 @@ const ItsmReconcile: React.FC = () => {
                           <td className={styles.localCell}>{emptyValue(d.local_value)}</td>
                           <td className={styles.itsmCell}>{emptyValue(d.itsm_value)}</td>
                           <td className={styles.actionCol}>
-                            {isOperator && (
+                            {isOperator && (r.to_fix_in_itsm.includes(d.field) ? (
+                              <div className={styles.rowActions}>
+                                <span className={styles.toFixChip} title="A task to correct this in Alemba is on the list. It closes itself when an export carries the app value.">
+                                  <ArrowUpRight size={12} /> to fix in ITSM
+                                </span>
+                                <button className={styles.unignoreBtn} onClick={() => withdrawWrong(r, d.field)} title="Withdraw — the app was wrong after all">
+                                  withdraw
+                                </button>
+                              </div>
+                            ) : (
                               <div className={styles.rowActions}>
                                 <Button size="sm" variant="success" onClick={() => accept(a.asset_id, [d.field])} loading={busy.has(`${a.asset_id}:accept:${d.field}`)} title="Write the ITSM value into the app">
                                   <Check size={14} /> Accept
@@ -415,8 +482,11 @@ const ItsmReconcile: React.FC = () => {
                                 <button className={styles.ignoreBtn} onClick={() => ignore(r, d.field, d.itsm_value)} title="Ignore this difference (persisted)">
                                   <EyeOff size={14} /> Ignore
                                 </button>
+                                <button className={styles.itsmWrongBtn} onClick={() => markWrong(r, d.field, d.itsm_value)} title="The app value is right — raise a task to correct Alemba">
+                                  <ArrowUpRight size={14} /> ITSM is wrong
+                                </button>
                               </div>
-                            )}
+                            ))}
                           </td>
                         </tr>
                       ))}

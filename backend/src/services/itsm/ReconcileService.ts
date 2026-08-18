@@ -271,6 +271,7 @@ export async function reconcileAsset(assetId: string): Promise<IReconcileAssetRe
       missing_in_itsm: false,
       diffs: active,
       ignored,
+      to_fix_in_itsm: (asset.reconcile_itsm_wrong ?? []).map((w) => w.field),
       checked_at: new Date(),
     };
   } catch (err) {
@@ -283,6 +284,7 @@ export async function reconcileAsset(assetId: string): Promise<IReconcileAssetRe
       missing_in_itsm: missing,
       diffs: [],
       ignored: [],
+      to_fix_in_itsm: (asset.reconcile_itsm_wrong ?? []).map((w) => w.field),
       checked_at: new Date(),
       ...(missing ? {} : { error: message }),
     };

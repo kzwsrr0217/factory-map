@@ -10,6 +10,11 @@
  */
 import api from './api';
 
+/**
+ * Mirrors `NormalisationTaskKind` in the backend entity. Two declarations of one union is a
+ * duplication that can drift — and did: adding four kinds server-side left this list short, and
+ * only the KINDS table on the page failing to compile caught it. Keep them in step.
+ */
 export type NormalisationTaskKind =
   | 'link-to-itsm'
   | 'decide-match'
@@ -18,7 +23,11 @@ export type NormalisationTaskKind =
   | 'label-device'
   | 'check-hwa'
   | 'verify-disposal'
-  | 'resolve-field-differences';
+  | 'resolve-field-differences'
+  | 'create-in-map'
+  | 'confirm-primary-user'
+  | 'dispose-replaced-machine'
+  | 'correct-in-itsm';
 
 export type NormalisationTaskState = 'open' | 'done' | 'dismissed';
 

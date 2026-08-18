@@ -47,7 +47,11 @@ const KINDS: Array<{ kind: NormalisationTaskKind; label: string; hint: string }>
   { kind: 'link-to-itsm', label: 'Link to ITSM', hint: 'ITSM already knows it. Link the record on the asset page.' },
   { kind: 'label-device', label: 'Put a label on it', hint: 'Only a person can confirm this one.' },
   { kind: 'resolve-field-differences', label: 'Resolve differences', hint: 'Fields disagree with ITSM. Resolve them on the reconcile page.' },
-  { kind: 'verify-disposal', label: 'Confirm or retire', hint: 'ITSM has it, the survey never found it.' },
+  { kind: 'correct-in-itsm', label: 'Correct it in ITSM', hint: 'The map is right and Alemba is stale. Closes itself when a later export carries the app value.' },
+  { kind: 'confirm-primary-user', label: 'Confirm who uses it', hint: 'The logon record and the map name different people. Someone may simply have changed desks.' },
+  { kind: 'create-in-map', label: 'Add it to the map', hint: 'ITSM has it and Nexthink saw it running, so it exists. No need to go and look for it.' },
+  { kind: 'verify-disposal', label: 'Confirm or retire', hint: 'ITSM has it, the survey never found it, and Nexthink has not seen it either.' },
+  { kind: 'dispose-replaced-machine', label: 'Reuse or set aside', hint: 'A replaced machine is still switched on. Reinstall it into service, or shut it down for decommission.' },
 ];
 
 const KIND_LABEL = new Map(KINDS.map((k) => [k.kind, k.label]));

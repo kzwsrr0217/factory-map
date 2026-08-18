@@ -24,6 +24,12 @@ export interface ReconcileAssetResult {
   missing_in_itsm: boolean;
   diffs: ReconcileFieldDiff[];
   ignored: ReconcileFieldDiff[];
+  /**
+   * Field keys marked "ITSM is wrong, fix Alemba". These are ALSO still in `diffs` — unlike an
+   * ignore, the difference has not gone away, it has been escalated. Carried by the API so the
+   * decision is still visible after a re-check.
+   */
+  to_fix_in_itsm: string[];
   checked_at: string | null;
   error?: string;
 }
@@ -197,6 +203,17 @@ export const itsmService = {
   },
   unignore: async (assetId: string, field: string): Promise<void> => {
     await api.patch(`/itsm/reconcile/${assetId}/unignore/${encodeURIComponent(field)}`);
+  },
+  /**
+   * The third decision: the app is right and Alemba has to be corrected. Local write, like the
+   * other two — it raises a `correct-in-itsm` task for a person, and that task closes itself once
+   * a later export carries the app's value.
+   */
+  markItsmWrong: async (assetId: string, field: string, itsmValue: string | null, note?: string): Promise<void> => {
+    await api.patch(`/itsm/reconcile/${assetId}/itsm-wrong`, { field, itsm_value: itsmValue, note });
+  },
+  withdrawItsmWrong: async (assetId: string, field: string): Promise<void> => {
+    await api.patch(`/itsm/reconcile/${assetId}/itsm-wrong/${encodeURIComponent(field)}/withdraw`);
   },
   unlink: async (assetId: string): Promise<void> => {
     await api.patch(`/itsm/reconcile/${assetId}/unlink`);

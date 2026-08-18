@@ -108,6 +108,14 @@ export interface IReconcileAssetResult {
   diffs: IReconcileFieldDiff[];
   /** Differences the user has chosen to ignore (still matching ITSM). */
   ignored: IReconcileFieldDiff[];
+  /**
+   * Field keys the user marked as "ITSM is wrong, correct it in Alemba".
+   *
+   * These stay in `diffs` as well, deliberately: unlike an ignore, the difference is still real
+   * and still there until Alemba changes. Carried in the result rather than kept in component
+   * state so the decision survives a re-check — a decision that disappears on refresh is not one.
+   */
+  to_fix_in_itsm: string[];
   /** When this asset was last checked against ITSM. */
   checked_at: Date | null;
   /** Populated when the ITSM lookup itself errored (network/auth). */
