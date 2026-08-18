@@ -29,6 +29,7 @@ import {
 } from '../entities/NormalisationTask.entity';
 import { generateTasks, MACHINE_VERIFIABLE } from '../services/itsm/taskGenerator';
 import { buildWorksheet } from '../services/inventory/taskWorksheet';
+import { getSourceFreshness } from '../services/sourceFreshness';
 
 interface AuthRequest extends Request {
   user?: { username?: string };
@@ -229,4 +230,18 @@ export const runTaskGeneration = async (req: Request, res: Response, next: NextF
       },
     });
   } catch (error) { next(error); }
+};
+
+/**
+ * sourceFreshness: how old each source is and how much of the estate it covers.
+ *
+ * Sits above the task list rather than inside it: the list says what is left, this says whether the
+ * data behind it is worth acting on. Read-only, any authenticated role.
+ */
+export const sourceFreshness = async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    res.json({ success: true, data: await getSourceFreshness() });
+  } catch (error) {
+    next(error);
+  }
 };

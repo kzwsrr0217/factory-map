@@ -22,6 +22,7 @@
 import { AppDataSource } from '../../config/database';
 import { ItsmHardwareSnapshot } from '../../entities/ItsmHardwareSnapshot.entity';
 import { chunkForEntity } from '../../utils/mssqlBatch';
+import { recordImportRun } from '../importRun';
 
 export type SnapshotRow = Record<string, unknown>;
 
@@ -342,6 +343,8 @@ export interface SnapshotImportPlan {
 }
 
 export interface SnapshotImportInput {
+  /** Recorded in the import ledger. `system` for a scheduled run. */
+  by?: string;
   /** The Hardware Asset export, already parsed from JSON. */
   hardware: SnapshotRow[];
   /** Catalog Items CSV text. Without it, asset_type and manufacturer stay unenriched. */
@@ -444,6 +447,31 @@ export async function planSnapshotImport(input: SnapshotImportInput): Promise<Sn
     for (let i = 0; i < mapped.length; i += chunk) {
       await txRepo.insert(mapped.slice(i, i + chunk) as ItsmHardwareSnapshot[]);
     }
+  });
+
+  /**
+   * Outside the transaction: the ledger describes an import that has already happened, and failing
+   * to record it must not roll back the data it describes. `recordImportRun` swallows its own
+   * errors for the same reason.
+   *
+   * `taken_at` is left null rather than guessed. A portal CSV carries no export timestamp, and a
+   * file's mtime is when somebody saved it, which can be long before it reached the app — a wrong
+   * age is worse than an admitted unknown, because every report built on it would inherit the lie.
+   */
+  await recordImportRun({
+    source: 'itsm-hardware',
+    rowCount: mapped.length,
+    counts: {
+      created: plan.added.length,
+      changed: plan.changed.length,
+      gone: plan.removed.length,
+      unchanged: plan.unchanged,
+    },
+    detail: {
+      catalog_items: plan.enrichment.catalog_items,
+      persons: plan.enrichment.persons,
+    },
+    by: input.by,
   });
 
   return { ...plan, applied: true };

@@ -1,0 +1,50 @@
+/*
+ * SourceFreshnessBar — three rows of numbers above the task list.
+ *
+ * Quiet by default: this is context, not the work. Only .attention is coloured, because it is the
+ * only line that ever asks for something. A bar where everything shouts is a bar people stop
+ * reading, and then the one line that mattered goes unread too.
+ */
+.bar {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  background: var(--color-surface, transparent);
+}
+
+.heading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 10px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.row { }
+.rowEmpty { opacity: 0.6; }
+
+.top { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.label { font-size: 0.88rem; }
+.rows, .age, .taken { font-size: 0.78rem; color: var(--color-text-secondary); }
+.taken { border-bottom: 1px dotted var(--color-border); }
+
+.coverage { font-size: 0.78rem; color: var(--color-text-secondary); margin-top: 2px; }
+.delta { font-size: 0.76rem; color: var(--color-text-secondary); margin-top: 2px; }
+
+.attention {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 4px;
+  font-size: 0.78rem;
+  color: var(--color-warning, #b45309);
+}
+
+.loading { height: 96px; border-radius: var(--radius-md); background: var(--color-border); opacity: 0.25; margin-bottom: 16px; }
+.failed { font-size: 0.8rem; color: var(--color-text-secondary); margin-bottom: 16px; }

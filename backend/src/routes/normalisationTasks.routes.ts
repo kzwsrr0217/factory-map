@@ -124,6 +124,7 @@ import {
   listTasks,
   taskWorksheet,
   taskSummary,
+  sourceFreshness,
   updateTask,
   runTaskGeneration,
 } from '../controllers/normalisationTask.controller';
@@ -135,6 +136,8 @@ const router = Router();
 
 // Before '/:id' so the literal path wins over the parameter.
 router.get('/summary', taskSummary);
+// Before '/' so the literal path wins; how fresh each source is, and how far it reaches.
+router.get('/source-freshness', sourceFreshness);
 router.get('/worksheet', taskWorksheet);
 router.get('/', listTasks);
 router.patch('/:id', requireOperator, captureAuditBefore(NormalisationTask), auditLog('normalisation_task'), updateTask);

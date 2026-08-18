@@ -104,7 +104,33 @@ export interface TaskQuery {
   limit?: number;
 }
 
+/**
+ * How fresh each source is, and how much of the estate it speaks for.
+ *
+ * Deliberately not a comparison between the sources — see components/tasks/SourceFreshnessBar.tsx.
+ */
+export interface SourceStatus {
+  source: 'itsm-hardware' | 'nexthink-devices' | 'nexthink-logins' | 'survey';
+  label: string;
+  loaded: boolean;
+  /** Null where the table holds data but no import was ever recorded — an honest unknown. */
+  imported_at: string | null;
+  /** When the export itself was produced, where the source states it. Usually null. */
+  taken_at: string | null;
+  age_days: number | null;
+  rows: number;
+  counts: { created?: number; changed?: number; gone?: number; unchanged?: number } | null;
+  coverage: string;
+  attention: string | null;
+}
+
 export const taskService = {
+  /** How old each source is, for the bar above the list. */
+  getSourceFreshness: async (): Promise<SourceStatus[]> => {
+    const res = await api.get('/tasks/source-freshness');
+    return res.data.data;
+  },
+
   getTasks: async (query: TaskQuery = {}): Promise<{ tasks: NormalisationTask[]; total: number; totalPages: number }> => {
     const response = await api.get('/tasks', { params: query });
     return {

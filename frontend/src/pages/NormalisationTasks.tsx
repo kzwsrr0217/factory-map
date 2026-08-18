@@ -33,6 +33,7 @@ import {
   NormalisationTaskState,
 } from '../services/task.service';
 import styles from '../styles/pages/NormalisationTasks.module.css';
+import SourceFreshnessBar from '../components/tasks/SourceFreshnessBar';
 
 /**
  * The kinds in the order the work actually happens: find out what a device is, get it into
@@ -245,7 +246,7 @@ const NormalisationTasks: React.FC = () => {
         <div>
           <h1>Normalisation tasks</h1>
           <p className={styles.subtitle}>
-            Derived from the ITSM export, the physical inventory and the app — not kept by hand.
+            Derived from the ITSM export, the physical survey, Nexthink and the app — not kept by hand.
             Re-derive after every new export; the list closes what the data proves done by itself.
           </p>
         </div>
@@ -260,6 +261,10 @@ const NormalisationTasks: React.FC = () => {
           </Button>
         </div>
       </div>
+
+      {/* Context before content: the list below is only as trustworthy as the exports it was
+          derived from, and until the import ledger existed nothing recorded their age. */}
+      <SourceFreshnessBar />
 
       {summary.data && (
         summary.data.consistent ? (

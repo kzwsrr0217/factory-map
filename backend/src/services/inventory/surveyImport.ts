@@ -45,6 +45,7 @@ import { Zone } from '../../entities/Zone.entity';
 import { ItsmHardwareSnapshot } from '../../entities/ItsmHardwareSnapshot.entity';
 import { NameCorrection, NameCorrectionScope, NAME_CORRECTION_SCOPES } from '../../entities/NameCorrection.entity';
 import { chunkForEntity, chunked } from '../../utils/mssqlBatch';
+import { recordImportRun } from '../importRun';
 import { foldName } from '../itsm/inventoryMatch';
 
 export interface SurveyRow {
@@ -1185,6 +1186,8 @@ export interface SurveyImportInput {
   /** Create the rooms the survey refers to and the map lacks. Only with `apply`. */
   createMissingWorkAreas?: boolean;
   apply: boolean;
+  /** Recorded in the import ledger. `system` for a scheduled run. */
+  by?: string;
 }
 
 /** The created assets and the ids of the updated ones, for the caller's audit trail. */
@@ -1385,6 +1388,30 @@ export async function planSurveyImport(input: SurveyImportInput): Promise<Survey
     created_areas: createdAreas,
     applied: input.apply,
   };
+
+  /**
+   * The ledger row, outside the transaction and only when something was actually written. Same
+   * reasoning as the other two importers: it describes a completed import.
+   *
+   * `taken_at` stays null — a survey export carries no timestamp of its own, and the round can be
+   * walked over several days. `import_runs.imported_at` is the only honest date here.
+   */
+  if (input.apply) {
+    await recordImportRun({
+      source: 'survey',
+      rowCount: internal.observations.length,
+      counts: {
+        created: created.length,
+        changed: updatedIds.length,
+        unchanged: internal.observations.filter((o) => o.resolution === 'unmatched').length,
+      },
+      detail: {
+        unmatched_rows: internal.observations.filter((o) => o.resolution === 'unmatched').length,
+        rows_with_suppressed_conflicts: internal.observations.filter((o) => o.suppressed.length > 0).length,
+      },
+      by: input.by,
+    });
+  }
 
   return { plan, created, updatedIds };
 }
