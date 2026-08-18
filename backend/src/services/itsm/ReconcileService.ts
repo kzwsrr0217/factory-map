@@ -363,6 +363,68 @@ export async function ignoreField(
   return asset;
 }
 
+/**
+ * The third decision: record that ITSM is wrong about this field and Alemba must be corrected.
+ *
+ * Neither of the other two fits what happens most often after a physical survey. Accepting the
+ * ITSM value overwrites what somebody verified by standing in the room; ignoring it parks a
+ * difference that is not going to resolve itself. Until now that case had nowhere to go, so it
+ * lived in someone's head.
+ *
+ * Local write only, like everything else here — the app never writes to Alemba. What this
+ * produces is a `correct-in-itsm` task for a person, and that task closes itself when a later
+ * export carries the app's value. Which is why `app_value` is snapshotted here rather than read
+ * from the asset later: if someone edits the asset again in the meantime, the task must still be
+ * judged against what was claimed at the time, not against a moving target.
+ */
+export async function markItsmWrong(
+  assetId: string,
+  field: string,
+  itsmValue: string | null,
+  user?: string,
+  note?: string,
+): Promise<Asset> {
+  const def = FIELD_BY_KEY.get(field);
+  if (!def) throw new Error(`Unknown reconcile field: ${field}`);
+  const assetRepo = AppDataSource.getRepository(Asset);
+  const asset = await assetRepo.findOne({ where: { id: assetId } });
+  if (!asset) throw new Error('Asset not found');
+
+  const list = (asset.reconcile_itsm_wrong ?? []).filter((w) => w.field !== field);
+  list.push({
+    field,
+    app_value: def.getLocal(asset),
+    itsm_value: itsmValue,
+    marked_at: new Date(),
+    marked_by: user,
+    note,
+  });
+  asset.reconcile_itsm_wrong = list;
+  /**
+   * An ignore on the same field is dropped: the two are mutually exclusive decisions about one
+   * difference, and leaving both would mean the diff is simultaneously parked and escalated.
+   * The diff counter is deliberately NOT decremented — unlike an ignore, this difference is still
+   * real and still there until Alemba changes.
+   */
+  if (asset.reconcile_ignored) {
+    const kept = asset.reconcile_ignored.filter((i) => i.field !== field);
+    asset.reconcile_ignored = kept.length > 0 ? kept : null;
+  }
+  await assetRepo.save(asset);
+  return asset;
+}
+
+/** Withdraw a "correct in ITSM" mark, e.g. it turned out the app was wrong after all. */
+export async function unmarkItsmWrong(assetId: string, field: string): Promise<Asset> {
+  const assetRepo = AppDataSource.getRepository(Asset);
+  const asset = await assetRepo.findOne({ where: { id: assetId } });
+  if (!asset) throw new Error('Asset not found');
+  const list = (asset.reconcile_itsm_wrong ?? []).filter((w) => w.field !== field);
+  asset.reconcile_itsm_wrong = list.length > 0 ? list : null;
+  await assetRepo.save(asset);
+  return asset;
+}
+
 /** Remove an ignore entry so the field is compared again. Local write only. */
 export async function unignoreField(assetId: string, field: string): Promise<Asset> {
   const assetRepo = AppDataSource.getRepository(Asset);

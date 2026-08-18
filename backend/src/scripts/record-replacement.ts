@@ -129,8 +129,31 @@ async function main(): Promise<void> {
       }
 
       for (const monitorHwa of swap.monitorHwas) {
-        const monitor = await find(monitorHwa);
-        if (!monitor) { console.log(`  ✖ ${monitorHwa} is not in the app — cannot attach it`); continue; }
+        /**
+         * Created from the ITSM export when the app has never seen it, exactly as the replacement
+         * machine above is. This used to just refuse, which was the wrong asymmetry: a screen
+         * named as having come with a new machine is, by definition, usually as new as the
+         * machine — so the one case the feature exists for was the one it could not handle.
+         * The same rule still applies as for the machine: where ITSM does not have it either,
+         * stop, because inventing a device Alemba cannot confirm is how a duplicate is born.
+         */
+        let monitor = await find(monitorHwa);
+        if (!monitor) {
+          const row = await snapshotRepo.findOne({ where: { itsm_id: monitorHwa } });
+          if (!row) {
+            console.log(`  ✖ ${monitorHwa} is neither in the app nor in the loaded ITSM export — cannot attach it`);
+            continue;
+          }
+          console.log(`  · ${monitorHwa} is in the export but not in the app — ${apply ? 'creating' : 'would be created'} from it`);
+          console.log(`      ${row.catalog_item_name ?? '(no catalogue item)'} · serial ${row.serial_number ?? '—'} · ${row.status ?? 'no status'}`);
+          if (!apply) continue;
+          const created = await createAssetsFromUnlinkedMmh([row.itsm_guid]);
+          monitor = created.created[0] ?? created.linked[0] ?? null;
+          if (!monitor) {
+            console.log(`  ✖ could not create ${monitorHwa}: ${created.skipped.map((s) => s.error).join('; ')}`);
+            continue;
+          }
+        }
         if (!apply || !newAsset) {
           console.log(`  · would place ${monitor.display_name} in the same room and attach it to ${swap.newHwa}`);
           continue;

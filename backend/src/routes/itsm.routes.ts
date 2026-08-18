@@ -113,6 +113,8 @@ import {
   acceptReconcileFields,
   ignoreReconcileDiff,
   unignoreReconcileDiff,
+  markReconcileItsmWrong,
+  unmarkReconcileItsmWrong,
   unlinkReconcileAsset,
   unlinkedMmh,
   importSnapshotFromUpload,
@@ -164,6 +166,10 @@ router.post('/reconcile/:id/check', requireOperator, reconcileCheckAsset);
 router.patch('/reconcile/:id/accept', requireOperator, captureAuditBefore(Asset), auditLog('asset'), acceptReconcileFields);
 router.patch('/reconcile/:id/ignore', requireOperator, captureAuditBefore(Asset), auditLog('asset'), ignoreReconcileDiff);
 router.patch('/reconcile/:id/unignore/:field', requireOperator, unignoreReconcileDiff);
+// The third decision. Same guard as the other two: an operator may record it, and the change is
+// audited, because "Alemba is wrong about this" is a claim someone should be answerable for.
+router.patch('/reconcile/:id/itsm-wrong', requireOperator, captureAuditBefore(Asset), auditLog('asset'), markReconcileItsmWrong);
+router.patch('/reconcile/:id/itsm-wrong/:field/withdraw', requireOperator, unmarkReconcileItsmWrong);
 router.patch('/reconcile/:id/unlink', requireOperator, captureAuditBefore(Asset), auditLog('asset'), unlinkReconcileAsset);
 
 export default router;

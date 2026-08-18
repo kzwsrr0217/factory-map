@@ -256,6 +256,29 @@ export class Asset {
   @Column({ name: 'reconcile_ignored', type: 'simple-json', nullable: true })
   reconcile_ignored!: Array<{ field: string; itsm_value: string | null; ignored_at: Date; ignored_by?: string }> | null;
 
+  /**
+   * The third decision: this field's ITSM value is WRONG and Alemba has to be corrected.
+   *
+   * Accepting an ITSM value overwrites the app and leaves no open question. Ignoring one parks
+   * the difference. Neither covers the case that comes up most after a physical survey — the
+   * person standing in the room is right and the record is stale — and until now that had
+   * nowhere to be recorded, so it was carried in someone's head or a spreadsheet.
+   *
+   * `app_value` is stored, not just referenced, because it is what makes the resulting
+   * `correct-in-itsm` task close itself: when a later export reports this value, the correction
+   * demonstrably happened in Alemba. Comparing against the live asset instead would close the
+   * task if somebody edited the asset again here, which proves nothing about ITSM.
+   */
+  @Column({ name: 'reconcile_itsm_wrong', type: 'simple-json', nullable: true })
+  reconcile_itsm_wrong!: Array<{
+    field: string;
+    app_value: string | null;
+    itsm_value: string | null;
+    marked_at: Date;
+    marked_by?: string;
+    note?: string;
+  }> | null;
+
   // Result of the last per-asset reconcile check (populated on demand only).
   @Column({ name: 'reconcile_last_at', type: 'datetime', nullable: true })
   reconcile_last_at!: Date | null;

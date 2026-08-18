@@ -22,6 +22,8 @@ import {
   acceptFields,
   ignoreField,
   unignoreField,
+  markItsmWrong,
+  unmarkItsmWrong,
   unlinkAsset,
   listLinked,
   driftSummary,
@@ -169,6 +171,46 @@ export const ignoreReconcileDiff = async (req: AuthRequest, res: Response, next:
     const message = error instanceof Error ? error.message : String(error);
     if (notFound(message)) { res.status(404).json({ success: false, error: message }); return; }
     if (/unknown reconcile field/i.test(message)) { res.status(400).json({ success: false, error: message }); return; }
+    next(error);
+  }
+};
+
+/**
+ * markReconcileItsmWrong: the third decision — the map is right, Alemba must be corrected.
+ *
+ * A sibling of the ignore endpoint rather than a flag on it, because the two mean opposite
+ * things: an ignore says the difference does not matter, this says it does and the other system
+ * is the one that has to change. It produces a `correct-in-itsm` task for a person.
+ */
+export const markReconcileItsmWrong = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const field = req.body?.field;
+    if (!field || typeof field !== 'string') {
+      res.status(400).json({ success: false, error: 'Body must include a "field"' });
+      return;
+    }
+    const asset = await markItsmWrong(
+      id, field, req.body?.itsm_value ?? null, req.user?.username, req.body?.note,
+    );
+    res.json({ success: true, data: asset.toApiResponse() });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (notFound(message)) { res.status(404).json({ success: false, error: message }); return; }
+    if (/unknown reconcile field/i.test(message)) { res.status(400).json({ success: false, error: message }); return; }
+    next(error);
+  }
+};
+
+/** unmarkReconcileItsmWrong: withdraw it, e.g. the app turned out to be wrong after all. */
+export const unmarkReconcileItsmWrong = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { id, field } = req.params;
+    const asset = await unmarkItsmWrong(id, field);
+    res.json({ success: true, data: asset.toApiResponse() });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (notFound(message)) { res.status(404).json({ success: false, error: message }); return; }
     next(error);
   }
 };

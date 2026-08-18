@@ -37,7 +37,9 @@ import {
   NormalisationTaskKind,
 } from '../../entities/NormalisationTask.entity';
 import { chunkForEntity, chunked, MSSQL_PARAM_BUDGET } from '../../utils/mssqlBatch';
-import { findUnlinkedMmhAssets } from './ReconcileService';
+import { findUnlinkedMmhAssets, RECONCILE_FIELDS } from './ReconcileService';
+import { snapshotRowToHardware } from './SnapshotITSMAdapter';
+import { deriveNexthinkTasks, suppressVerifyDisposalFor } from '../nexthink/nexthinkTasks';
 import {
   buildSnapshotIndex,
   matchRecord,
@@ -68,6 +70,18 @@ export const MACHINE_VERIFIABLE: ReadonlySet<NormalisationTaskKind> = new Set([
   'check-hwa',
   'resolve-field-differences',
   'verify-disposal',
+  // The asset appears, so the map holds it.
+  'create-in-map',
+  // The two names agree, or the difference is gone.
+  'confirm-primary-user',
+  // The old machine stops reporting, or drops out of the export.
+  'dispose-replaced-machine',
+  /**
+   * The only kind proven done by an OUTSIDE system changing: a later ITSM export carries the
+   * value the app was marked right about. That is a stronger proof than any of the others —
+   * nobody here can fake it by editing a local record.
+   */
+  'correct-in-itsm',
 ]);
 
 /** A task the current data says is necessary, before it meets what is stored. */
@@ -121,6 +135,10 @@ function toCandidateRow(row: ItsmHardwareSnapshot): SnapshotCandidateRow {
 export async function deriveRequiredTasks(): Promise<RequiredTask[]> {
   const snapshotRows = await AppDataSource.getRepository(ItsmHardwareSnapshot).find();
   const index = buildSnapshotIndex(snapshotRows.map(toCandidateRow));
+  // Full rows, keyed by ITSM id: the candidate index carries only the fields the matcher needs,
+  // and proving an Alemba correction landed needs the field's real comparison semantics.
+  const snapshotByItsmId = new Map(snapshotRows.map((r) => [r.itsm_id.toUpperCase(), r]));
+  const fieldByKey = new Map(RECONCILE_FIELDS.map((f) => [f.key, f]));
   const assets = (await AppDataSource.getRepository(Asset).find()).filter((a) => !a.successor_id);
 
   const required: RequiredTask[] = [];
@@ -242,8 +260,19 @@ export async function deriveRequiredTasks(): Promise<RequiredTask[]> {
     }
   }
 
+  /**
+   * The third source's contribution to THIS list is a subtraction.
+   *
+   * `verify-disposal` sends a person to find out whether hardware ITSM lists still exists. For a
+   * device that reported to Nexthink this week the answer is already yes, and the useful task is
+   * "add it to the map" — which `deriveNexthinkTasks` raises as `create-in-map`. Raising both
+   * would put the same machine on a walking list and a data-entry list at once.
+   */
+  const provenAlive = await suppressVerifyDisposalFor();
+
   // The other direction: ITSM has hardware the survey never found.
   for (const row of await findUnlinkedMmhAssets()) {
+    if (provenAlive.has(row.itsm_id)) continue;
     add({
       kind: 'verify-disposal',
       subject_key: row.itsm_id,
@@ -258,6 +287,57 @@ export async function deriveRequiredTasks(): Promise<RequiredTask[]> {
       ].join('\n'),
     });
   }
+
+  /**
+   * The third decision, made on the reconcile page: this ITSM value is wrong, fix Alemba.
+   *
+   * One task per asset rather than per field, because the person doing it opens the record once
+   * and corrects everything on it. The fields are listed in the evidence, which also means the
+   * evidence hash changes when another field is marked — so a dismissed task comes back, which
+   * is the intended behaviour: a decision about two fields did not cover a third.
+   */
+  for (const asset of assets) {
+    const marked = asset.reconcile_itsm_wrong ?? [];
+    if (marked.length === 0) continue;
+
+    /**
+     * Drop the entries Alemba has already been corrected on, which is how this closes itself.
+     *
+     * Compared with the field's OWN `equals`, not string equality: status goes through the
+     * mapping table and MACs through normalisation, so a correction that landed in a different
+     * but equivalent form still counts. Where the comparison cannot be made at all — unknown
+     * field key, or the asset is not in the export — the entry is KEPT. An unprovable correction
+     * must leave the task open; silently closing it would be the app claiming Alemba was fixed.
+     */
+    const row = asset.hardware_asset_id
+      ? snapshotByItsmId.get(asset.hardware_asset_id.trim().toUpperCase())
+      : undefined;
+    const hw = row ? snapshotRowToHardware(row) : null;
+    const wrong = marked.filter((w) => {
+      const field = fieldByKey.get(w.field);
+      if (!field || !hw) return true;
+      return !field.equals(w.app_value, hw);
+    });
+    if (wrong.length === 0) continue;
+
+    add({
+      kind: 'correct-in-itsm',
+      subject_key: asset.id,
+      asset_id: asset.id,
+      itsm_id: asset.hardware_asset_id ?? null,
+      summary: `${asset.display_name}: correct ${wrong.length} field(s) in Alemba — the map is right`,
+      evidence: [
+        ...wrong.map((w) => `${w.field}: ITSM has "${w.itsm_value ?? '(empty)'}", should be "${w.app_value ?? '(empty)'}"`
+          + `${w.note ? ` — ${w.note}` : ''}`),
+        'This closes itself once an export reports the app value: the correction is proven by'
+          + ' Alemba changing, not by anyone saying so here.',
+      ].join('\n'),
+    });
+  }
+
+  // The third source. Appended rather than interleaved so the ITSM-vs-map reasoning above stays
+  // readable as one piece; the kinds do not overlap, so order carries no meaning.
+  required.push(...await deriveNexthinkTasks());
 
   return required;
 }

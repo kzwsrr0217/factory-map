@@ -31,9 +31,11 @@
  * met"), so the logon window is necessarily shorter than the device one. Do not widen it to
  * match — anything comparing the two tables has to tolerate the difference instead.
  *
- * Dry run by default, like every other importer here. The dry run is also the only place the
- * one genuinely unknown number gets stated: how much of the Nexthink estate the factory map
- * knows about at all.
+ * Dry run by default — note this is NOT what `import-itsm-snapshot.ts` does, which writes on
+ * sight. The difference is deliberate here and the two should probably be reconciled one day, but
+ * do not assume from one which way the other behaves; that assumption cost a surprise once. The
+ * dry run is also the only place the one genuinely unknown number gets stated: how much of the
+ * Nexthink estate the factory map knows about at all.
  *
  *   npm run import:nexthink -- /path/to/export/dir             # measures, writes nothing
  *   npm run import:nexthink -- /path/to/export/dir --apply     # replaces both tables

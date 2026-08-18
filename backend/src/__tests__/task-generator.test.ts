@@ -276,3 +276,153 @@ describe('taskGenerator — at the size of a real estate', () => {
     expect(stored).toBe(N);
   }, 60000);
 });
+
+/**
+ * ── The third decision, and the third source ────────────────────────────────────
+ *
+ * Two properties below are the ones worth pinning, because both were got wrong first:
+ *
+ *   - `correct-in-itsm` must close itself when Alemba is corrected, and ONLY then. It is the one
+ *     kind whose completion is proven by an outside system changing.
+ *   - "Does it exist" and "is it still in service" are different questions. Conflating them put
+ *     three devices on a walking list and a data-entry list at the same time.
+ */
+import { NexthinkDeviceSnapshot } from '../entities/NexthinkDeviceSnapshot.entity';
+import { suppressVerifyDisposalFor } from '../services/nexthink/nexthinkTasks';
+
+const createdDeviceNames: string[] = [];
+
+afterEach(async () => {
+  if (createdDeviceNames.length > 0) {
+    await AppDataSource.getRepository(NexthinkDeviceSnapshot)
+      .createQueryBuilder().delete()
+      .where('device_name IN (:...names)', { names: createdDeviceNames }).execute();
+    await AppDataSource.getRepository(NormalisationTask)
+      .createQueryBuilder().delete()
+      .where('subject_key IN (:...names)', { names: createdDeviceNames }).execute();
+    createdDeviceNames.length = 0;
+  }
+});
+
+async function makeNexthinkDevice(name: string, lastSeen: Date): Promise<void> {
+  await AppDataSource.getRepository(NexthinkDeviceSnapshot).save({
+    device_name: name,
+    entity: 'Veszprem-Client',
+    first_seen: lastSeen,
+    last_seen: lastSeen,
+    hardware_type: 'desktop',
+    manufacturer: 'Dell',
+    model: 'OptiPlex 7090',
+    bios_serial: `${name}-serial`,
+    os_name: 'Windows 11 Enterprise 25H2',
+  } as NexthinkDeviceSnapshot);
+  createdDeviceNames.push(name);
+}
+
+describe('taskGenerator — correct-in-itsm, the decision that closes itself', () => {
+  it('raises it for a field marked as wrong in ITSM, and names both values', async () => {
+    const hwa = `${PREFIX}_CW1`;
+    await makeSnapshotRow({ itsm_id: hwa, serial_number: 'OLD-SERIAL' });
+    const asset = await makeAsset({
+      display_name: `${PREFIX}_cw1`,
+      hardware_asset_id: hwa,
+      serial_number: 'REAL-SERIAL',
+      reconcile_itsm_wrong: [{
+        field: 'serial_number',
+        app_value: 'REAL-SERIAL',
+        itsm_value: 'OLD-SERIAL',
+        marked_at: new Date(),
+        marked_by: 'tester',
+      }],
+    });
+
+    await generateTasks({ apply: true });
+    const task = (await tasksFor(asset.id)).find((t) => t.kind === 'correct-in-itsm');
+    expect(task).toBeDefined();
+    expect(task!.evidence).toContain('OLD-SERIAL');
+    expect(task!.evidence).toContain('REAL-SERIAL');
+  });
+
+  it('closes it once the export carries the app value — and not before', async () => {
+    const hwa = `${PREFIX}_CW2`;
+    const row = await makeSnapshotRow({ itsm_id: hwa, serial_number: 'STALE' });
+    const asset = await makeAsset({
+      display_name: `${PREFIX}_cw2`,
+      hardware_asset_id: hwa,
+      serial_number: 'CORRECTED',
+      reconcile_itsm_wrong: [{
+        field: 'serial_number',
+        app_value: 'CORRECTED',
+        itsm_value: 'STALE',
+        marked_at: new Date(),
+        marked_by: 'tester',
+      }],
+    });
+
+    await generateTasks({ apply: true });
+    expect(kinds(await tasksFor(asset.id))).toContain('correct-in-itsm');
+
+    // Alemba is corrected and a later export brings the value across.
+    row.serial_number = 'CORRECTED';
+    await AppDataSource.getRepository(ItsmHardwareSnapshot).save(row);
+
+    await generateTasks({ apply: true });
+    const after = (await tasksFor(asset.id)).find((t) => t.kind === 'correct-in-itsm');
+    // Machine-verifiable, so the generator closes it rather than leaving it for a person.
+    expect(after?.state).toBe('done');
+  });
+
+  it('keeps it open when the asset is not in the export at all', async () => {
+    // The correction cannot be proven, so it must not be assumed. Closing here would be the app
+    // claiming Alemba was fixed on no evidence.
+    const asset = await makeAsset({
+      display_name: `${PREFIX}_cw3`,
+      hardware_asset_id: `${PREFIX}_ABSENT`,
+      serial_number: 'CORRECTED',
+      reconcile_itsm_wrong: [{
+        field: 'serial_number',
+        app_value: 'CORRECTED',
+        itsm_value: 'STALE',
+        marked_at: new Date(),
+        marked_by: 'tester',
+      }],
+    });
+    await generateTasks({ apply: true });
+    const task = (await tasksFor(asset.id)).find((t) => t.kind === 'correct-in-itsm');
+    expect(task?.state).toBe('open');
+  });
+});
+
+describe('suppressVerifyDisposalFor — presence proves existence, recency does not', () => {
+  it('includes a device last seen weeks ago', async () => {
+    /**
+     * The regression. With a 7-day recency test, HWA38257 — last seen 8 days before the export's
+     * newest sighting — got BOTH a verify-disposal ("go and find it") and a create-in-map ("it is
+     * running, add it"). Nexthink drops long-inactive devices entirely, so being in the table at
+     * all is the proof that it exists.
+     */
+    const name = `${PREFIX}_OLD`;
+    const weeksAgo = new Date(Date.now() - 40 * 24 * 60 * 60 * 1000);
+    await makeNexthinkDevice(name, weeksAgo);
+    const suppressed = await suppressVerifyDisposalFor();
+    expect(suppressed.has(name)).toBe(true);
+  });
+
+  it('does not include a device that is not in the snapshot', async () => {
+    const suppressed = await suppressVerifyDisposalFor();
+    expect(suppressed.has(`${PREFIX}_NEVER_SEEN`)).toBe(false);
+  });
+});
+
+describe('taskGenerator — a Nexthink device ITSM knows but the map does not', () => {
+  it('says add it to the map, not go and look for it', async () => {
+    const hwa = `${PREFIX}_CIM`;
+    await makeSnapshotRow({ itsm_id: hwa, catalog_item_name: 'Dell Pro Slim', status: 'Deployed' });
+    await makeNexthinkDevice(hwa, new Date());
+
+    await generateTasks({ apply: true });
+    const forDevice = kinds(await tasksFor(hwa));
+    expect(forDevice).toContain('create-in-map');
+    expect(forDevice).not.toContain('verify-disposal');
+  });
+});

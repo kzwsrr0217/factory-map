@@ -56,7 +56,41 @@ export type NormalisationTaskKind =
   /** ITSM has hardware the survey never found: confirm it exists or retire it. */
   | 'verify-disposal'
   /** The asset and its ITSM record disagree on fields: resolve them. */
-  | 'resolve-field-differences';
+  | 'resolve-field-differences'
+  /**
+   * ITSM has it, Nexthink saw it running, the map does not hold it: add it.
+   *
+   * This is `verify-disposal` with the question already answered. That task sends a person to
+   * find out whether hardware ITSM lists still exists; when the machine reported to Nexthink
+   * this week, it does, and walking the floor to confirm it is waste. Emitted INSTEAD of
+   * verify-disposal for those devices, never alongside it.
+   */
+  | 'create-in-map'
+  /**
+   * The logon record and the map name different people: confirm who uses it.
+   *
+   * Deliberately not folded into `resolve-field-differences`, which is keyed on the ITSM
+   * reconcile status of the same asset — one row per (kind, subject) means the two would
+   * overwrite each other's evidence and one of the two disagreements would vanish.
+   */
+  | 'confirm-primary-user'
+  /**
+   * A machine that was replaced is still switched on: reinstall it into service, or shut it
+   * down and set it aside for decommission.
+   *
+   * The operating rule is that a Win11-capable machine gets reinstalled and reused and one that
+   * is not gets set aside. Which is correct needs the readiness data, which is not in this
+   * system — so the task states the observation and the choice, and does not pick.
+   */
+  | 'dispose-replaced-machine'
+  /**
+   * The app's value is right and Alemba is wrong: correct it in ITSM.
+   *
+   * The third decision, next to accepting an ITSM value and ignoring it. It closes ITSELF:
+   * once a later export carries the app's value, the correction demonstrably happened. That is
+   * the only kind here whose completion is proven by an outside system changing.
+   */
+  | 'correct-in-itsm';
 
 export type NormalisationTaskState = 'open' | 'done' | 'dismissed';
 
