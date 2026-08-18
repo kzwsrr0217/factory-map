@@ -84,6 +84,20 @@ export type NormalisationTaskKind =
    */
   | 'dispose-replaced-machine'
   /**
+   * The survey saw something different from what the record says: decide which is right.
+   *
+   * Raised from what the survey import DECLINED to apply. Its rule is fill a gap, never overwrite,
+   * so where the walkers read a serial off a device and the asset already held another one, the old
+   * one silently won. That is a safe default and a bad ending — the person standing in the room is
+   * usually right, and nobody was ever told there was a question.
+   *
+   * A separate kind from `resolve-field-differences` because that one is keyed on the same asset
+   * for the ITSM comparison, and one row per (kind, subject) means sharing a kind would make the two
+   * disagreements overwrite each other. The two are also answered differently: an ITSM difference
+   * is settled on the reconcile page, this one usually by looking at the device again.
+   */
+  | 'resolve-survey-difference'
+  /**
    * The app's value is right and Alemba is wrong: correct it in ITSM.
    *
    * The third decision, next to accepting an ITSM value and ignoring it. It closes ITSELF:

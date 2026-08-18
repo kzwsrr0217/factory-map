@@ -40,6 +40,7 @@ import { chunkForEntity, chunked, MSSQL_PARAM_BUDGET } from '../../utils/mssqlBa
 import { findUnlinkedMmhAssets, RECONCILE_FIELDS } from './ReconcileService';
 import { snapshotRowToHardware } from './SnapshotITSMAdapter';
 import { deriveNexthinkTasks, suppressVerifyDisposalFor } from '../nexthink/nexthinkTasks';
+import { deriveSurveyTasks } from '../inventory/surveyTasks';
 import {
   buildSnapshotIndex,
   matchRecord,
@@ -72,6 +73,11 @@ export const MACHINE_VERIFIABLE: ReadonlySet<NormalisationTaskKind> = new Set([
   'verify-disposal',
   // The asset appears, so the map holds it.
   'create-in-map',
+  /**
+   * Closes when the asset's value matches what the survey read — checked against the live asset,
+   * so it does not have to wait for the next survey round to notice it was settled.
+   */
+  'resolve-survey-difference',
   // The two names agree, or the difference is gone.
   'confirm-primary-user',
   // The old machine stops reporting, or drops out of the export.
@@ -335,9 +341,10 @@ export async function deriveRequiredTasks(): Promise<RequiredTask[]> {
     });
   }
 
-  // The third source. Appended rather than interleaved so the ITSM-vs-map reasoning above stays
-  // readable as one piece; the kinds do not overlap, so order carries no meaning.
+  // The other two sources. Appended rather than interleaved so the ITSM-vs-map reasoning above
+  // stays readable as one piece; the kinds do not overlap, so order carries no meaning.
   required.push(...await deriveNexthinkTasks());
+  required.push(...await deriveSurveyTasks());
 
   return required;
 }

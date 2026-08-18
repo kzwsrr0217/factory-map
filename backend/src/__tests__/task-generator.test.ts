@@ -426,3 +426,117 @@ describe('taskGenerator — a Nexthink device ITSM knows but the map does not', 
     expect(forDevice).not.toContain('verify-disposal');
   });
 });
+
+/**
+ * ── The survey's declined disagreements ─────────────────────────────────────────
+ *
+ * Tested here because the real survey produces none: every non-HWA row matches its asset BY serial,
+ * so serials agree by construction, and on 735 rows the types agreed too. The derivation would
+ * otherwise ship having never run.
+ *
+ * The property that matters most is the self-closing one. A task that can only be closed by the
+ * next survey round — months away — trains everyone to ignore the list.
+ */
+import { SurveyObservation } from '../entities/SurveyObservation.entity';
+
+const createdObservationIds: string[] = [];
+
+afterEach(async () => {
+  if (createdObservationIds.length > 0) {
+    await AppDataSource.getRepository(SurveyObservation)
+      .createQueryBuilder().delete().whereInIds(createdObservationIds).execute();
+    createdObservationIds.length = 0;
+  }
+});
+
+async function makeObservation(over: Partial<SurveyObservation>): Promise<SurveyObservation> {
+  const repo = AppDataSource.getRepository(SurveyObservation);
+  const row = await repo.save(repo.create({
+    survey_row_id: `${PREFIX}_row`,
+    epulet: 'Werk1',
+    emelet: 'Ground Floor',
+    resolution: 'updated',
+    imported_at: new Date(),
+    ...over,
+  }));
+  createdObservationIds.push(row.id);
+  return row;
+}
+
+describe('taskGenerator — what the survey saw and the import declined', () => {
+  it('raises a task naming both values', async () => {
+    const asset = await makeAsset({ display_name: `${PREFIX}_sv1`, serial_number: 'FROM-ITSM' });
+    await makeObservation({
+      resolved_asset_id: asset.id,
+      sorozatszam: 'READ-OFF-DEVICE',
+      suppressed_fields: [{
+        field: 'serial_number', app_value: 'FROM-ITSM', survey_value: 'READ-OFF-DEVICE',
+      }],
+    });
+
+    await generateTasks({ apply: true });
+    const task = (await tasksFor(asset.id)).find((t) => t.kind === 'resolve-survey-difference');
+    expect(task).toBeDefined();
+    expect(task!.evidence).toContain('FROM-ITSM');
+    expect(task!.evidence).toContain('READ-OFF-DEVICE');
+    // The place is what makes it actionable: somebody has to go and look at the device.
+    expect(task!.evidence).toContain('Werk1');
+  });
+
+  it('closes itself when the asset is changed to what the survey read', async () => {
+    const asset = await makeAsset({ display_name: `${PREFIX}_sv2`, serial_number: 'STALE' });
+    await makeObservation({
+      resolved_asset_id: asset.id,
+      suppressed_fields: [{ field: 'serial_number', app_value: 'STALE', survey_value: 'CORRECT' }],
+    });
+    await generateTasks({ apply: true });
+    expect(kinds(await tasksFor(asset.id))).toContain('resolve-survey-difference');
+
+    // Somebody decides the survey was right. No new survey round happens.
+    await AppDataSource.getRepository(Asset).update(asset.id, { serial_number: 'CORRECT' });
+
+    await generateTasks({ apply: true });
+    const after = (await tasksFor(asset.id)).find((t) => t.kind === 'resolve-survey-difference');
+    expect(after?.state).toBe('done');
+  });
+
+  it('ignores a difference that is only spelling', async () => {
+    const asset = await makeAsset({ display_name: `${PREFIX}_sv3`, model: 'Optiplex 7090' });
+    await makeObservation({
+      resolved_asset_id: asset.id,
+      suppressed_fields: [{ field: 'model', app_value: 'Optiplex 7090', survey_value: 'optiplex  7090' }],
+    });
+    await generateTasks({ apply: true });
+    expect(kinds(await tasksFor(asset.id))).not.toContain('resolve-survey-difference');
+  });
+
+  it('raises nothing for an observation that matched no asset', async () => {
+    // 489 of 735 real rows. Almost all are the known unmatched-place backlog, which the import
+    // report already groups by place — six corrections cover 478 rows. Individual tasks would
+    // bury the list.
+    const before = await AppDataSource.getRepository(NormalisationTask)
+      .count({ where: { kind: 'resolve-survey-difference' } });
+    await makeObservation({
+      resolution: 'unmatched',
+      resolved_asset_id: null,
+      sorozatszam: 'ORPHAN',
+      suppressed_fields: [{ field: 'serial_number', app_value: 'x', survey_value: 'ORPHAN' }],
+    });
+    await generateTasks({ apply: true });
+    expect(await AppDataSource.getRepository(NormalisationTask)
+      .count({ where: { kind: 'resolve-survey-difference' } })).toBe(before);
+  });
+
+  it('keeps a task open when the field name cannot be checked', async () => {
+    // An unverifiable claim must not be treated as resolved: silently closing it would be the app
+    // asserting a disagreement had been settled on no evidence.
+    const asset = await makeAsset({ display_name: `${PREFIX}_sv5` });
+    await makeObservation({
+      resolved_asset_id: asset.id,
+      suppressed_fields: [{ field: 'not_a_field', app_value: 'a', survey_value: 'b' }],
+    });
+    await generateTasks({ apply: true });
+    const task = (await tasksFor(asset.id)).find((t) => t.kind === 'resolve-survey-difference');
+    expect(task?.state).toBe('open');
+  });
+});
