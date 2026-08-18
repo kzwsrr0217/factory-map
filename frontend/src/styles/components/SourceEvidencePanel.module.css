@@ -1,0 +1,74 @@
+/*
+ * SourceEvidencePanel — four sources side by side for one device.
+ *
+ * Three cell states have to be visually distinct, because conflating any two of them invents a
+ * problem that is not there:
+ *   .noOpinion   the source cannot know this field       -> a faint dash
+ *   .empty       the source knows it, and it is blank     -> muted "(empty)"
+ *   .notCompared shown, but in another vocabulary         -> dotted underline + reason
+ */
+
+.prompt { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.promptHint { font-size: 0.8rem; color: var(--color-text-secondary); }
+
+.panel { display: flex; flex-direction: column; gap: 14px; }
+
+.sourceBar { display: flex; flex-wrap: wrap; gap: 16px; font-size: 0.8rem; }
+.sourceOn { color: var(--color-text); }
+.sourceOff { color: var(--color-text-secondary); }
+.absent {
+  margin-left: 4px;
+  border-bottom: 1px dotted var(--color-border);
+  cursor: help;
+}
+
+.agree { margin: 0; font-size: 0.85rem; color: var(--color-text-secondary); }
+.disagreeCount {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: var(--color-warning, #b45309);
+}
+
+.tableWrap { overflow-x: auto; }
+.table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+.table th, .table td {
+  text-align: left;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--color-border);
+  vertical-align: top;
+}
+.table thead th {
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+.table tbody th {
+  font-weight: 500;
+  white-space: nowrap;
+}
+.rowDisagrees { background: var(--color-warning-light, rgba(180, 83, 9, 0.06)); }
+.rowIcon { margin-right: 5px; vertical-align: -2px; color: var(--color-warning, #b45309); }
+
+.noOpinion { color: var(--color-border); }
+.empty { color: var(--color-text-secondary); font-style: italic; }
+.notCompared { border-bottom-style: dotted; }
+.qualifier {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.72rem;
+  color: var(--color-text-secondary);
+}
+
+.block { border-top: 1px solid var(--color-border); padding-top: 10px; }
+.block h4 { margin: 0 0 4px; font-size: 0.85rem; }
+.blockHint { margin: 0 0 8px; font-size: 0.76rem; color: var(--color-text-secondary); }
+
+.logons { list-style: none; margin: 0; padding: 0; font-size: 0.8rem; }
+.logons li { display: flex; justify-content: space-between; gap: 12px; padding: 2px 0; }
+.logonMeta { color: var(--color-text-secondary); white-space: nowrap; }
+
+.suppressed { margin: 0; padding-left: 18px; font-size: 0.8rem; }
+.suppressed li { padding: 2px 0; }

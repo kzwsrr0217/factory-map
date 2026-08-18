@@ -38,6 +38,7 @@ import { Request, Response, NextFunction } from 'express';
 import { AuthRequest } from '../middleware/auth.middleware';
 import { AuditLog } from '../entities/AuditLog.entity';
 import { AppDataSource } from '../config/database';
+import { buildAssetEvidence } from '../services/evidence/assetEvidence';
 import { Asset } from '../entities/Asset.entity';
 import { MasterAsset } from '../entities/MasterAsset.entity';
 import { AssetSoftware } from '../entities/AssetSoftware.entity';
@@ -737,6 +738,25 @@ export const getAssetById = async (req: Request, res: Response, next: NextFuncti
 // doc comment). Empty when the asset isn't IFS-joined or is itself an IT
 // device rather than a machine. No live IFS/Databricks call — reads only
 // the local master_assets table.
+/**
+ * getAssetEvidence: what each source says about this one device.
+ *
+ * Read-only and per asset on purpose — there is no estate-wide variant, for the reasons in
+ * services/evidence/assetEvidence.ts.
+ */
+export const getAssetEvidence = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const evidence = await buildAssetEvidence(req.params.id);
+    if (!evidence) {
+      res.status(404).json({ success: false, error: 'Asset not found' });
+      return;
+    }
+    res.json({ success: true, data: evidence });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const getAssetOtChildren = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const asset = await repo().findOne({ where: { id: req.params.id } });

@@ -390,7 +390,58 @@ function assetQueryParams(query: AssetQuery): Record<string, string | number> {
  */
 const ID_LOOKUP_CHUNK = 100;
 
+
+/** One source's answer for one field. See components/asset/SourceEvidencePanel.tsx. */
+export interface EvidenceCell {
+  value: string | null;
+  /** False when the source structurally cannot know this field — render a dash, not a blank. */
+  has_opinion: boolean;
+  /** Why this cell means what it means, where the same word differs per source. */
+  qualifier?: string;
+  /** False when the value is in another vocabulary, so a difference carries no meaning. */
+  comparable?: boolean;
+}
+
+export interface EvidenceField {
+  field: string;
+  label: string;
+  map: EvidenceCell;
+  itsm: EvidenceCell;
+  nexthink: EvidenceCell;
+  survey: EvidenceCell;
+  disagrees: boolean;
+}
+
+export interface AssetEvidence {
+  asset_id: string;
+  display_name: string;
+  hardware_asset_id: string | null;
+  sources: Record<'itsm' | 'nexthink' | 'survey', {
+    present: boolean;
+    as_of: string | null;
+    absent_reason?: string;
+  }>;
+  fields: EvidenceField[];
+  activity: {
+    last_seen: string | null;
+    entity: string | null;
+    logons: Array<{ full_name: string | null; user_name: string; logins: number; account_kind: string }>;
+  } | null;
+  suppressed_by_import: Array<{ field: string; app_value: string | null; survey_value: string | null }>;
+}
+
 export const assetService = {
+  /**
+   * What ITSM, Nexthink and the survey each say about one device.
+   *
+   * Per asset only — there is deliberately no estate-wide variant; see the backend service for
+   * why a global grid of the three sources does not survive contact with the data.
+   */
+  getEvidence: async (assetId: string): Promise<AssetEvidence> => {
+    const res = await api.get(`/assets/${assetId}/evidence`);
+    return res.data.data;
+  },
+
   // Get all assets
   /**
    * Every asset, fetched page by page.

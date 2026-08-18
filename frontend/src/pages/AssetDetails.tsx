@@ -6,6 +6,7 @@ import Card from '../components/common/Card';
 import PhysicalPathTrace from '../components/network/PhysicalPathTrace';
 import { useAssetSearch } from '../hooks/useAssetSearch';
 import SwitchImpactPanel from '../components/network/SwitchImpactPanel';
+import SourceEvidencePanel from '../components/asset/SourceEvidencePanel';
 import Button from '../components/common/Button';
 import Badge from '../components/common/Badge';
 import Breadcrumb from '../components/common/Breadcrumb';
@@ -942,6 +943,13 @@ const AssetDetails: React.FC = () => {
             <Card padding="lg">
               <h3 className={styles.sectionTitle}>Maintenance Impact</h3>
               <SwitchImpactPanel assetId={asset._id} />
+
+              {/* The three sources against the app's own record. On demand: several queries, and
+                  most visits to an asset page are not about reconciling it. */}
+              <Card padding="lg">
+                <h3>Where this came from</h3>
+                <SourceEvidencePanel assetId={asset._id} />
+              </Card>
             </Card>
           )}
 

@@ -223,6 +223,7 @@ import { Router } from 'express';
 import {
   getAllAssets,
   getAssetById,
+  getAssetEvidence,
   getAssetLookups,
   getMaintenanceCounts,
   getAssetOtChildren,
@@ -256,6 +257,8 @@ router.get('/persons',             getAssetPersons);
 router.get('/maintenance-counts',  getMaintenanceCounts);
 router.get('/:id',                 getAssetById);
 router.get('/:id/ot-children',     getAssetOtChildren);
+// The three sources side by side for one device. Read-only for any authenticated role.
+router.get('/:id/evidence',        getAssetEvidence);
 
 // Write — operator or admin only
 router.post('/',    requireOperator, validate(AssetCreateSchema), auditLog('asset'), createAsset);
