@@ -19,6 +19,7 @@ import {
   NexthinkLoginSnapshot,
   NexthinkAccountKind,
 } from '../../entities/NexthinkLoginSnapshot.entity';
+import { recordImportRun, keyDeltaAgainstLastRun } from '../importRun';
 
 /**
  * Asset types Nexthink could plausibly report on: it needs an agent, so it sees computers and
@@ -261,6 +262,18 @@ export interface NexthinkImportPlan {
     /** Total assets of a Nexthink-visible type, for reading the two numbers above against. */
     visible_type_assets: number;
   };
+  /**
+   * Device names the PREVIOUS import had and this one does not.
+   *
+   * The only lifecycle signal this source produces that a single snapshot cannot: Nexthink ages
+   * long-inactive devices out of the export entirely, so a retired machine disappears rather than
+   * going stale. Null when there is no earlier recorded run to compare against — which is not the
+   * same as "nothing disappeared", and the report has to say so.
+   *
+   * It is a question, not a verdict: a device also drops out if it was moved to an entity outside
+   * the export's filter, or if someone scoped the query differently by hand.
+   */
+  gone_since_last_import: { device_names: string[]; previous_run_at: Date } | null;
 }
 
 /** What a device source yields, whether it was a CSV file or the NQL API. */
@@ -286,6 +299,8 @@ export async function planNexthinkImport(input: {
   apply: boolean;
   /** Cut-off for the "quiet" count, in days. Defaults to 30. */
   quietDays?: number;
+  /** Recorded in the import ledger. `system` for a scheduled run. */
+  by?: string;
 }): Promise<NexthinkImportPlan> {
   const quietDays = input.quietDays ?? 30;
 
@@ -367,6 +382,16 @@ export async function planNexthinkImport(input: {
     (a) => !exported.has(a.hardware_asset_id ?? '') && !exported.has(a.display_name),
   ).length;
 
+  /**
+   * Computed BEFORE anything is recorded, so "the previous run" is unambiguous. Done on a dry run
+   * too: what disappeared is exactly the kind of thing worth seeing before deciding to overwrite
+   * the table with a snapshot that no longer contains it.
+   */
+  const deviceNamesForLedger = devicesParsed.rows.map((d) => d.device_name);
+  const delta = devicesParsed.rows.length > 0
+    ? await keyDeltaAgainstLastRun('nexthink-devices', deviceNamesForLedger)
+    : null;
+
   if (input.apply && (devicesParsed.rows.length > 0 || loginsParsed.rows.length > 0)) {
     const importedAt = new Date();
     await AppDataSource.transaction(async (manager) => {
@@ -387,6 +412,36 @@ export async function planNexthinkImport(input: {
         }
       }
     });
+
+    /**
+     * After the transaction, deliberately outside it: the ledger describes an import that has
+     * already happened, and failing to write it must not roll back the data it describes.
+     * `recordImportRun` swallows its own errors for the same reason.
+     */
+    if (devicesParsed.rows.length > 0) {
+      await recordImportRun({
+        source: 'nexthink-devices',
+        rowCount: devicesParsed.rows.length,
+        // The export's own newest sighting is the closest thing to "when this data was true".
+        takenAt: devicesParsed.rows.reduce<Date | null>(
+          (max, d) => (d.last_seen && (!max || d.last_seen > max) ? d.last_seen : max), null,
+        ),
+        counts: delta ? { created: delta.appeared.length, gone: delta.disappeared.length } : null,
+        presentKeys: deviceNamesForLedger,
+        detail: { entities: Object.keys(byEntity) },
+        by: input.by,
+      });
+    }
+    if (loginsParsed.rows.length > 0) {
+      // No present_keys: absence of a logon row means nobody signed in, which is ordinary for a
+      // shop-floor machine and says nothing about whether the device exists.
+      await recordImportRun({
+        source: 'nexthink-logins',
+        rowCount: loginsParsed.rows.length,
+        detail: { devices_with_logins: new Set(loginsParsed.rows.map((l) => l.device_name)).size },
+        by: input.by,
+      });
+    }
   }
 
   return {
@@ -413,5 +468,8 @@ export async function planNexthinkImport(input: {
       never_seen_by_nexthink: neverSeen,
       visible_type_assets: visibleTypeAssets.length,
     },
+    gone_since_last_import: delta && delta.previous_run_at
+      ? { device_names: delta.disappeared, previous_run_at: delta.previous_run_at }
+      : null,
   };
 }

@@ -240,6 +240,26 @@ async function main(): Promise<void> {
       }
       console.log(`    ${j.never_seen_by_nexthink}/${j.visible_type_assets} assets of a type Nexthink could see (${NEXTHINK_VISIBLE_ASSET_TYPES.join('/')}) are absent from this export`);
       console.log('      — either genuinely inactive, or simply outside the exported entities. A question, not a verdict.');
+
+      /**
+       * What the previous import had and this one does not. Said here rather than in a report,
+       * because a dry run is the moment to see it: this is the last chance before the table that
+       * still contains those devices is overwritten.
+       */
+      const gone = plan.gone_since_last_import;
+      if (!gone) {
+        console.log('\n  No earlier import on record, so nothing can be said about what disappeared.');
+      } else if (gone.device_names.length === 0) {
+        console.log(`\n  Nothing has dropped out since the import of ${gone.previous_run_at.toISOString().slice(0, 10)}.`);
+      } else {
+        console.log(`\n  ${gone.device_names.length} device(s) present in the import of `
+          + `${gone.previous_run_at.toISOString().slice(0, 10)} and absent now:`);
+        console.log(`      ${gone.device_names.slice(0, 15).join(', ')}`
+          + (gone.device_names.length > 15 ? `, … (+${gone.device_names.length - 15})` : ''));
+        console.log('      Nexthink drops long-inactive devices, so this is the closest thing to a');
+        console.log('      decommission signal it produces — but a device also drops out if it moved');
+        console.log('      outside the exported entities. Worth checking, not worth concluding.');
+      }
     }
 
     if (!apply) {

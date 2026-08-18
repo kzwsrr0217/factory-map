@@ -773,6 +773,23 @@ export async function backfillAssetsFromSnapshot(): Promise<IBackfillResult> {
     };
 
     fill('manufacturer', row.manufacturer);
+    /**
+     * `other` is treated as a gap for the type, not as a value.
+     *
+     * It is the classifier's fallback — what an asset gets when the catalogue name matched no
+     * rule — and not a judgement anyone made. Assets created before the catalogue CSV was ever
+     * loaded are all stuck on it, and the plain fill rule refuses to touch them because "other"
+     * is non-empty. That left 31 assets permanently mistyped, including three machines created
+     * from a swap earlier the same day.
+     *
+     * Guarded both ways: only overwritten when the export offers something that is NOT itself
+     * the fallback, so a genuine `other` in the export cannot overwrite a better local value.
+     */
+    if (asset.asset_type === 'other' && row.asset_type && row.asset_type !== 'other') {
+      asset.asset_type = row.asset_type;
+      changed = true;
+      result.fieldsWritten++;
+    }
     fill('asset_type', row.asset_type);
     fill('catalog_itsm_id', row.catalog_itsm_id);
     fill('person_itsm_id', row.person_itsm_id);
