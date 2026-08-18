@@ -28,6 +28,7 @@ import { ItsmHardwareSnapshot } from '../entities/ItsmHardwareSnapshot.entity';
 import { NexthinkDeviceSnapshot } from '../entities/NexthinkDeviceSnapshot.entity';
 import { NexthinkLoginSnapshot } from '../entities/NexthinkLoginSnapshot.entity';
 import { ImportRun } from '../entities/ImportRun.entity';
+import { SurveyObservation } from '../entities/SurveyObservation.entity';
 import { NormalisationTask } from '../entities/NormalisationTask.entity';
 import { NameCorrection } from '../entities/NameCorrection.entity';
 import { AssetSoftware } from '../entities/AssetSoftware.entity';
@@ -52,7 +53,7 @@ export const AppDataSource = new DataSource({
   database: config.mssql.database,
   synchronize: config.env !== 'production',
   logging: config.env === 'development' ? ['error', 'warn'] : false,
-  entities: [Building, Floor, Zone, WorkArea, Section, Workstation, Asset, MasterAsset, ItsmHardwareSnapshot, NexthinkDeviceSnapshot, NexthinkLoginSnapshot, ImportRun, NormalisationTask, NameCorrection, AssetSoftware, AssetConnection, User, AuditLog, AlertConfig, AlertLog, ScheduledAlert, ActiveSession, NetworkRoom, NetworkRack, PatchPanel, WallPort, ProductionLine, WorkCenter, EntityKind],
+  entities: [Building, Floor, Zone, WorkArea, Section, Workstation, Asset, MasterAsset, ItsmHardwareSnapshot, NexthinkDeviceSnapshot, NexthinkLoginSnapshot, ImportRun, SurveyObservation, NormalisationTask, NameCorrection, AssetSoftware, AssetConnection, User, AuditLog, AlertConfig, AlertLog, ScheduledAlert, ActiveSession, NetworkRoom, NetworkRack, PatchPanel, WallPort, ProductionLine, WorkCenter, EntityKind],
   migrations: ['dist/migrations/*.js'],
   migrationsTableName: 'typeorm_migrations',
   options: {

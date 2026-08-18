@@ -36,6 +36,7 @@
  */
 import { AppDataSource } from '../../config/database';
 import { Asset } from '../../entities/Asset.entity';
+import { SurveyObservation, SurveyResolution } from '../../entities/SurveyObservation.entity';
 import { AssetConnection } from '../../entities/AssetConnection.entity';
 import { Building } from '../../entities/Building.entity';
 import { Floor } from '../../entities/Floor.entity';
@@ -43,7 +44,7 @@ import { WorkArea } from '../../entities/WorkArea.entity';
 import { Zone } from '../../entities/Zone.entity';
 import { ItsmHardwareSnapshot } from '../../entities/ItsmHardwareSnapshot.entity';
 import { NameCorrection, NameCorrectionScope, NAME_CORRECTION_SCOPES } from '../../entities/NameCorrection.entity';
-import { chunkForEntity } from '../../utils/mssqlBatch';
+import { chunkForEntity, chunked } from '../../utils/mssqlBatch';
 import { foldName } from '../itsm/inventoryMatch';
 
 export interface SurveyRow {
@@ -241,6 +242,47 @@ export function usableSerial(raw: string | undefined): string | null {
  * Merges rows from several export files, last one winning on a repeated row id — a
  * re-export of the same tablet overwriting an earlier partial one.
  */
+/**
+ * Where the survey brought a value, the asset already held a different one, and the old one wins.
+ *
+ * Extracted and exported so it can be tested, because the real survey exercises none of it: every
+ * non-HWA row matches its asset BY serial, so serials agree by construction, and the types agreed
+ * too (735 rows, zero conflicts). Logic that only fires on data nobody has yet is logic that has to
+ * be tested on data made up for the purpose.
+ *
+ * Returns only genuine conflicts. A field the asset does not have is a gap being filled, not a
+ * disagreement, and listing those would bury the real ones in hundreds of non-events.
+ */
+export function suppressedConflicts(
+  app: {
+    serial_number: string | null;
+    model: string | null;
+    asset_type: string | null;
+    source_of_truth: string;
+  },
+  survey: { serial: string | null; model: string | null; deviceType: string },
+): Array<{ field: string; app_value: string | null; survey_value: string | null }> {
+  const out: Array<{ field: string; app_value: string | null; survey_value: string | null }> = [];
+  const conflict = (field: string, appValue: string | null, surveyValue: string | null) => {
+    if (!surveyValue || !appValue) return;
+    if (fold(appValue) === fold(surveyValue)) return;
+    out.push({ field, app_value: appValue, survey_value: surveyValue });
+  };
+  conflict('serial_number', app.serial_number, survey.serial);
+  conflict('model', app.model, survey.model);
+  /**
+   * The one exception, and it mirrors the apply rule exactly: a LOCAL asset reading "other" got
+   * that from this same survey, so a better reading of the same source is allowed to replace it.
+   * There the survey WINS, so it is not a suppression — and if this test drifted from the apply
+   * condition the table would claim a disagreement that the import had actually honoured.
+   */
+  const localOtherIsFixable = app.source_of_truth === 'local'
+    && app.asset_type === 'other'
+    && survey.deviceType !== 'other';
+  if (!localOtherIsFixable) conflict('asset_type', app.asset_type, survey.deviceType);
+  return out;
+}
+
 export function mergeSurveyRows(batches: SurveyRow[][]): SurveyRow[] {
   const byKey = new Map<string, SurveyRow>();
   for (const batch of batches) {
@@ -482,6 +524,24 @@ function matchWorkArea(
 
 // ── The plan ──────────────────────────────────────────────────────────────────
 
+/**
+ * One survey row on its way to the landing table.
+ *
+ * Created for EVERY row at the top of the loop with `resolution: 'unmatched'`, then mutated when
+ * the row resolves. Done that way round deliberately: the loop has several early `continue` paths
+ * (unresolvable place, an HWA the export does not contain), and finding every one of them to mark
+ * a row unmatched is the kind of bookkeeping that silently rots as the function grows. Defaulting
+ * to unmatched means a row that falls out anywhere is recorded correctly without anyone
+ * remembering to say so.
+ */
+interface PlannedObservation {
+  row: SurveyRow;
+  resolution: SurveyResolution;
+  /** Known immediately for a match; filled in after the insert for a create. */
+  assetId: string | null;
+  suppressed: Array<{ field: string; app_value: string | null; survey_value: string | null }>;
+}
+
 interface PlannedUpdate {
   assetId: string;
   display: string;
@@ -518,6 +578,8 @@ interface InternalPlan {
   otherRows: number;
   toUpdate: PlannedUpdate[];
   toCreate: PlannedCreate[];
+  /** One per survey row, for the landing table. See PlannedObservation. */
+  observations: PlannedObservation[];
   /**
    * Keyed by building+floor as written, with a row count and which of the two failed.
    *
@@ -716,6 +778,7 @@ async function planInternal(rows: SurveyRow[], corrections: Corrections): Promis
     otherRows: 0,
     toUpdate: [],
     toCreate: [],
+    observations: [],
     unmatchedPlace: new Map(),
     missingWorkAreas: new Map(),
     unmatchedPerson: new Map(),
@@ -757,6 +820,12 @@ async function planInternal(rows: SurveyRow[], corrections: Corrections): Promis
   }
 
   for (const row of rows) {
+    // Recorded first and mutated later — see PlannedObservation for why this order.
+    const observation: PlannedObservation = {
+      row, resolution: 'unmatched', assetId: null, suppressed: [],
+    };
+    plan.observations.push(observation);
+
     const identifier = (row.hwa ?? '').trim();
     const mode = fold(row.azonosito_mod);
     // A CSV export of the survey has no `azonosito_mod` column at all. A row carrying an
@@ -876,6 +945,8 @@ async function planInternal(rows: SurveyRow[], corrections: Corrections): Promis
       // Already resolved and reported above; nothing to place if it found nothing.
       if (!found) continue;
       plan.toUpdate.push({ assetId: found.asset.id, display: found.asset.display_name, fields: placementFields });
+      observation.resolution = 'updated';
+      observation.assetId = found.asset.id;
       continue;
     }
 
@@ -910,6 +981,24 @@ async function planInternal(rows: SurveyRow[], corrections: Corrections): Promis
       plan.parentUnknown.set(parentHwa, (plan.parentUnknown.get(parentHwa) ?? 0) + 1);
     }
     if (existing) {
+      observation.resolution = 'updated';
+      observation.assetId = existing.id;
+      /**
+       * Every place the survey brought a value, the asset already held a DIFFERENT one, and the
+       * old one wins. Recorded rather than merely happening.
+       *
+       * This is the whole reason the landing table exists. The never-overwrite rule is right —
+       * an automated import must not overwrite what may have come from ITSM — but applying it
+       * silently means the survey's disagreement is destroyed at the moment it is discovered.
+       * Written down, it becomes something a person can be asked about.
+       *
+       * Only genuine conflicts: a value the asset does not have is a gap being filled, not a
+       * disagreement, and listing those would bury the real ones.
+       */
+      observation.suppressed = suppressedConflicts(existing, {
+        serial, model: fromType.model, deviceType,
+      });
+
       // Never clobber a value that may since have come from ITSM (e.g. if this local
       // asset got linked to a real HWA between survey runs) — only fill these two if
       // still empty, matching backfillAssetsFromSnapshot's never-overwrite convention.
@@ -953,6 +1042,8 @@ async function planInternal(rows: SurveyRow[], corrections: Corrections): Promis
     }
 
     if (!serial) plan.createWithoutSerial++;
+    // Nothing to suppress on a device that does not exist yet: every value is a gap.
+    observation.resolution = 'created';
     const displayName = (row.megjegyzes ?? '').trim() || row.eszkoz_tipus || serial || 'Survey device';
     if (parent) {
       // The child does not exist yet; it is looked up by its survey row after the save.
@@ -1167,6 +1258,48 @@ export async function planSurveyImport(input: SurveyImportInput): Promise<Survey
           bidirectional: false,
         }));
         linksMade++;
+      }
+
+      /**
+       * The landing table, replaced wholesale — the survey as of this import, not a pile of rounds.
+       *
+       * Inside the transaction with the asset changes, unlike the import ledger: an observation
+       * says "this row resolved to that asset", so if the asset write rolls back the claim about it
+       * has to go too. The ledger describes a finished import and belongs outside.
+       *
+       * Created assets are matched back by `survey_row_id`, which the create path stamps on. A row
+       * with no id from a survey tool that does not issue them stays null here: the asset exists
+       * and is correct, only the link from observation to asset is unavailable, and inventing one
+       * by position would be a guess that looks like a fact.
+       */
+      const obsRepo = manager.getRepository(SurveyObservation);
+      await obsRepo.clear();
+      const createdByRow = new Map(
+        created.filter((a) => a.survey_row_id).map((a) => [a.survey_row_id!, a.id]),
+      );
+      const observationRows = internal.observations.map((o) => ({
+        survey_row_id: o.row.id ?? null,
+        terulet: o.row.terulet ?? null,
+        epulet: o.row.epulet ?? null,
+        emelet: o.row.emelet ?? null,
+        helyszin: o.row.helyszin ?? null,
+        work_area: o.row.work_area ?? null,
+        szemely: o.row.szemely ?? null,
+        megjegyzes: o.row.megjegyzes ?? null,
+        azonosito_mod: o.row.azonosito_mod ?? null,
+        hwa: o.row.hwa ?? null,
+        eszkoz_tipus: o.row.eszkoz_tipus ?? null,
+        sorozatszam: o.row.sorozatszam ?? null,
+        resolved_asset_id: o.assetId
+          ?? (o.row.id ? createdByRow.get(o.row.id) ?? null : null),
+        resolution: o.resolution,
+        suppressed_fields: o.suppressed.length > 0 ? o.suppressed : null,
+        imported_at: new Date(),
+      }));
+      // Chunked for the same 2100-parameter ceiling every other bulk insert here respects; a real
+      // survey round is 700+ rows and this table is 15 columns wide.
+      for (const chunk of chunked(observationRows, 100)) {
+        await obsRepo.insert(chunk);
       }
     });
   }

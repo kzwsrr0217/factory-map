@@ -986,3 +986,84 @@ describe('POST /api/inventory/survey/import — a model where the type belongs',
     expect(after!.asset_type).toBe('workstation');
   });
 });
+
+/**
+ * ── What the import silently declined ───────────────────────────────────────────
+ *
+ * `suppressedConflicts` records the disagreements the never-overwrite rule resolves in favour of
+ * the older value. Tested here rather than through an import because the real survey exercises none
+ * of it: every non-HWA row matches its asset BY serial, so serials agree by construction, and on
+ * 735 real rows the types agreed too — zero conflicts. Code that only fires on data nobody has yet
+ * needs data made up for the purpose.
+ */
+import { suppressedConflicts } from '../services/inventory/surveyImport';
+
+const mapAsset = (over: Partial<Parameters<typeof suppressedConflicts>[0]> = {}) => ({
+  serial_number: null, model: null, asset_type: null, source_of_truth: 'itsm', ...over,
+});
+const surveyClaim = (over: Partial<Parameters<typeof suppressedConflicts>[1]> = {}) => ({
+  serial: null, model: null, deviceType: 'other', ...over,
+});
+
+describe('suppressedConflicts', () => {
+  it('says nothing when the app has no value — that is a gap, not a disagreement', () => {
+    // The overwhelmingly common case. Listing these would bury the real conflicts in hundreds
+    // of non-events.
+    expect(suppressedConflicts(mapAsset(), surveyClaim({ serial: 'SER-1', model: 'U2419H', deviceType: 'monitor' })))
+      .toEqual([]);
+  });
+
+  it('says nothing when the survey has no value', () => {
+    expect(suppressedConflicts(mapAsset({ serial_number: 'SER-1', model: 'U2419H' }), surveyClaim())).toEqual([]);
+  });
+
+  it('records a serial the app disagrees with', () => {
+    const out = suppressedConflicts(
+      mapAsset({ serial_number: 'FROM-ITSM' }), surveyClaim({ serial: 'READ-OFF-THE-DEVICE' }),
+    );
+    expect(out).toEqual([{
+      field: 'serial_number', app_value: 'FROM-ITSM', survey_value: 'READ-OFF-THE-DEVICE',
+    }]);
+  });
+
+  it('ignores a difference that is only spelling or accents', () => {
+    // Same fold() the matcher uses, so the table cannot fill up with findings that are typography.
+    expect(suppressedConflicts(mapAsset({ model: 'Optiplex 7090' }), surveyClaim({ model: 'optiplex  7090' })))
+      .toEqual([]);
+  });
+
+  it('records a type the app disagrees with', () => {
+    const out = suppressedConflicts(
+      mapAsset({ asset_type: 'workstation' }), surveyClaim({ deviceType: 'monitor' }),
+    );
+    expect(out.map((c) => c.field)).toEqual(['asset_type']);
+  });
+
+  it('does NOT record the local-other case, because there the survey wins', () => {
+    /**
+     * The one exception, and it has to mirror the apply rule exactly: a local asset reading "other"
+     * got that from this same survey, so a better reading replaces it. If this drifted from the
+     * apply condition the table would claim a disagreement the import had actually honoured —
+     * a false finding, which is worse than a missing one.
+     */
+    expect(suppressedConflicts(
+      mapAsset({ asset_type: 'other', source_of_truth: 'local' }), surveyClaim({ deviceType: 'monitor' }),
+    )).toEqual([]);
+  });
+
+  it('still records it when the asset reading "other" came from ITSM', () => {
+    // ITSM's "other" is a classification someone or something else made; the survey does not
+    // get to overrule it silently.
+    expect(suppressedConflicts(
+      mapAsset({ asset_type: 'other', source_of_truth: 'itsm' }), surveyClaim({ deviceType: 'monitor' }),
+    ).map((c) => c.field)).toEqual(['asset_type']);
+  });
+
+  it('records several fields at once', () => {
+    const out = suppressedConflicts(
+      mapAsset({ serial_number: 'A', model: 'B', asset_type: 'laptop' }),
+      surveyClaim({ serial: 'X', model: 'Y', deviceType: 'monitor' }),
+    );
+    expect(out.map((c) => c.field).sort()).toEqual(['asset_type', 'model', 'serial_number']);
+  });
+});

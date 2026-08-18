@@ -22,6 +22,7 @@ import { ItsmHardwareSnapshot } from './entities/ItsmHardwareSnapshot.entity';
 import { NexthinkDeviceSnapshot } from './entities/NexthinkDeviceSnapshot.entity';
 import { NexthinkLoginSnapshot } from './entities/NexthinkLoginSnapshot.entity';
 import { ImportRun } from './entities/ImportRun.entity';
+import { SurveyObservation } from './entities/SurveyObservation.entity';
 import { NormalisationTask } from './entities/NormalisationTask.entity';
 import { NameCorrection } from './entities/NameCorrection.entity';
 import { WorkArea } from './entities/WorkArea.entity';
@@ -63,7 +64,7 @@ export default new DataSource({
   // table nothing owns.
   entities: [
     Building, Floor, Zone, WorkArea, Section, Workstation,
-    Asset, MasterAsset, ItsmHardwareSnapshot, NexthinkDeviceSnapshot, NexthinkLoginSnapshot, ImportRun,
+    Asset, MasterAsset, ItsmHardwareSnapshot, NexthinkDeviceSnapshot, NexthinkLoginSnapshot, ImportRun, SurveyObservation,
     NormalisationTask, NameCorrection,
     AssetSoftware, AssetConnection,
     User, AuditLog, AlertConfig, AlertLog, ScheduledAlert, ActiveSession,
