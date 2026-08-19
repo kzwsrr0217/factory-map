@@ -17,13 +17,28 @@ import { AlertTriangle, Database } from 'lucide-react';
 import { taskService, SourceStatus } from '../../services/task.service';
 import styles from '../../styles/components/SourceFreshnessBar.module.css';
 
-/** Whole days, in words, because "0d ago" reads worse than "today". */
+/**
+ * In words, because "0d ago" reads worse than "today".
+ *
+ * "Today" and "yesterday" are decided on the CALENDAR DATE, not on elapsed hours. The service's
+ * `age_days` floors the elapsed time, so an import at 14:28 yesterday afternoon read as 0 days at
+ * 05:52 this morning — and the bar said "imported today" about yesterday's data. Fifteen hours is
+ * not a rounding error when the whole point of the line is how old the data is.
+ *
+ * Anything older than yesterday falls back to `age_days`, where floored elapsed days and calendar
+ * days agree closely enough that the difference cannot mislead.
+ */
 function age(status: SourceStatus): string {
   if (!status.loaded) return 'nothing loaded';
-  if (status.age_days === null) return 'import date unknown';
-  if (status.age_days === 0) return 'imported today';
-  if (status.age_days === 1) return 'imported yesterday';
-  return `imported ${status.age_days} days ago`;
+  if (!status.imported_at) return 'import date unknown';
+  const day = (d: Date) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+  const at = new Date(status.imported_at);
+  const now = new Date();
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (day(at) === day(now)) return 'imported today';
+  if (day(at) === day(yesterday)) return 'imported yesterday';
+  return `imported ${status.age_days ?? '?'} days ago`;
 }
 
 const SourceFreshnessBar: React.FC = () => {
