@@ -13,11 +13,11 @@
  * panel. Inapplicable lines are dimmed, carry a dash, and are pushed below the rest.
  *
  * ── Why an unsatisfied check is not automatically this asset's problem ──────────
- * Measured on 2026-08-19: 0 of 1248 assets that belong on a floor plan are drawn on one. That is a
- * project stage nobody has started, not 1248 individual mistakes — so an estate-wide figure sits next
- * to the local one, and a check that nothing in the estate satisfies is labelled as such instead of
- * being blamed on whatever asset happens to be open. The summary loads on demand: it assesses every
- * live asset, which is not something to do on every page view.
+ * Measured on 2026-08-19: 1 of 1197 assets that belong on a floor plan is drawn on one, and 1 of 434
+ * that plug into a wall have a socket recorded. Those are project stages nobody has started, not 1196
+ * individual mistakes — so an estate-wide figure sits next to the local one, and a check almost nothing
+ * in the estate satisfies is labelled as such rather than blamed on whatever asset happens to be open.
+ * The summary loads on demand: it assesses every live asset, which is not a per-page-view cost.
  */
 import React, { useState } from 'react';
 import { AlertCircle, Check, ClipboardCheck, Minus } from 'lucide-react';
@@ -132,7 +132,7 @@ const CompletenessPanel: React.FC<CompletenessPanelProps> = ({ assetId }) => {
                 {estate && c.applicable && !c.satisfied && (
                   <span className={styles.estate}>
                     {estate.unstarted
-                      ? `Nothing in the estate satisfies this yet (0 of ${estate.applicable}) — this is a stage nobody has started, not a fault of this asset.`
+                      ? `Almost nothing in the estate satisfies this yet (${estate.satisfied} of ${estate.applicable}) — this is a stage nobody has started, not a fault of this asset.`
                       : `Across the estate: ${estate.satisfied} of ${estate.applicable} where it applies.`}
                   </span>
                 )}

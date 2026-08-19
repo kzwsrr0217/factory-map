@@ -22,6 +22,7 @@ import { Asset } from '../entities/Asset.entity';
 import {
   assessAsset,
   isOutOfService,
+  isUnstartedStage,
   CheckKey,
   CompletenessInputs,
 } from '../services/asset/completeness';
@@ -227,6 +228,25 @@ describe('the checks that read a source', () => {
   it('does not demand a person for a printer', () => {
     // Shared kit has no personal owner, so requiring one would fail every printer forever.
     expect(check(asset({ asset_type: 'printer', person_full_name: null }), 'core-fields').satisfied).toBe(true);
+  });
+});
+
+describe('the estate summary', () => {
+  it('still calls a stage unstarted when one stray asset satisfies it', () => {
+    /**
+     * The flag exists to stop the panel blaming one asset for a programme nobody has begun. Written as
+     * `satisfied === 0` it stayed silent on exactly the two checks it was built for: the floor-plan
+     * position stands at 1 of 1197 and the wall socket at 1 of 434, so a single stray record out of a
+     * thousand switched the context message off.
+     *
+     * Pinned as a pure ratio rather than through the database: the rule is arithmetic, and the estate
+     * numbers that motivated it will move.
+     */
+    expect(isUnstartedStage(1, 1197)).toBe(true);   // the floor plan, as measured
+    expect(isUnstartedStage(1, 434)).toBe(true);    // the wall sockets, as measured
+    expect(isUnstartedStage(0, 988)).toBe(true);    // never compared against the export
+    expect(isUnstartedStage(63, 453)).toBe(false);  // 14% — under way, and this asset's own gap
+    expect(isUnstartedStage(0, 3)).toBe(false);     // three devices is not a programme stage
   });
 });
 

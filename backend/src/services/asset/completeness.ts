@@ -348,13 +348,35 @@ export interface CompletenessSummary {
     label: string;
     applicable: number;
     satisfied: number;
-    /** True when the check applies widely and nothing satisfies it: a stage nobody has started. */
+    /**
+     * True when the check applies widely and virtually nothing satisfies it: a stage nobody has
+     * started, rather than a fault of any individual asset.
+     *
+     * Deliberately NOT `satisfied === 0`. The floor-plan check stands at 1 of 1197 and the wall-socket
+     * check at 1 of 434, so an exact-zero test would stay silent on the two checks this flag exists
+     * for — one stray record out of a thousand is not a programme under way.
+     */
     unstarted: boolean;
   }>;
   /** How many assets are fully recorded against everything that applies to them. */
   complete: number;
   /** Distribution of "satisfied of applicable", so the shape is visible without listing 1344 rows. */
   distribution: Array<{ satisfied: number; applicable: number; assets: number }>;
+}
+
+/**
+ * Whether a check is an unstarted programme stage rather than this asset's own gap.
+ *
+ * Named and exported so the rule has one home and can be tested directly. Inlined, the only way to
+ * pin it was to restate the arithmetic in the test, which proves nothing.
+ *
+ * Two guards, each for a different mistake. The 20 stops a check applying to three devices being
+ * announced as a programme stage. The 2% is the mistake actually made: written as `satisfied === 0`
+ * this stayed silent on the floor-plan check at 1 of 1197 and the socket check at 1 of 434 — the two
+ * it was written for — because one stray record out of a thousand is not a start.
+ */
+export function isUnstartedStage(satisfied: number, applicable: number): boolean {
+  return applicable >= 20 && satisfied / applicable < 0.02;
 }
 
 export async function getCompletenessSummary(): Promise<CompletenessSummary> {
@@ -394,9 +416,7 @@ export async function getCompletenessSummary(): Promise<CompletenessSummary> {
       label: v.label,
       applicable: v.applicable,
       satisfied: v.satisfied,
-      // 20 is a floor, not a threshold with meaning: it stops a check that applies to three devices
-      // from being announced as an unstarted programme stage.
-      unstarted: v.satisfied === 0 && v.applicable >= 20,
+      unstarted: isUnstartedStage(v.satisfied, v.applicable),
     })).sort((a, b) => (a.satisfied / a.applicable) - (b.satisfied / b.applicable)),
     complete: assessed.filter((a) => a.applicable > 0 && a.satisfied === a.applicable).length,
     distribution: [...dist.values()].sort(
