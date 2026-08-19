@@ -1333,6 +1333,32 @@ placed anywhere are counted rather than listed — nothing can be done about the
 until they are placed — and the console output states how many rows it elided
 instead of truncating silently. See docs/CONNECTIONS_WORKFLOW.md.
 
+## Placement cascade — a machine's children follow it
+
+`services/asset/childPlacement.ts`. Called from `updateAsset` and `bulkUpdateAssets` after the parent
+is saved, with the placement captured BEFORE `applyBodyToAsset` overwrote it.
+
+**The rule:** a child moves only if `samePlacement(child, parentBefore)`. A child recorded elsewhere is
+returned in `left_behind` and untouched. Without that test, one move would have destroyed 22 deliberate
+placements on the real data — 63 live `parent-child` links split 41 together, 22 apart.
+
+**Three things it refuses to do**, each for a reason that is easy to get wrong:
+
+| | Why |
+|---|---|
+| carry `loc_x`/`loc_y` | rooms differ in size and shape, so the old position draws it confidently in a meaningless spot. Cleared, `is_placed = false` |
+| recurse past one level | `parent-child` rows are user-editable with no cycle guard, so a two-row loop would hang a recursive walk. A monitor has no children anyway |
+| move a replaced device | a retired asset has already been cleared out of its slot; moving it would put it back on the map |
+
+**The direction of the link is the trap.** A `parent-child` row is directed: the child's `asset_id` is
+itself and `connected_asset_id` names its PARENT. So a machine's children are the rows pointing AT it,
+not the rows it owns. Reading it the other way round would silently relocate the machine's parent and
+leave the screens behind — there is a test for exactly that.
+
+Failures are swallowed at the call site. The edit the caller asked for has already been saved, and
+reporting zero moved children is recoverable; turning a successful move into a 500 is not. Both
+endpoints report what moved: `children_moved` on the single PATCH, counts in the bulk response message.
+
 ## Nexthink — the third source
 
 Nexthink is what the machines report about themselves. It is **evidence, never a system of record**,

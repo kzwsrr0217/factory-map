@@ -208,6 +208,23 @@ The floor map shows all assets positioned on the floor plan.
 2. Drag it to its new position
 3. The move is saved automatically and recorded in the asset's location history
 
+#### When a machine changes room, its screens go with it
+
+A desk move is one physical act — somebody carries the machine, its monitors and the dock — so the app
+treats it as one. Change a machine's **room** and anything attached to it as a child moves too, on the
+map, on the asset page, and in a bulk move of a whole room. The confirmation says how many came along.
+
+Two things about it worth knowing, because both are deliberate:
+
+- **A child recorded in a DIFFERENT room stays there**, and is reported rather than moved. A screen in
+  the machine's room was clearly following it; one parked in a store room or a device mounted in a
+  cabinet down the hall was not, and dragging that along would wreck a placement somebody meant.
+- **The moved devices arrive in the right room but not on the plan.** Rooms differ in size and shape,
+  so keeping their old position would draw them confidently in a meaningless spot. Drag them where they
+  belong, or use **Arrange unplaced**.
+
+Only one level moves: a machine's own children, not its children's children.
+
 ### Viewing asset details from the map
 1. Click on an asset icon
 2. A popover appears showing: asset name, status (color-coded), IP address, assigned person, next maintenance date (red if overdue, amber if within 30 days), and connection count

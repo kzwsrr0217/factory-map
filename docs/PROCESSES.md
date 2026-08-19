@@ -145,12 +145,23 @@ record, and the reinstall-or-shelf verdict — is a command-line report. See the
 | Real step | In the app | Role |
 |---|---|---|
 | Machine is carried to another room | **Floor Map** — drag it, or set the room on the **Asset** page | operator |
-| Its monitors and dock should follow | **not automatic.** Children stay where they were | operator, by hand |
+| Its monitors and dock follow | **automatic**, and the response says what came along | — |
+| A child recorded in a DIFFERENT room stays there | deliberate — it is reported, not moved | — |
+| Put the moved devices back on the plan | they arrive in the right room but unplaced; drag them, or **Arrange unplaced** | operator |
 | The wall socket it used is now free | **Network Infrastructure** — the socket's occupancy follows the asset | — |
 
-**The gap:** moving a machine does not move what hangs off it. A desk move is one physical act and
-several separate edits in the app, which is exactly the kind of thing that gets half-done. See the
-gap register.
+**A child follows only if it was WITH the machine.** That distinction is the whole rule. A screen in
+the machine's room was clearly following it; a child recorded somewhere else was not — an OT device in
+a cabinet down the hall, a spare parked in a store room — and dragging that along would destroy a
+deliberate placement to fix an accidental one. On the real estate 63 live parent-child links split 41
+together and 22 apart, so without the rule one move would have wrecked 22 placements.
+
+**Coordinates are cleared, not carried.** The moved device is in the right room and not yet on the
+plan. Rooms differ in size and shape, so keeping the old x/y would place it confidently somewhere
+meaningless — unplaced in the right room is honest, placed in the wrong spot is not.
+
+The same applies to a **bulk** move, which is how a whole room gets relocated. Moving one machine
+taking its screens while moving five did not would be a worse inconsistency than the original gap.
 
 ### 4. The person changes, the machine stays
 
@@ -293,7 +304,7 @@ What does not work end to end today. Ordered by how much it costs the person doi
 |---|---|---|---|
 | G1 | ~~The whole Nexthink round is command-line.~~ **Closed 2026-08-19** for the import and the four questions — they are on the **Nexthink** page. What remains is the Windows 11 readiness report, which needs a fourth landing table before it can leave the command line. | Was high, now low | The logic moved into `services/nexthink/overview.ts`, so the page and the scripts return the same objects rather than each having their own query. |
 | G2 | **230 monitors are not in Alemba**, so they cannot be attached to their machines. | High, but the work is data entry, not development | Worksheet exists: `register-in-itsm`. Policy is confirmed: every monitor goes into Alemba. |
-| G3 | **Moving a machine does not move its monitors and dock.** | Medium — a desk move becomes several edits and gets half-done | Children keep their old room. |
+| G3 | ~~Moving a machine does not move its monitors and dock.~~ **Closed 2026-08-19.** Co-located children follow, on both the single and the bulk path; a child recorded elsewhere is reported and left alone. | Was medium, now none | This one silently produced wrong data rather than extra work, which is why it went first. `services/asset/childPlacement.ts`, 9 tests. |
 | G4 | **A swap cannot attach a peripheral that is not in the map or the export.** | Medium | Same root as G2. |
 | G5 | **176 assets sit on a floor with no room.** | Medium — they are findable but not on a rectangle | Mostly the survey's unmatched-place backlog; correcting the places fixes most of it. |
 | G6 | **The survey's "who I saw" cannot be accepted with one click.** | Medium | The disagreement is recorded and becomes a task, but resolving it is a manual edit of the asset. |
@@ -325,5 +336,11 @@ G1 was the one gap worth closing before anybody was told to use the app for Next
 closed apart from the readiness report. "Run this in a terminal" is not a process; it is an
 instruction to the one person who happens to have one.
 
-The next candidate is **G3** — moving a machine leaving its monitors behind — because unlike the
-others it silently produces wrong data rather than making somebody do extra work.
+**G3** is closed too, and it went second for the same reason it was worth doing: unlike the rest it
+silently produced wrong data rather than extra work.
+
+What is left is either data entry somebody has to do (**G2**, **G5**), a decision to make rather than
+code to write (**G8**, **G9**), or blocked on a credential that cannot be requested yet (**G7**). The
+one remaining piece of real development is **G4** — attaching a peripheral the map and Alemba have
+never seen — and it shares its root cause with G2, so the monitors going into Alemba largely dissolves
+it.

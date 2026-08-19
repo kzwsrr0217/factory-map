@@ -77,6 +77,12 @@ reconcile page therefore reported the comparison as stale permanently, and the a
 returned nothing for "the last hour". `options.useUTC: true` on both data sources. Backend suite is
 44 suites / 602 tests green; frontend 22 / 162.
 
+**Two process gaps closed on 2026-08-19.** The Nexthink round is no longer command-line (there is a
+`/nexthink` page), and moving a machine now takes its monitors and dock with it — that one silently
+produced wrong data rather than extra work, which is why it was next. The register in
+[PROCESSES.md](PROCESSES.md) marks both, and what remains there is data entry, decisions, or blocked on
+a credential rather than development.
+
 **Before production**, in this order: the lockfile fix (it blocks the image build, see
 [DEPLOYMENT.md](DEPLOYMENT.md) §3), baseline the migration history, `NODE_ENV=production`, rotate the
 exposed credentials ([ADMIN_GUIDE.md](ADMIN_GUIDE.md)), and decide the two open RBAC questions on

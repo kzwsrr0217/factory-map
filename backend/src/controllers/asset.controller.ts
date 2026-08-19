@@ -38,6 +38,12 @@ import { Request, Response, NextFunction } from 'express';
 import { AuthRequest } from '../middleware/auth.middleware';
 import { AuditLog } from '../entities/AuditLog.entity';
 import { AppDataSource } from '../config/database';
+import {
+  placementOf,
+  placementChanged,
+  moveChildrenWithParent,
+  ChildMoveResult,
+} from '../services/asset/childPlacement';
 import { buildAssetEvidence } from '../services/evidence/assetEvidence';
 import { Asset } from '../entities/Asset.entity';
 import { MasterAsset } from '../entities/MasterAsset.entity';
@@ -878,6 +884,14 @@ export const bulkUpdateAssets = async (req: Request, res: Response, next: NextFu
     const updated: Array<{ _id: string; display_name: string }> = [];
     /** Assets sent back to the unplaced tray because their room changed. */
     const unplaced: string[] = [];
+    /**
+     * Each asset's address before the loop touches it, so its children can follow afterwards.
+     *
+     * Moving five machines has to take their screens along for the same reason moving one does —
+     * "one move carries the monitors, five do not" is a worse inconsistency than the original gap,
+     * and the bulk path is the one somebody uses to relocate a whole room.
+     */
+    const placementsBefore = new Map(assets.map((a) => [a.id, placementOf(a)]));
 
     for (const asset of assets) {
       if (changes.workarea_id !== undefined) {
@@ -915,6 +929,31 @@ export const bulkUpdateAssets = async (req: Request, res: Response, next: NextFu
 
     if (assets.length > 0) await repo().save(assets, { chunk: chunkForEntity(Asset) });
 
+    /**
+     * The children follow, after the parents are saved and one parent at a time.
+     *
+     * Sequential rather than concurrent: two machines in a bulk move can share a screen through
+     * separate parent-child rows, and two writers racing on that row would leave it in whichever
+     * room finished last for no stated reason. Slower and answerable beats faster and arbitrary.
+     *
+     * A child that is ITSELF in the moved set is skipped — it has already been given the new address
+     * by the loop above, and re-deriving it from a parent's old placement would clear its
+     * coordinates a second time for no reason.
+     */
+    const movedSet = new Set(assets.map((a) => a.id));
+    let childrenMoved = 0;
+    let childrenLeftBehind = 0;
+    for (const asset of assets) {
+      const before = placementsBefore.get(asset.id);
+      if (!before) continue;
+      const after = placementOf(asset);
+      if (!placementChanged(before, after)) continue;
+      const result = await moveChildrenWithParent(asset.id, before, after, { skipIds: movedSet })
+        .catch(() => ({ moved: [], left_behind: [] }));
+      childrenMoved += result.moved.length;
+      childrenLeftBehind += result.left_behind.length;
+    }
+
     // One entry per asset, matching how single edits are recorded. Written
     // manually because the audit middleware infers the action from req.method
     // and expects one flat asset in the response body.
@@ -934,9 +973,20 @@ export const bulkUpdateAssets = async (req: Request, res: Response, next: NextFu
 
     res.json({
       success: true,
-      data: { updated, skipped, unplaced },
+      data: {
+        updated,
+        skipped,
+        unplaced,
+        // Reported, not silent: a bulk move that quietly relocated other devices would be a
+        // surprise, and `children_left_behind` is the case worth seeing — a screen the app
+        // knowingly did not move because it was recorded in another room.
+        children_moved: childrenMoved,
+        children_left_behind: childrenLeftBehind,
+      },
       message: `${updated.length} asset(s) updated`
         + (unplaced.length > 0 ? `, ${unplaced.length} returned to the unplaced tray because their work area changed` : '')
+        + (childrenMoved > 0 ? `, ${childrenMoved} attached device(s) moved with them` : '')
+        + (childrenLeftBehind > 0 ? `, ${childrenLeftBehind} left where they were (recorded in another room)` : '')
         + (skipped.length > 0 ? `, ${skipped.length} skipped` : ''),
     });
   } catch (error) { next(error); }
@@ -1016,6 +1066,13 @@ export const updateAsset = async (req: Request, res: Response, next: NextFunctio
     }
 
     const wasPlaced = asset.is_placed;
+    /**
+     * The address the machine has BEFORE the edit, captured here because `applyBodyToAsset` on the
+     * next line overwrites those fields on the entity. The children that should follow are the ones
+     * that were with it at the OLD address; compared against the new one, every child would look as
+     * if it had been somewhere else and none would ever move.
+     */
+    const placementBefore = placementOf(asset);
     applyBodyToAsset(asset, body);
     const hierarchyMismatch = await findHierarchyMismatch(asset);
     if (hierarchyMismatch) {
@@ -1047,6 +1104,25 @@ export const updateAsset = async (req: Request, res: Response, next: NextFunctio
     await repo().save(asset);
     await saveRelations(asset, body);
 
+    /**
+     * A desk move is ONE physical act, so the screens go with the machine.
+     *
+     * Before this, the machine moved and its monitors kept pointing at a room they had left. That is
+     * not merely extra work left undone — the map looked complete and was wrong, which is worse than
+     * an obvious gap. Only children that were WITH the machine follow it; one recorded elsewhere was
+     * not following it and is reported instead. See services/asset/childPlacement.ts.
+     *
+     * Swallowing a failure here is deliberate. The edit the caller asked for has already succeeded,
+     * and reporting zero moved children is recoverable; turning a successful move of the machine into
+     * a 500 is not.
+     */
+    const placementAfter = placementOf(asset);
+    let childMove: ChildMoveResult = { moved: [], left_behind: [] };
+    if (placementChanged(placementBefore, placementAfter)) {
+      childMove = await moveChildrenWithParent(assetId, placementBefore, placementAfter)
+        .catch(() => ({ moved: [], left_behind: [] }));
+    }
+
     // Enforce bidirectional symmetry (best-effort)
     if (incomingPred) {
       await repo().createQueryBuilder().update().set({ successor_id: assetId }).where('id = :id AND successor_id IS NULL', { id: incomingPred }).execute().catch(() => { /* ignore */ });
@@ -1057,7 +1133,20 @@ export const updateAsset = async (req: Request, res: Response, next: NextFunctio
 
     const full = (await loadWithRelations(assetId))!;
     io.emit('asset:updated', full.toApiResponse());
-    res.json({ success: true, data: full.toApiResponse() });
+    /**
+     * The child move is reported alongside the asset rather than folded into it.
+     *
+     * A caller that moved a machine needs to know two monitors came along — silently correct data is
+     * still a surprise, and `left_behind` is the case worth seeing most: a child the app knowingly
+     * did NOT move because it was recorded somewhere else.
+     */
+    res.json({
+      success: true,
+      data: full.toApiResponse(),
+      ...(childMove.moved.length > 0 || childMove.left_behind.length > 0
+        ? { children_moved: childMove }
+        : {}),
+    });
   } catch (error) { next(error); }
 };
 
