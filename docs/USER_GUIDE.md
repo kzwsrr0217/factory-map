@@ -462,6 +462,52 @@ Below the table it also shows who has been signing in (from Nexthink, with the a
 shared or admin account is visible as such) and any value the survey brought that the import declined
 to apply because the record already held another.
 
+#### "How complete is this record" — what is still missing
+
+Underneath it, **Check what is missing** lists the things a fully recorded asset needs and says, one
+line at a time, which are in place. There is deliberately **no percentage**: a number cannot be acted
+on, and it hides the one part that can — which item is missing.
+
+The list has **three** states, and the third is the important one:
+
+| What you see | What it means |
+|---|---|
+| a tick | recorded |
+| a warning mark | it applies to this asset and is not recorded — this is the to-do |
+| a dash, dimmed, at the bottom | **it cannot apply to this asset.** Not a gap, and never counted |
+
+The dash is why the panel is worth reading. A monitor carries no Nexthink agent, an IPC on Windows 7
+cannot either, a rack-mounted server is located by its rack and not by a dot on a plan, and a printer
+has no personal owner. Those are limits of the device, not holes in the record, so they never count
+against it. The score reads **"4 of 7"** — of the checks that apply to *this* asset — and a monitor's
+denominator is genuinely smaller than a workstation's.
+
+The checks are:
+
+| Check | Satisfied when | Never applies to |
+|---|---|---|
+| **Registered in ITSM** | it carries an HWA the loaded export contains | nothing — every device, monitors included, belongs in Alemba |
+| **Agrees with ITSM** | a compare made *since the current export was loaded* found no disagreement | anything not in the export |
+| **Reports to Nexthink** | the last snapshot contains it | monitors, docks, printers, phones, switches; anything on an OS older than Windows 10 |
+| **Seen in a physical survey** | a survey row resolved to it | nothing — somebody looking at it is the only source that confirms it exists |
+| **Key fields filled** | type, serial and manufacturer are present, plus the person for a personal machine | — (the person is not asked of shared kit) |
+| **Placed on the floor plan** | it is drawn on a plan | servers and network kit |
+| **Wired to a known socket** | a wall port is recorded, which is what makes the patch panel and switch port knowable | monitors, docks and anything that does not plug into the wall itself |
+| **Attached to its machine** | a parent is recorded | anything that is not a peripheral |
+
+Two things it will tell you that are easy to misread:
+
+- **"The last compare ran before the current export was loaded, so its verdict says nothing."** Not a
+  disagreement — a verdict about data that has since been replaced. Run **Compare all** and it clears.
+  This is currently true of nearly every asset.
+- **"Nothing in the estate satisfies this yet — this is a stage nobody has started."** Press *Compare
+  with the rest of the estate* and the panel adds the estate-wide figure next to each unmet check. If
+  the whole estate is at zero, the missing item is a project that has not begun, not a mistake on the
+  asset you happen to have open. Right now that is true of the floor-plan positions.
+
+A device that has left service is not measured at all: the panel simply says nothing is expected of
+its record.
+
 The panel shows all information organized in sections:
 
 | Section | What you'll find |

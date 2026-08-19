@@ -311,6 +311,9 @@ What does not work end to end today. Ordered by how much it costs the person doi
 | G7 | **No import is scheduled.** Every round starts with somebody exporting by hand. | Medium | The Nexthink API path is written but has no credential; ITSM has no API path at all. |
 | G8 | **Reads are unrestricted, including the audit log and person assignments.** | To confirm, not necessarily to change | Deliberate for a small team; it is personal data. |
 | G9 | **`operator` is one wide role.** Delete, bulk-edit and whole-snapshot import are the same permission. | To confirm | Proportionate today. |
+| G10 | **Nothing said which records were incomplete.** **Closed 2026-08-19.** Every asset page answers it, and an estate-wide figure sits next to each unmet check. | Was medium, now none | `services/asset/completeness.ts`, 21 tests. The per-asset denominator is the whole design; see the pitfalls table in DEVELOPER_GUIDE. |
+| G11 | **No reconcile has been run against the loaded export.** 1038 live assets carry a verdict from a compare made *before* it — 1045 of them reading `missing` from a run against an empty snapshot table. Until **Compare all** is run, "Agrees with ITSM" is unsatisfiable estate-wide and the app cannot say where it disagrees with Alemba. | High, and it is one button | Surfaced by G10 rather than found by looking. The completeness check now reports these verdicts as stale rather than as disagreements. |
+| G12 | **278 assets have no `status`, and two vocabularies share the column** — 946 read `active` and 22 read ITSM's `Deployed`. | Low, but it silently widens every status filter | `isOutOfService` matches case-insensitively so it does not trip over the mixture, but nothing normalises it. |
 
 ---
 

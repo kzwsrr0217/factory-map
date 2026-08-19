@@ -430,6 +430,40 @@ export interface AssetEvidence {
   suppressed_by_import: Array<{ field: string; app_value: string | null; survey_value: string | null }>;
 }
 
+/** One item on an asset's completeness checklist. */
+export interface CompletenessCheck {
+  key: string;
+  label: string;
+  /** False when the check cannot apply to this asset. Rendered as neither pass nor fail. */
+  applicable: boolean;
+  satisfied: boolean;
+  detail: string | null;
+}
+
+export interface AssetCompleteness {
+  asset_id: string;
+  display_name: string;
+  /** False for a device out of service: nothing is expected of its record. */
+  tracked: boolean;
+  checks: CompletenessCheck[];
+  satisfied: number;
+  applicable: number;
+}
+
+export interface CompletenessSummary {
+  total: number;
+  by_check: Array<{
+    key: string;
+    label: string;
+    applicable: number;
+    satisfied: number;
+    /** The check applies widely and nothing satisfies it — a stage nobody has started. */
+    unstarted: boolean;
+  }>;
+  complete: number;
+  distribution: Array<{ satisfied: number; applicable: number; assets: number }>;
+}
+
 export const assetService = {
   /**
    * What ITSM, Nexthink and the survey each say about one device.
@@ -439,6 +473,27 @@ export const assetService = {
    */
   getEvidence: async (assetId: string): Promise<AssetEvidence> => {
     const res = await api.get(`/assets/${assetId}/evidence`);
+    return res.data.data;
+  },
+
+  /**
+   * What is still missing from one record.
+   *
+   * Returns per-check verdicts and a satisfied/applicable pair rather than a percentage: which thing
+   * is missing is the actionable part, and the percentage is derivable from the pair anyway.
+   */
+  getCompleteness: async (assetId: string): Promise<AssetCompleteness> => {
+    const res = await api.get(`/assets/${assetId}/completeness`);
+    return res.data.data;
+  },
+
+  /**
+   * The same checks across the estate, so one red tick can be read in context.
+   *
+   * Not cheap — it assesses every live asset — so callers load it on demand rather than on mount.
+   */
+  getCompletenessSummary: async (): Promise<CompletenessSummary> => {
+    const res = await api.get('/assets/completeness');
     return res.data.data;
   },
 

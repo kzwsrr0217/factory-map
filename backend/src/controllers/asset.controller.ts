@@ -45,6 +45,7 @@ import {
   ChildMoveResult,
 } from '../services/asset/childPlacement';
 import { buildAssetEvidence } from '../services/evidence/assetEvidence';
+import { getAssetCompleteness, getCompletenessSummary } from '../services/asset/completeness';
 import { Asset } from '../entities/Asset.entity';
 import { MasterAsset } from '../entities/MasterAsset.entity';
 import { AssetSoftware } from '../entities/AssetSoftware.entity';
@@ -758,6 +759,43 @@ export const getAssetEvidence = async (req: Request, res: Response, next: NextFu
       return;
     }
     res.json({ success: true, data: evidence });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * getAssetCompletenessById: what is still missing from this one record.
+ *
+ * Read-only, and no percentage in the payload: the caller gets per-check verdicts with reasons and a
+ * satisfied/applicable count, because WHICH thing is missing is the only actionable part. A percent is
+ * derivable from the pair; the pair is not derivable from a percent.
+ */
+export const getAssetCompletenessById = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const result = await getAssetCompleteness(req.params.id);
+    if (!result) {
+      res.status(404).json({ success: false, error: 'Asset not found' });
+      return;
+    }
+    res.json({ success: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * getCompletenessOverview: the same checks across the estate.
+ *
+ * Exists so a red check on one asset can be read in context. Measured on 2026-08-19, 0 of 1248 assets
+ * that belong on a floor plan are drawn on one — that is a stage nobody has begun, not 1248 individual
+ * mistakes, and without this endpoint the per-asset widget would say the opposite.
+ *
+ * Reads every live asset and assesses in memory, so it is not a poll-every-second endpoint.
+ */
+export const getCompletenessOverview = async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    res.json({ success: true, data: await getCompletenessSummary() });
   } catch (error) {
     next(error);
   }

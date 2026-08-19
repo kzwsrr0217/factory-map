@@ -239,6 +239,8 @@ import {
   updateConnection,
   removeConnection,
   replaceAsset,
+  getAssetCompletenessById,
+  getCompletenessOverview,
 } from '../controllers/asset.controller';
 import { auditLog, captureAuditBefore } from '../middleware/audit.middleware';
 import { requireOperator } from '../middleware/auth.middleware';
@@ -255,10 +257,14 @@ router.get('/lookups',             getAssetLookups);
 router.get('/stats',               getAssetStats);
 router.get('/persons',             getAssetPersons);
 router.get('/maintenance-counts',  getMaintenanceCounts);
+// Estate-wide completeness. Before '/:id' so 'completeness' is not read as an asset id.
+router.get('/completeness',        getCompletenessOverview);
 router.get('/:id',                 getAssetById);
 router.get('/:id/ot-children',     getAssetOtChildren);
 // The three sources side by side for one device. Read-only for any authenticated role.
 router.get('/:id/evidence',        getAssetEvidence);
+// What is still missing from one record, with a reason per check.
+router.get('/:id/completeness',    getAssetCompletenessById);
 
 // Write — operator or admin only
 router.post('/',    requireOperator, validate(AssetCreateSchema), auditLog('asset'), createAsset);

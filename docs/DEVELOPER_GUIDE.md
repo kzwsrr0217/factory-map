@@ -912,6 +912,8 @@ Two endpoints elsewhere belong to the same story:
 | Endpoint | Role | Notes |
 |---|---|---|
 | `GET /assets/:id/evidence` | any | what the map, ITSM, Nexthink and the survey each say about ONE device. Per asset only — there is deliberately no estate-wide variant, see the file header of `services/evidence/assetEvidence.ts` |
+| `GET /assets/:id/completeness` | any | per-check verdicts for one record, each with a reason, plus a `satisfied`/`applicable` pair. No percentage in the payload: the pair is derivable into one, the reverse is not |
+| `GET /assets/completeness` | any | the same checks across the estate, so a red tick can be read in context. Declared BEFORE `/:id` or Express reads `completeness` as an asset id. Assesses every live asset — not a poll-me endpoint |
 | `GET /tasks/source-freshness` | any | how old each source is and how much of the estate it covers, for the bar above the task list |
 
 `itsm-wrong` is the third reconcile decision and the only task kind proven done by an OUTSIDE system
@@ -1442,6 +1444,9 @@ wrong at least once and was caught by reading output rather than by a test:
 | `comparePerson` | `services/inventory/personEvidence.ts` | filtered on `full_name` while the caller filtered on `account_kind`, so an admin account with an AD name would have reassigned a machine to whoever administered it |
 | `suppressedConflicts` | `services/inventory/surveyImport.ts` | the survey exercises none of it — every non-HWA row matches BY serial, so serials agree by construction |
 | `disagrees` | `services/evidence/assetEvidence.ts` | compared cells in different vocabularies (`desktop` vs `workstation`, a site vs a room) and flagged three false disagreements on the first device tried |
+| `assessAsset` | `services/asset/completeness.ts` | scored every asset against the same eight checks, so all 405 monitors read permanently incomplete for lacking a Nexthink agent they cannot carry. The denominator is per asset, not global |
+| the staleness test in `assessAsset` | same | reported a reconcile verdict recorded BEFORE the loaded export as a live disagreement. 1038 live assets carry one — 1045 of them reading `missing` from a compare that ran while the snapshot table was empty — and the first version printed the self-refuting line "Agrees with ITSM — 0 field(s) still disagree" |
+| `isOutOfService` | same | measured 61 decommissioned devices, putting permanent reds on the summary that no work could ever clear. Matches case-insensitively, because `active` and ITSM's `Deployed` are both in the column |
 
 ### Tasks it feeds
 
