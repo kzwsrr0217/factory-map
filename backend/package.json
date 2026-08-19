@@ -41,7 +41,8 @@
     "nexthink:swap-check": "ts-node src/scripts/nexthink-swap-check.ts",
     "nexthink:unknown": "ts-node src/scripts/nexthink-unknown-devices.ts",
     "nexthink:person-mismatch": "ts-node src/scripts/nexthink-person-mismatch.ts",
-    "nexthink:quiet": "ts-node src/scripts/nexthink-quiet-devices.ts"
+    "nexthink:quiet": "ts-node src/scripts/nexthink-quiet-devices.ts",
+    "nexthink:win11": "ts-node src/scripts/nexthink-win11-readiness.ts"
   },
   "keywords": [
     "factory-map",
