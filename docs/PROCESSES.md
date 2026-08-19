@@ -237,14 +237,22 @@ hardware export alone imports cleanly and quietly leaves most of the estate mist
 | Real step | In the app | Role |
 |---|---|---|
 | Export devices and logons from Investigations | in Nexthink | — |
+| Import them | **Nexthink** page → load an export. Check first, then replace | operator |
+| Read what the snapshot says | same page: coverage, machines the map lacks, what has gone quiet, where the logons name a different person | any |
+| Act | the findings that are actions are on the **Tasks** page | operator |
 | Export the Windows 11 readiness remote action | in Nexthink | — |
-| Import | **command line only** — `import:nexthink` | operator with a terminal |
-| Read the five reports | **command line only** | operator with a terminal |
-| Act | the findings that are actions appear on the **Tasks** page | operator |
+| Read the reinstall-or-shelf verdict | **command line** — `nexthink:win11` | operator with a terminal |
 
-**This is the least finished process in the app.** The data, the tasks it feeds and the per-asset
-evidence panel are all in the product; the import and all five reports are scripts. Someone without
-a terminal cannot run a Nexthink round at all. See the gap register.
+**The round is a UI process now, with one exception.** Loading the two exports and reading the four
+questions the snapshot raises are on the Nexthink page. What is still command-line is the **Windows 11
+readiness** report, because that data is a third export from a remote action and is not stored in the
+app at all — it is read straight from the CSV. Storing it needs a fourth landing table.
+
+**Why the actions are not on that page.** A machine on the network that no register holds, a replaced
+machine still reporting, a person the logons disagree about — those become tasks, where they can be
+assigned, dismissed with a reason, and closed by the data. Repeating them on the Nexthink page would
+create a second list to reconcile with the first. The Nexthink page holds the state of the source and
+the questions; the Tasks page holds the work.
 
 The five reports:
 
@@ -283,7 +291,7 @@ What does not work end to end today. Ordered by how much it costs the person doi
 
 | # | Gap | Cost | Notes |
 |---|---|---|---|
-| G1 | **The whole Nexthink round is command-line.** Import and all five reports. | High — a process nobody without a terminal can run | The tasks it produces DO appear in the UI. It is the import and the reports that have no page. |
+| G1 | ~~The whole Nexthink round is command-line.~~ **Closed 2026-08-19** for the import and the four questions — they are on the **Nexthink** page. What remains is the Windows 11 readiness report, which needs a fourth landing table before it can leave the command line. | Was high, now low | The logic moved into `services/nexthink/overview.ts`, so the page and the scripts return the same objects rather than each having their own query. |
 | G2 | **230 monitors are not in Alemba**, so they cannot be attached to their machines. | High, but the work is data entry, not development | Worksheet exists: `register-in-itsm`. Policy is confirmed: every monitor goes into Alemba. |
 | G3 | **Moving a machine does not move its monitors and dock.** | Medium — a desk move becomes several edits and gets half-done | Children keep their old room. |
 | G4 | **A swap cannot attach a peripheral that is not in the map or the export.** | Medium | Same root as G2. |
@@ -313,6 +321,9 @@ The deploy order matters more than the date:
 5. **Decide G8 and G9 on purpose.** Neither needs code today, but both should be a decision rather
    than a default.
 
-G1 is the one gap worth closing before people are told to use the app for Nexthink rounds, because
-"run this in a terminal" is not a process — it is an instruction to one person who happens to have
-one.
+G1 was the one gap worth closing before anybody was told to use the app for Nexthink rounds, and it is
+closed apart from the readiness report. "Run this in a terminal" is not a process; it is an
+instruction to the one person who happens to have one.
+
+The next candidate is **G3** — moving a machine leaving its monitors behind — because unlike the
+others it silently produces wrong data rather than making somebody do extra work.

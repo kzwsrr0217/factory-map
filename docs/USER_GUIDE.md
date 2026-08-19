@@ -26,14 +26,15 @@
 15. [ITSM Reconcile](#itsm-reconcile)
     - [Loading a fresh ITSM export](#loading-a-fresh-itsm-export)
     - [Inventory import (the physical walk-around)](#inventory-import)
-16. [Tasks](#normalisation-tasks)
-17. [Alerts (Admins only)](#alerts)
-18. [Reports](#reports)
-19. [Audit Log](#audit-log)
-20. [Settings](#settings)
-21. [User Management (Admins only)](#user-management)
-22. [Keyboard Shortcuts](#keyboard-shortcuts)
-23. [Tips & Best Practices](#tips--best-practices)
+16. [Nexthink](#nexthink)
+17. [Tasks](#normalisation-tasks)
+18. [Alerts (Admins only)](#alerts)
+19. [Reports](#reports)
+20. [Audit Log](#audit-log)
+21. [Settings](#settings)
+22. [User Management (Admins only)](#user-management)
+23. [Keyboard Shortcuts](#keyboard-shortcuts)
+24. [Tips & Best Practices](#tips--best-practices)
 
 ---
 
@@ -100,6 +101,7 @@ The left **sidebar** is the main navigation menu, in groups:
 | Network | Connections | Force-directed graph of all asset connections |
 | Data & admin | Normalisation run | Where the current round has got to: which step is next, and whether the task list is older than the data it describes |
 | Data & admin | ITSM Reconcile | Compare assets against the ITSM system (read-only) and resolve differences per field |
+| Data & admin | Nexthink | What the machines report about themselves: load the two exports, then read the coverage, the machines the map lacks, what has gone quiet, and where the logons name a different person. Nothing here writes to Nexthink |
 | Data & admin | Inventory import | Hand the physical walk-around to the app: preview what it would change, fix the names that did not match, then apply |
 | Data & admin | Tasks | What is left before the inventory, the app and ITSM agree. Derived from the data — press **Re-derive** after a new ITSM export. Dismissing needs a reason, and only "put a label on it" can be closed on your word alone: everything else is checked against the data and comes back if the cause is still there |
 | Data & admin | Reports | Asset statistics and ITSM sync |
@@ -971,6 +973,65 @@ into "register in ITSM" tasks.
 ---
 
 <a id="normalisation-tasks"></a>
+## Nexthink
+
+**Nexthink** is the third source, and the only one that is not something a person typed: it is what the
+machines report about themselves. The page is where an export gets loaded and where the questions that
+export raises get read.
+
+Two things to hold on to before reading any number here:
+
+- **Nothing in this app writes to Nexthink.** It is evidence, never a system of record.
+- **Nexthink only sees machines carrying its agent.** No monitor, dock or phone ever does. So every
+  "absent from Nexthink" number is a limit of the source far more often than a gap in the estate, and
+  the page says so next to each one.
+
+### Loading an export (operator/admin)
+
+Both files come from **Investigations → NQL editor → Run → export the grid**. The exact queries are in
+the header of `import-nexthink-snapshot.ts`.
+
+**Scope both exports to the same entities.** If they differ, the two files describe different
+populations and every comparison between them is quietly wrong. The IPCs live in the Industry
+entities, so an export scoped to `Veszprem-Client` alone silently omits every shop-floor machine.
+
+**Check without importing** first. It writes nothing and it is where the numbers worth reading are —
+in particular how many devices matched an asset in the map, which is the only place that join gets
+measured before anything is overwritten. **Replace the snapshot** then loads it, replacing both tables
+wholesale so they always mean "what Nexthink reported as of the last export" rather than a merged
+cache nobody can reason about.
+
+Choosing a different file clears the previous check, so the numbers on screen always belong to the
+files currently selected.
+
+### What the page tells you
+
+| Section | The question it answers | What it cannot answer |
+|---|---|---|
+| **What this snapshot covers** | how many devices, per Nexthink entity, and how many are on Windows 11 | nothing about a device without an agent |
+| **On the network, not in the map** | which machines are switched on and in no map record | — this is the strongest finding here; a machine cannot report without existing |
+| **Stopped reporting** | which machines have gone quiet, counted back from the newest sighting in the export | whether they are gone. In the holiday season weeks of silence is usually leave, and the page says so |
+| **The logons name a different person** | where the logon record and the map disagree clearly | who is right. A person who changed desks looks exactly like this |
+
+Two readings the page protects you from:
+
+- **"Absent from the export" is not "gone".** Nexthink drops long-inactive devices entirely, so a
+  machine switched off months ago does not appear with an old date — it disappears. Only a comparison
+  against the *previous* import can see that, and the page shows it when there is one.
+- **A device newer than the loaded ITSM export** is marked as such rather than as missing from Alemba.
+  Telling somebody to create a CI that already exists is how a duplicate is made.
+
+### What is not on this page
+
+The findings that are **actions** — a machine to register, a replaced machine still running, a person
+to confirm. Those are on the **[Tasks](#tasks)** page, where one can be assigned, dismissed with a
+reason, and closed by the data. A second list here would be a second thing to reconcile.
+
+The **Windows 11 reinstall-or-set-aside** verdict is still command-line (`nexthink:win11`), because it
+needs a third export — from a remote action — that the app does not store yet.
+
+---
+
 ## Tasks
 
 The **Tasks** page answers one question: what is left before the physical

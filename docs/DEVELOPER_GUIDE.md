@@ -1365,6 +1365,32 @@ simply not matching.
    is one definition of "is this a person", checked against the real 671-row export rather than
    argued about per caller.
 
+### Endpoints, and what is deliberately not one
+
+| Endpoint | Role | Notes |
+|---|---|---|
+| `GET /nexthink/overview` | any | the whole state of the source in ONE call: coverage per entity, unknown-to-map, quiet devices, person mismatches, and what disappeared since the previous import |
+| `POST /nexthink/import` `{devicesCsv?, loginsCsv?, apply?}` | operator | CSV **text** is posted and parsed server-side, like the ITSM snapshot import — one place knows the export's column names, and it is the place that owns the parser. `apply` defaults to false |
+
+One call rather than five, because the five reports answer questions about one snapshot; a page needing
+five requests would show them arriving at different times.
+
+The import rejects a file that parses to **zero** rows rather than importing it. With `apply` that
+would clear the table and report success, which is the worst outcome for a wrong file — every report
+built on it would then honestly say the estate is empty.
+
+The findings that are ACTIONS are not served here. They become tasks under `/api/tasks`, where they can
+be assigned, dismissed with a reason and closed by the data. A second list would be a second thing to
+reconcile.
+
+### Where the logic lives
+
+`services/nexthink/overview.ts` owns `findUnknownDevices()`, `findQuietDevices()` and the composed
+`getNexthinkOverview()`. Two of these started life inside the scripts that printed them; adding a page
+meant either calling a script from a web request or writing the query twice, and two implementations of
+"which devices does the map not know" is how two answers start to differ. The scripts now print what
+these return.
+
 ### Scripts
 
 | Command | What it does |

@@ -20,6 +20,7 @@ import {
   Gauge,
   ListChecks,
   LucideIcon,
+  Radio,
 } from 'lucide-react';
 import { useMaintenanceCounts } from '../../hooks/useMaintenanceCounts';
 import styles from '../../styles/components/Sidebar.module.css';
@@ -84,6 +85,9 @@ const menuGroups: MenuGroup[] = [
       // group because it is where someone picking the work back up should start.
       { icon: Route,         label: 'Normalisation run', path: '/normalisation' },
       { icon: RefreshCw,     label: 'ITSM Reconcile', path: '/itsm' },
+      // The third source: what the machines report about themselves. Next to ITSM Reconcile
+      // because the two are the same kind of job — load an export, read what it disagrees with.
+      { icon: Radio,         label: 'Nexthink',       path: '/nexthink' },
       // Where the physical walk-around is handed to the app, and where the survey's
       // free-text names are mapped onto the app's — see pages/InventoryImport.tsx.
       { icon: FileInput,     label: 'Inventory import', path: '/inventory-import' },

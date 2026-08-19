@@ -58,13 +58,15 @@ each reports how old it is and how much of the estate it covers. The app still n
 |---|---|---|---|
 | ITSM (Alemba) | `itsm_hardware_snapshot` | accept · ignore · **ITSM is wrong** | yes |
 | Physical survey | `survey_observation` | the declined disagreements become tasks | import yes, decisions partly |
-| Nexthink | `nexthink_device_snapshot`, `nexthink_login_snapshot` | none by design — it only monitors | **no page at all** |
+| Nexthink | `nexthink_device_snapshot`, `nexthink_login_snapshot` | none by design — it only monitors | yes: `/nexthink` (import + the four questions). The Windows 11 readiness report is still CLI |
 
 Also new: `import_runs`, a ledger of every import. It is what makes "which devices dropped out since
 last time" answerable, which is the only real decommission signal this estate produces — Nexthink
 ages inactive devices out rather than marking them stale.
 
-**Five Nexthink reports, all command-line:** `nexthink:swap-check`, `nexthink:unknown`,
+**Five Nexthink reports.** Four are on the `/nexthink` page as well as the command line; the fifth
+(`nexthink:win11`) is CLI only, because its data is a third export from a remote action that the app
+does not store yet. The commands: `nexthink:swap-check`, `nexthink:unknown`,
 `nexthink:person-mismatch`, `nexthink:quiet`, `nexthink:win11`. The last one answers the question the
 whole exercise started from — for a swapped-out machine, reinstall it or set it aside — and needs a
 third export, from the `Get Windows 11 readiness` remote action rather than the device inventory.

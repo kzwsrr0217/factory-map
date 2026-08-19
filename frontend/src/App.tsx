@@ -49,6 +49,7 @@ import AuditLog from './pages/AuditLog';
 import UnplacedAssets from './pages/UnplacedAssets';
 import SurveyProgress from './pages/SurveyProgress';
 import NormalisationTasks from './pages/NormalisationTasks';
+import Nexthink from './pages/Nexthink';
 import InventoryImport from './pages/InventoryImport';
 import NormalisationRun from './pages/NormalisationRun';
 import TaskWorksheet from './pages/TaskWorksheet';
@@ -110,6 +111,7 @@ function App() {
                           <Route path="/infrastructure" element={<NetworkInfrastructure />} />
                           <Route path="/maintenance" element={<Maintenance />} />
                           <Route path="/itsm" element={<ItsmReconcile />} />
+                          <Route path="/nexthink" element={<Nexthink />} />
                           <Route path="/inventory-import" element={<InventoryImport />} />
                           <Route path="/normalisation" element={<NormalisationRun />} />
                           <Route path="*" element={<Navigate to="/" replace />} />

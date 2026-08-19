@@ -32,6 +32,7 @@ import productionLinesRoutes from './productionLines.routes';
 import workCentersRoutes from './workCenters.routes';
 import exportRoutes from './export.routes';
 import normalisationTasksRoutes from './normalisationTasks.routes';
+import nexthinkRoutes from './nexthink.routes';
 import inventoryRoutes from './inventory.routes';
 import { authenticate } from '../middleware/auth.middleware';
 
@@ -61,5 +62,6 @@ router.use('/work-centers', workCentersRoutes);
 router.use('/export', exportRoutes);
 router.use('/tasks', normalisationTasksRoutes);
 router.use('/inventory', inventoryRoutes);
+router.use('/nexthink', nexthinkRoutes);
 
 export default router;
