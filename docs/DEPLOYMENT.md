@@ -267,6 +267,24 @@ machine before assuming the ticket is required.
 
 ## 3. First-time deploy
 
+> ### The image build fails on a stale lockfile, and it fails before anything else
+>
+> The production Dockerfile installs with `npm ci`, and `npm ci` **refuses to run** when
+> `package.json` and `package-lock.json` disagree. They had drifted: the lockfile still listed
+> `express-validator`, which an earlier commit had removed from `package.json` without regenerating
+> the lock. Nothing exercised it until the first `npm ci`.
+>
+> It is fixed in the repository, so a fresh clone is fine. The point of the warning is what to do if
+> the build ever stops with a lockfile mismatch again: **regenerate the lock, do not delete it and do
+> not switch the Dockerfile to `npm install`.** `npm ci` failing is the safety feature working —
+> `npm install` would silently resolve different versions than the ones anybody tested.
+>
+> ```bash
+> cd backend && npm install --package-lock-only
+> ```
+>
+> Commit the result. Verify with `npm ci --dry-run` before building the image.
+
 ```bash
 git clone https://github.com/kzwsrr0217/factory-map.git
 cd factory-map

@@ -903,7 +903,23 @@ row there to make a new field reconcilable. Status comparisons go through
 | `PATCH /reconcile/:id/accept` `{fields:[]}` | operator | 1 GET (re-read at accept time), writes locally |
 | `PATCH /reconcile/:id/ignore` `{field, itsm_value}` | operator | none — the value comes from the client |
 | `PATCH /reconcile/:id/unignore/:field` | operator | none |
+| `PATCH /reconcile/:id/itsm-wrong` `{field, itsm_value, note?}` | operator | none — records that ALEMBA is the one to change |
+| `PATCH /reconcile/:id/itsm-wrong/:field/withdraw` | operator | none |
 | `PATCH /reconcile/:id/unlink` | operator | none — clears the local link only |
+
+Two endpoints elsewhere belong to the same story:
+
+| Endpoint | Role | Notes |
+|---|---|---|
+| `GET /assets/:id/evidence` | any | what the map, ITSM, Nexthink and the survey each say about ONE device. Per asset only — there is deliberately no estate-wide variant, see the file header of `services/evidence/assetEvidence.ts` |
+| `GET /tasks/source-freshness` | any | how old each source is and how much of the estate it covers, for the bar above the task list |
+
+`itsm-wrong` is the third reconcile decision and the only task kind proven done by an OUTSIDE system
+changing: `correct-in-itsm` stops being derived once a later export carries the value the app was
+marked right about. `app_value` is snapshotted at the moment of the decision rather than read from the
+asset later — otherwise editing the asset again would close the task without Alemba having changed.
+It also drops any `ignore` on the same field (they are opposite decisions) and deliberately does NOT
+decrement `reconcile_diff_count`, because unlike an ignore the difference is still real.
 
 Accept/ignore/unlink are audited (`captureAuditBefore` + `auditLog('asset')`).
 Ignores are stored on the asset (`reconcile_ignored`) together with the ITSM value
@@ -1316,6 +1332,73 @@ panel's rack, and wired devices placed on a floor with no socket. Devices not ye
 placed anywhere are counted rather than listed — nothing can be done about them
 until they are placed — and the console output states how many rows it elided
 instead of truncating silently. See docs/CONNECTIONS_WORKFLOW.md.
+
+## Nexthink — the third source
+
+Nexthink is what the machines report about themselves. It is **evidence, never a system of record**,
+and there is deliberately no code anywhere that writes to it.
+
+### The three exports and why there are three
+
+All come from Investigations (NQL editor → Run → export the grid). The queries are kept verbatim in
+the header of `scripts/import-nexthink-snapshot.ts` and `scripts/nexthink-win11-readiness.ts`.
+
+| Export | Table | Notes |
+|---|---|---|
+| `devices` | `nexthink_device_snapshot` | max **91-day** window; scope it to all five Veszprém entities or the IPCs are silently missing |
+| `session.logins` | `nexthink_login_snapshot` | refuses a 90-day range outright, so its window is necessarily shorter than the device one |
+| `Get Windows 11 readiness` remote action | *(not stored yet — read from CSV)* | TPM and Secure Boot are **not** inventory fields; three attempts at `hardware.tpm_version` were rejected because the data comes from a remote action |
+
+`device.name` **is** the HWA tag, so no serial matching is needed. It joins to
+`Asset.hardware_asset_id` with a `display_name` fallback — **not** to `Asset.id`, which is a generated
+uuid; binding an HWA against it makes SQL Server reject the parameter as an invalid GUID rather than
+simply not matching.
+
+### Two properties of the source that shape everything built on it
+
+1. **Nexthink ages inactive devices out of the export entirely.** A decommissioned machine does not
+   appear with a stale `last_seen` — it *disappears*. So the signal for "nobody has seen this in
+   months" is ABSENCE, which is only observable against a previous import. That is what `import_runs`
+   exists for (`services/importRun.ts`, `keyDeltaAgainstLastRun`).
+2. **Roughly half the logon rows are not people.** `classifyAccount()` resolves that once at import
+   into `account_kind` (`person`, `person_unnamed`, `admin`, `machine`, `generic`, `local`), so there
+   is one definition of "is this a person", checked against the real 671-row export rather than
+   argued about per caller.
+
+### Scripts
+
+| Command | What it does |
+|---|---|
+| `npm run import:nexthink -- <dir>` | dry run by default. **Note:** `import:itsm` writes on sight — do not assume from one what the other does |
+| `npm run import:nexthink -- <dir> --apply` | replaces both tables in one transaction |
+| `npm run import:nexthink -- --from-api` | written, never executed — needs an API credential that does not exist yet |
+| `npm run nexthink:swap-check -- OLD=NEW ...` | confirms a claimed swap from the shared named logons |
+| `npm run nexthink:unknown` | devices on the network that the map does not hold |
+| `npm run nexthink:person-mismatch` | where the logon record and the map name different people |
+| `npm run nexthink:quiet` | machines that have stopped reporting |
+| `npm run nexthink:win11 -- <readiness.csv>` | reinstall it or set it aside, per machine |
+
+### Where the judgement lives, and why it is extracted
+
+Every decision the reports make is a pure exported function with tests, because each one shipped
+wrong at least once and was caught by reading output rather than by a test:
+
+| Function | File | The mistake it now prevents |
+|---|---|---|
+| `decideFate` | `services/nexthink/swapEvidence.ts` | compared the old machine's last sighting against the REPLACEMENT's `first_seen` and reported 871-day gaps as "still reporting after the swap" — recycled replacements carry a years-old first_seen |
+| `decideVerdict` | same | called it a contradiction when only one side had named logons; ignorance is not disagreement |
+| `comparePerson` | `services/inventory/personEvidence.ts` | filtered on `full_name` while the caller filtered on `account_kind`, so an admin account with an AD name would have reassigned a machine to whoever administered it |
+| `suppressedConflicts` | `services/inventory/surveyImport.ts` | the survey exercises none of it — every non-HWA row matches BY serial, so serials agree by construction |
+| `disagrees` | `services/evidence/assetEvidence.ts` | compared cells in different vocabularies (`desktop` vs `workstation`, a site vs a room) and flagged three false disagreements on the first device tried |
+
+### Tasks it feeds
+
+`services/nexthink/nexthinkTasks.ts` derives `register-in-itsm`, `create-in-map`,
+`confirm-primary-user` and `dispose-replaced-machine`. The most useful thing it does is a
+**subtraction**: `suppressVerifyDisposalFor()` stops `verify-disposal` being raised for any device in
+the snapshot, because that task sends a person to find out whether hardware still exists and Nexthink
+has already answered it. Presence is the test, not recency — a 7-day recency test here put three
+devices on a walking list and an add-it list simultaneously.
 
 ## IFS/CMDB Master-Data Import
 

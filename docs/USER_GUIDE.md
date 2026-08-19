@@ -37,6 +37,17 @@
 
 ---
 
+## Looking for how to do something, not what a page does?
+
+This guide is organised by **screen**. If you arrived with a job rather than a question about a page
+— "we swapped a machine this morning", "somebody moved desk", "a new laptop arrived" — read
+**[PROCESSES.md](PROCESSES.md)** instead. It walks each real process end to end, says which screen
+serves each step and which role can do it, and is honest about the steps the app does not cover yet.
+
+Come back here for the detail of an individual screen.
+
+---
+
 ## What is Factory Map?
 
 Factory Map is an IT asset management application designed for factory and industrial environments. It helps IT teams:
@@ -406,6 +417,31 @@ Click any asset to open the **Asset Details** panel, or navigate directly to `/a
 | **Sync from ITSM** | Pulls the latest data from the ITSM system (only visible for ITSM-managed assets). |
 
 > **QR codes and mobile devices**: The link inside a QR code points to the Factory Map server. If you're on a local network, the URL will use the server's IP address so you can tap it on your phone and reach the app. If the URL shows "localhost", ask your administrator to set `REACT_APP_PUBLIC_BASE_URL` in the server configuration to your server's real hostname.
+
+#### "Where this came from" — the four sources side by side
+
+Near the bottom of the full-page view, **Compare the sources** shows what each source says about this
+one device: the app's own record, ITSM, Nexthink and the physical survey, each with the date it last
+said anything. It loads on demand, because most visits to an asset page are not about reconciling it.
+
+Read the cells carefully, because three states look similar and mean very different things:
+
+| What you see | What it means |
+|---|---|
+| a value | that source states this |
+| *(empty)* | that source knows the field and it is blank |
+| **—** | that source **cannot** know this field. Nexthink has no opinion about who a device is assigned to; a monitor carries no agent, so its whole Nexthink column is dashes |
+| a value with a note under it | shown but **not compared** — it is in a different vocabulary. Nexthink says `desktop` where the app says `workstation`; ITSM's location is the site, never a room |
+
+A row is flagged only where sources that can be compared actually disagree. The **person** row is the
+one most worth looking at, and the three cells there are three different claims: ITSM's *assigned*
+owner, the survey's *observed* occupant, and Nexthink's *heaviest logon*. They differ routinely
+without anything being wrong — somebody moved desk, or a colleague signed in once to fix something.
+The panel says which is which and decides nothing.
+
+Below the table it also shows who has been signing in (from Nexthink, with the account type, so a
+shared or admin account is visible as such) and any value the survey brought that the import declined
+to apply because the record already held another.
 
 The panel shows all information organized in sections:
 
@@ -808,7 +844,24 @@ For each row you decide individually:
 |--------|--------------|
 | **Accept** | The ITSM value is written into Factory Map (ITSM itself is untouched) |
 | **Ignore** | The difference is hidden and remembered on the server; if ITSM later reports a *different* value, it resurfaces automatically. Un-ignore any time from the chip list |
-| *(neither)* | Fix the value by hand in ITSM (use the **Open in ITSM** link), then **Re-check** |
+| **ITSM is wrong** | Records that Alemba is the one that needs changing, and raises a task for it |
+| *(none of them)* | Fix the value by hand in ITSM (use the **Open in ITSM** link), then **Re-check** |
+
+**About "ITSM is wrong".** This is the case that comes up most after a physical survey — the person
+standing in the room is right and the record is stale — and until it existed there was nowhere to put
+it, so it lived in somebody's head.
+
+Three things about it that are deliberate:
+
+- **The row stays in the differences table.** Unlike an ignore, the difference has not gone away; it
+  has been escalated. It stops being outstanding when Alemba actually changes, not when you click.
+- **It replaces an ignore on the same field.** They are opposite decisions about one difference.
+- **It closes itself.** The `correct-in-itsm` task it raises disappears once a later ITSM export
+  reports the value the app was marked right about — so the correction is proven by Alemba changing,
+  not by anyone saying so here. If the asset is not in the export at all, the task stays open,
+  because nothing can prove it.
+
+The app still never writes to ITSM. What this produces is work for a person.
 
 ### Missing in ITSM
 If the linked record no longer exists in ITSM, the asset is flagged and offers
@@ -923,6 +976,23 @@ into "register in ITSM" tasks.
 The **Tasks** page answers one question: what is left before the physical
 inventory, this app and ITSM all agree?
 
+### Where the data comes from — read this bar first
+
+Above the list, a bar shows each source: how many rows it holds, when it was imported, and how much of
+the estate it actually speaks for. It is there because the list below is only as trustworthy as the
+exports it was derived from, and "7 devices quiet for 30+ days" means one thing against yesterday's
+export and something else against one taken three weeks ago.
+
+- **Coverage matters as much as the date.** A fresh export covering a third of the estate is not fresh
+  data about the estate. The Nexthink line says how many assets have reported and why the rest have
+  not — most of the gap is monitors and phones that never had an agent, which is not a gap at all.
+- **"Import date unknown"** means the table holds data but no import was ever recorded. That is an
+  honest unknown, not zero and not today.
+- **Only one line is ever coloured**, and only when the source itself states something worth acting
+  on — nothing loaded, or devices that dropped out since the previous import.
+
+### The list
+
 The list is **derived**, not kept by hand. **Re-derive from the data** recomputes
 it from the three sources — the ITSM export, the survey as it landed in the app,
 and the app's own records — so run it after every new export or survey import. It
@@ -943,6 +1013,35 @@ trust it. What you can do with one is deliberately narrow:
 One kind — **Put a label on it** — is marked *needs a person*: nothing in any
 export records that a sticker was applied, so your word is the only evidence there
 will ever be.
+
+### What kinds you will see
+
+Each kind names an action rather than a symptom — "register it in ITSM", not "missing from ITSM".
+
+| Kind | What it is asking for | Raised from |
+|---|---|---|
+| Link to ITSM | a confident match was found; connect the asset to the record | ITSM + the matcher |
+| Decide which record | several candidates, or a contradiction — a person picks | ITSM + the matcher |
+| Register in ITSM | nothing in Alemba carries this device's key. Also raised for a machine Nexthink sees that no register knows at all | ITSM, Nexthink |
+| Read a serial off the device | nothing to match on, so it cannot be told from hardware ITSM already holds | the matcher |
+| Put a label on it | matched by serial rather than read off a sticker | the matcher |
+| Check the HWA | the asset carries a number the export does not contain | ITSM |
+| Confirm it exists or retire it | ITSM lists hardware the survey never found | ITSM |
+| Resolve field differences | the asset and its ITSM record disagree | reconcile |
+| **Add it to the map** | ITSM has it and Nexthink saw it running, but the map does not hold it | Nexthink |
+| **Confirm who uses it** | the logon record and the map name different people | Nexthink |
+| **Decide the replaced machine's fate** | a machine recorded as replaced is still reporting | Nexthink |
+| **The survey saw it differently** | the survey brought a value the import declined to overwrite | the survey |
+| **Correct it in Alemba** | you marked ITSM as the wrong one on the reconcile page | your decision |
+
+The bolded ones are newer. Two are worth knowing the reasoning behind:
+
+- **Add it to the map** replaces *Confirm it exists or retire it* for any device Nexthink has seen.
+  That task sends somebody to find out whether hardware ITSM lists still exists; if the machine
+  reported this week the answer is already yes, and walking the floor to confirm it is waste.
+- **Decide the replaced machine's fate** states the observation and the choice but does not pick.
+  Whether the right outcome is a reinstall or a shelf depends on Windows 11 eligibility, which comes
+  from a separate Nexthink export — see [PROCESSES.md](PROCESSES.md).
 
 When the list is empty the page says **Nothing outstanding**, which is the whole
 point of the exercise: the inventory, the app and ITSM agree as far as the data can

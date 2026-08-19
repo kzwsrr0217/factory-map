@@ -273,5 +273,6 @@ E2E tests run against the live app (`http://localhost:5174` frontend + `http://l
 | [docs/DATA_MODEL_MIGRATION.md](docs/DATA_MODEL_MIGRATION.md) | Phase-by-phase history of how the data model evolved, with verification notes |
 | [docs/ADMIN_GUIDE.md](docs/ADMIN_GUIDE.md) | Installation, all env vars, user management, backup, production |
 | [docs/DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md) | API reference, code conventions, adding features |
+| [docs/PROCESSES.md](docs/PROCESSES.md) | **How the work is actually done** — each real process end to end (new device, swap, move, survey round, reconcile round), who can do what, and an honest register of what the app does not cover yet |
 | [docs/USER_GUIDE.md](docs/USER_GUIDE.md) | End-user walkthrough of every page and feature |
 | [docs/CONNECTIONS_WORKFLOW.md](docs/CONNECTIONS_WORKFLOW.md) | Connections worked backwards from the service-desk use cases: socket chain vs asset-to-asset links, and the phased surveying process around the switch replacement |

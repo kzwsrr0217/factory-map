@@ -210,9 +210,24 @@ After first login, navigate to **Settings → Change Password** and set a strong
 
 | Role | Permissions |
 |------|-------------|
-| `viewer` | Read-only: browse all buildings, floors, assets, reports, audit log |
-| `operator` | viewer + create/edit assets, manage connections, upload floor plans, add/edit hierarchy (buildings, floors, work areas, sections) |
-| `admin` | operator + user management, delete buildings/floors, system settings |
+| `viewer` | Read-only, but read **everything** — see the note below |
+| `operator` | viewer + every write: create/edit/delete assets, record swaps and moves, manage connections, upload floor plans, edit the hierarchy, import ITSM and survey exports, resolve reconcile differences, generate and close tasks |
+| `admin` | operator + user management and alert configuration |
+
+Verified against the routes on 2026-08-19. Two properties of this model are worth deciding on
+purpose rather than inheriting, because neither is enforced by anything today:
+
+**No read is restricted.** Not one `GET` route carries a role check, so `viewer` can read the audit
+log, every person-to-device assignment, and the Nexthink logon records. For a small internal team
+that is proportionate and probably what you want. But person assignments and logon records are
+personal data under GDPR/revDSG, so "anyone with an account can read who uses which machine" should
+be a decision somebody made, not a default. If it needs narrowing, the place is a guard on the audit
+and reconcile read routes — the app has the middleware, it simply is not applied to reads.
+
+**`operator` is one wide role.** Deleting an asset, bulk-editing hundreds and replacing an entire
+ITSM snapshot are the same permission. There is no separate "may import" or "may delete". Fine for a
+handful of people who all do the same job; not fine the day the app is opened to a wider group, and
+splitting it later means touching every write route.
 
 ### Creating a user (via UI)
 1. Log in as admin
@@ -449,6 +464,26 @@ docker exec factory-map-backend npx ts-node src/scripts/seed-mssql.ts
 ---
 
 ## Security Considerations
+
+### Credentials that must be rotated before production
+
+These are known to have been shared where they should not have been — in a chat, in a terminal
+transcript, or committed to this repository. Each one is exposed until it is changed, regardless of
+whether anything appears to have happened:
+
+| What | Why | Also do |
+|---|---|---|
+| The MSSQL **SA password** | typed into a terminal transcript | rotate in `.env` (dev) **and** `.env.prod` (VM). If the `mssql_data` volume predates the change, the volume still holds the old one — the container will reject the new password until it is recreated or the login is altered inside SQL Server |
+| The app's **`admin` account password** | present in this repository's setup documentation | change it in the app, then remove or redact it from the docs |
+| Individual **device and shared-account passwords** | shared in team chat and pasted onward | a shared generic account (`MMHGEN*`) is the more urgent of the two: several people and machines use one credential, so nobody can tell from a log who acted |
+
+Report each exposure to **is-reports@maxongroup.com**. That is the process, and it applies even when
+the exposure was internal and accidental — the report is what makes the rotation traceable.
+
+**A standing rule worth repeating here:** never paste a password into a chat, a ticket, an AI tool, or
+a document. If a credential needs handing over, use the password manager. A password in a chat is
+exposed to everyone who can read the chat and everyone the chat is later forwarded to, and there is
+no way to un-share it.
 
 ### Production checklist
 - [ ] Set a strong `JWT_SECRET` (at least 32 random characters): `openssl rand -hex 32`

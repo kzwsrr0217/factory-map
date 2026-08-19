@@ -2,7 +2,13 @@
 
 > **Read this first if you're a new session with no prior context.** It's a
 > point-in-time snapshot of where the project stands, why, and what's next.
-> Last updated: 2026-08-05 (Phase 16 — the real survey exports, read and reconciled; import previewed on dev).
+> Last updated: 2026-08-19 — Nexthink is in as the third source; the process model exists; nothing
+> has been deployed yet.
+>
+> **If you want to know how work is actually done rather than what changed, read
+> [PROCESSES.md](PROCESSES.md).** It models each real process end to end and carries the honest gap
+> register. Section 3 below is the change history; sections 1–2 are still accurate; anything
+> describing "phases 7–8" is historical.
 
 ---
 
@@ -36,10 +42,51 @@ maintenance/alerting, reporting, network infrastructure, two-way ITSM
 reconcile, asset lifecycle/replace); his strengths are the 3D view, camera
 fly-to, grid-snap/rotation, and OSM backdrop, which factorymap doesn't have.
 
-## 3. Current state (all on `main`, pushed to GitHub)
+## 3. Current state
 
-Repo: `github.com/kzwsrr0217/factory-map`. Everything below is merged to
-`main` and pushed. Recent history (newest first):
+### Where it stands on 2026-08-19
+
+**Everything is on `main` locally and NOTHING is pushed or deployed.** `main` is about sixteen
+commits ahead of `origin/main`, and the VM still runs the previous version. That is deliberate: the
+instruction was to keep it on dev until it looks stable.
+
+**Three sources, none authoritative, and they are now symmetric.** ITSM, the physical survey and
+Nexthink each have a landing table replaced wholesale on import, each feeds the one task list, and
+each reports how old it is and how much of the estate it covers. The app still never writes to ITSM.
+
+| | Landing table | Decisions recordable | In the UI |
+|---|---|---|---|
+| ITSM (Alemba) | `itsm_hardware_snapshot` | accept · ignore · **ITSM is wrong** | yes |
+| Physical survey | `survey_observation` | the declined disagreements become tasks | import yes, decisions partly |
+| Nexthink | `nexthink_device_snapshot`, `nexthink_login_snapshot` | none by design — it only monitors | **no page at all** |
+
+Also new: `import_runs`, a ledger of every import. It is what makes "which devices dropped out since
+last time" answerable, which is the only real decommission signal this estate produces — Nexthink
+ages inactive devices out rather than marking them stale.
+
+**Five Nexthink reports, all command-line:** `nexthink:swap-check`, `nexthink:unknown`,
+`nexthink:person-mismatch`, `nexthink:quiet`, `nexthink:win11`. The last one answers the question the
+whole exercise started from — for a swapped-out machine, reinstall it or set it aside — and needs a
+third export, from the `Get Windows 11 readiness` remote action rather than the device inventory.
+
+**Two long-standing red tests were fixed and the cause was real.** TypeORM's mssql driver left
+`useUTC` off, so any date the DATABASE generates read back in the Node process's local time. The
+reconcile page therefore reported the comparison as stale permanently, and the audit log's date filter
+returned nothing for "the last hour". `options.useUTC: true` on both data sources. Backend suite is
+44 suites / 602 tests green; frontend 22 / 162.
+
+**Before production**, in this order: the lockfile fix (it blocks the image build, see
+[DEPLOYMENT.md](DEPLOYMENT.md) §3), baseline the migration history, `NODE_ENV=production`, rotate the
+exposed credentials ([ADMIN_GUIDE.md](ADMIN_GUIDE.md)), and decide the two open RBAC questions on
+purpose. The full list with reasoning is in [PROCESSES.md](PROCESSES.md).
+
+**Parked, not forgotten:** the Nexthink API credential. The fetcher is written and unrunnable — the
+tenant has no Administration menu for us, and as of 2026-08-19 it cannot even be requested yet. Do
+not plan work that depends on it.
+
+### Change history (older, newest first)
+
+Repo: `github.com/kzwsrr0217/factory-map`. Recent history:
 
 - `eb51212` Merge: **full IFS/CMDB ingest parity + import script** (phase 8)
 - `4bf5a28` Merge: **network-infra lifecycle + live-audit fixes + docs** (phase 7)
@@ -467,5 +514,6 @@ run `npm run import:master -- <dir>` (it can't see host paths directly — the
 | [DATA_MODEL_MIGRATION.md](DATA_MODEL_MIGRATION.md) | Phase-by-phase (1-8) history with per-phase verification logs |
 | [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) | API reference, DB schema, ITSM + master-data import, conventions |
 | [DEPLOYMENT.md](DEPLOYMENT.md) | Production VM deployment: compose, nginx, firewall, backup/restore, ITSM import on the VM |
+| [PROCESSES.md](PROCESSES.md) | **The process model**: each real process end to end, who can do what, and the gap register. Start here for "how do I..." |
 | [USER_GUIDE.md](USER_GUIDE.md) | End-user walkthrough of every page |
 | [ADMIN_GUIDE.md](ADMIN_GUIDE.md) | Install, env vars, user management, backup |
