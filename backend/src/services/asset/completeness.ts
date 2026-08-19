@@ -3,9 +3,14 @@
  *
  * ── The one decision this file exists to get right ──────────────────────────────
  * **The denominator differs per asset.** A monitor carries no Nexthink agent, an IPC on an OS older
- * than Windows 10 cannot either, a rack-mounted server does not belong on a floor plan, and a printer
- * has no personal owner. So every check is either APPLICABLE to an asset or not, and the score is over
- * the applicable ones only.
+ * than Windows 10 cannot either, a rack-mounted server sits in the server room rather than on a floor
+ * plan, and a switch is the far end of a cable run rather than something plugged into a wall socket. So
+ * every check is either APPLICABLE to an asset or not, and the score is over the applicable ones only.
+ *
+ * Every one of those lists is a statement about how this estate actually works, so none of them was
+ * decided here: they were put to the person who runs it and corrected on 2026-08-19. Two answers went
+ * against the first guess — servers carry no Nexthink agent at all, and the person field is legitimate
+ * on peripherals too, merely incomplete. Guessing either way would have been a policy invented in code.
  *
  * Get that wrong and the feature is worse than nothing. A flat "seven checks, you have four" would
  * mark all 405 monitors permanently incomplete for lacking data they can never have; within a fortnight
@@ -32,6 +37,7 @@ import { AssetConnection } from '../../entities/AssetConnection.entity';
 import { ItsmHardwareSnapshot } from '../../entities/ItsmHardwareSnapshot.entity';
 import { NexthinkDeviceSnapshot } from '../../entities/NexthinkDeviceSnapshot.entity';
 import { SurveyObservation } from '../../entities/SurveyObservation.entity';
+import { NEXTHINK_VISIBLE_ASSET_TYPES } from '../nexthink/snapshotImport';
 
 export type CheckKey =
   | 'itsm-record'
@@ -72,20 +78,49 @@ export interface AssetCompleteness {
 }
 
 /**
- * Asset types that can carry a Nexthink agent. Same list the import uses, deliberately — two
- * definitions of "could Nexthink see this" would drift.
+ * Types Nexthink could report on. Imported rather than restated: this file used to hold its own copy
+ * while claiming in a comment to share the import's, which is precisely how the two drift. Confirming
+ * that servers carry no agent then meant editing two lists, and forgetting one would leave the
+ * completeness panel and the coverage report disagreeing about the same 47 machines.
  */
-const AGENT_TYPES = new Set(['workstation', 'laptop', 'server', 'ipc']);
+const NEXTHINK_TYPES = new Set<string>(NEXTHINK_VISIBLE_ASSET_TYPES);
+
+/**
+ * Types that are computers, which decides WHICH FIELDS a record needs — a different question from
+ * "could Nexthink see it", and one that happened to have the same answer until it did not. Servers are
+ * still computers with a serial, a maker and a responsible person; they simply carry no agent.
+ */
+const COMPUTER_TYPES = new Set(['workstation', 'laptop', 'server', 'ipc']);
 
 /** Types that live on a floor plan. A rack-mounted server is located by its rack, not by a dot. */
 const PLAN_TYPES = new Set([
   'workstation', 'laptop', 'ipc', 'monitor', 'printer', 'scanner', 'dock', 'phone', 'other',
 ]);
 
-/** Types that plug into a wall socket, so a socket is part of recording them. */
-const SOCKET_TYPES = new Set(['workstation', 'ipc', 'printer', 'server', 'switch']);
+/**
+ * Types that plug into a wall socket, so the socket — and through it the patch panel and switch port —
+ * is part of recording them.
+ *
+ * Confirmed 2026-08-19, and two types came OFF the list. A switch is in a rack, and the wall socket is
+ * the far end of the run that reaches that rack through the patch panel: asking a switch for its own
+ * wall port inverts the cable. A server is in a rack in the server room, the same way. Both were on
+ * this list and produced 59 questions that have no answer.
+ *
+ * A laptop is absent because its dock holds the socket, and the dock is on the list in its own right.
+ *
+ * NOT YET RIGHT: a docking monitor does plug into the wall, and an ordinary monitor does not. Nothing
+ * in the data distinguishes them — `model` is empty on 1334 of 1344 assets — so all 404 monitors are
+ * treated as not applicable rather than 404 unanswerable questions being raised. See G13.
+ */
+const SOCKET_TYPES = new Set(['workstation', 'ipc', 'dock', 'printer']);
 
-/** Types that belong to a machine, so a parent link is part of recording them. */
+/**
+ * Types that belong to a machine, so a parent link is part of recording them.
+ *
+ * Scanners and phones are deliberately absent: confirmed 2026-08-19 that they belong to a PERSON, not
+ * to a machine, so the person field is what records them and a missing parent is not a gap. Barcode
+ * scanners are intended to be tied to machines later; that is G14, not a silent red on 47 records now.
+ */
 const CHILD_TYPES = new Set(['monitor', 'dock']);
 
 /**
@@ -94,6 +129,12 @@ const CHILD_TYPES = new Set(['monitor', 'dock']);
  * Not "every column": most of the forty are optional by design, and demanding them all would make the
  * check unreachable. These are the ones without which the asset cannot be identified or found.
  *
+ * `person_full_name` is required of computers AND peripherals. Confirmed 2026-08-19: the field is
+ * legitimate everywhere and is simply incomplete, in Alemba as well as here, and it will be filled by
+ * hand. It carries extra weight for a scanner or a phone, which belong to a person rather than to a
+ * machine — for those it is the only thing that records where the device went. Network kit is the one
+ * exception: a switch in a rack has no user, so the `network` family below does not ask.
+ *
  * `model` is deliberately NOT here yet. It is empty on 1334 of 1344 live assets, so requiring it would
  * fail everything — and the value exists in the landing tables (Nexthink reports it, the ITSM catalogue
  * name carries it), so the fix is a backfill, not a thousand manual edits. Same for `os_type`, which is
@@ -101,14 +142,14 @@ const CHILD_TYPES = new Set(['monitor', 'dock']);
  * nothing can pass is a check everyone learns to skip.
  */
 const CORE_FIELDS: Record<string, Array<keyof Asset>> = {
-  agent: ['asset_type', 'serial_number', 'manufacturer', 'person_full_name'],
-  peripheral: ['asset_type', 'serial_number', 'manufacturer'],
+  computer: ['asset_type', 'serial_number', 'manufacturer', 'person_full_name'],
+  peripheral: ['asset_type', 'serial_number', 'manufacturer', 'person_full_name'],
   network: ['asset_type', 'manufacturer'],
 };
 
 function familyOf(assetType: string | null): keyof typeof CORE_FIELDS {
   if (!assetType) return 'peripheral';
-  if (AGENT_TYPES.has(assetType)) return 'agent';
+  if (COMPUTER_TYPES.has(assetType)) return 'computer';
   if (['switch', 'router', 'network', 'patch-panel'].includes(assetType)) return 'network';
   return 'peripheral';
 }
@@ -261,10 +302,10 @@ export function assessAsset(asset: Asset, inputs: CompletenessInputs): AssetComp
    *    and phone — nor to a machine whose recorded OS predates Windows 10. Those are the two exclusions
    *    that stop this check from being permanently red on half the estate.
    */
-  const couldReport = Boolean(type && AGENT_TYPES.has(type)) && !preWindows10(asset.os_version ?? asset.os_type);
+  const couldReport = Boolean(type && NEXTHINK_TYPES.has(type)) && !preWindows10(asset.os_version ?? asset.os_type);
   add('nexthink-seen', 'Reports to Nexthink', couldReport, couldReport && seenByNexthink,
     !type ? 'No asset type recorded, so it cannot be judged — fill the type first.'
-      : !AGENT_TYPES.has(type) ? `A ${type} carries no Nexthink agent.`
+      : !NEXTHINK_TYPES.has(type) ? `A ${type} carries no Nexthink agent.`
         : preWindows10(asset.os_version ?? asset.os_type) ? 'Its OS is older than Windows 10, which cannot run the agent.'
           : seenByNexthink ? null
             : 'Not in the Nexthink export: switched off long enough to be aged out, or the agent is not installed.');

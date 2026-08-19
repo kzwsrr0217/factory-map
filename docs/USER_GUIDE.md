@@ -488,18 +488,18 @@ The checks are:
 |---|---|---|
 | **Registered in ITSM** | it carries an HWA the loaded export contains | nothing — every device, monitors included, belongs in Alemba |
 | **Agrees with ITSM** | a compare made *since the current export was loaded* found no disagreement | anything not in the export |
-| **Reports to Nexthink** | the last snapshot contains it | monitors, docks, printers, phones, switches; anything on an OS older than Windows 10 |
+| **Reports to Nexthink** | the last snapshot contains it | monitors, docks, printers, phones, scanners, switches **and servers** — none of them carry the agent; also anything on an OS older than Windows 10 |
 | **Seen in a physical survey** | a survey row resolved to it | nothing — somebody looking at it is the only source that confirms it exists |
-| **Key fields filled** | type, serial and manufacturer are present, plus the person for a personal machine | — (the person is not asked of shared kit) |
-| **Placed on the floor plan** | it is drawn on a plan | servers and network kit |
-| **Wired to a known socket** | a wall port is recorded, which is what makes the patch panel and switch port knowable | monitors, docks and anything that does not plug into the wall itself |
-| **Attached to its machine** | a parent is recorded | anything that is not a peripheral |
+| **Key fields filled** | type, serial, manufacturer **and the person** are present | the person is asked of everything except network kit — a switch in a rack has no user |
+| **Placed on the floor plan** | it is drawn on a plan | servers (they are in a rack in the server room) and network kit |
+| **Wired to a known socket** | a wall port is recorded, which is what makes the patch panel and switch port knowable | PCs, IPCs, docks and printers are asked. **Switches and servers are not**: they are in a rack, and the wall socket is the far end of the run that reaches it through the patch panel. A laptop is not asked either — its dock holds the socket |
+| **Attached to its machine** | a parent is recorded | anything that is not a monitor or a dock. A **scanner or a phone belongs to a person**, not to a machine, so its person field is what records it |
 
 Two things it will tell you that are easy to misread:
 
 - **"The last compare ran before the current export was loaded, so its verdict says nothing."** Not a
   disagreement — a verdict about data that has since been replaced. Run **Compare all** and it clears.
-  This is currently true of nearly every asset.
+  It will come back the next time an export is loaded without a re-compare, which is what it is for.
 - **"Nothing in the estate satisfies this yet — this is a stage nobody has started."** Press *Compare
   with the rest of the estate* and the panel adds the estate-wide figure next to each unmet check. If
   the whole estate is at zero, the missing item is a project that has not begun, not a mistake on the
@@ -1045,7 +1045,8 @@ export raises get read.
 Two things to hold on to before reading any number here:
 
 - **Nothing in this app writes to Nexthink.** It is evidence, never a system of record.
-- **Nexthink only sees machines carrying its agent.** No monitor, dock or phone ever does. So every
+- **Nexthink only sees machines carrying its agent.** No monitor, dock or phone ever does, and neither
+  does any **server** here — confirmed 2026-08-19 that the agent is not deployed to them. So every
   "absent from Nexthink" number is a limit of the source far more often than a gap in the estate, and
   the page says so next to each one.
 

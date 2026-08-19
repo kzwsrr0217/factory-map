@@ -1447,6 +1447,7 @@ wrong at least once and was caught by reading output rather than by a test:
 | `assessAsset` | `services/asset/completeness.ts` | scored every asset against the same eight checks, so all 405 monitors read permanently incomplete for lacking a Nexthink agent they cannot carry. The denominator is per asset, not global |
 | the staleness test in `assessAsset` | same | reported a reconcile verdict recorded BEFORE the loaded export as a live disagreement. 1038 live assets carry one — 1045 of them reading `missing` from a compare that ran while the snapshot table was empty — and the first version printed the self-refuting line "Agrees with ITSM — 0 field(s) still disagree" |
 | `isOutOfService` | same | measured 61 decommissioned devices, putting permanent reds on the summary that no work could ever clear. Matches case-insensitively, because `active` and ITSM's `Deployed` are both in the column |
+| `NEXTHINK_VISIBLE_ASSET_TYPES` | `services/nexthink/snapshotImport.ts` | `completeness.ts` held its own copy of this list while a comment claimed it shared the import's. Confirming that servers carry no agent then meant editing two lists, and missing one would have left the completeness panel and the coverage report disagreeing about the same 47 machines. Now imported, and the type-family question it was conflated with lives separately as `COMPUTER_TYPES` |
 
 ### Tasks it feeds
 

@@ -44,7 +44,7 @@ There are three sources of truth about the estate and **none of them is authorit
 |---|---|---|
 | **ITSM (Alemba)** | what was recorded: the CI, its serial, who it is assigned to | whether the machine is switched on, or where it physically is beyond the site |
 | **The physical survey** | what a person saw standing in the room | anything after the walk-around; it ages from the day it is taken |
-| **Nexthink** | what the machine itself reports: OS, when it last ran, who signs in | anything about a device with no agent — every monitor, dock and phone |
+| **Nexthink** | what the machine itself reports: OS, when it last ran, who signs in | anything about a device with no agent — every monitor, dock and phone, **and every server**: confirmed 2026-08-19 that no agent is deployed to them |
 
 The app is a fourth thing: **the record it owns**, which is the placement on the map and everything
 a person has decided. It is not a copy of any of the three.
@@ -312,7 +312,10 @@ What does not work end to end today. Ordered by how much it costs the person doi
 | G8 | **Reads are unrestricted, including the audit log and person assignments.** | To confirm, not necessarily to change | Deliberate for a small team; it is personal data. |
 | G9 | **`operator` is one wide role.** Delete, bulk-edit and whole-snapshot import are the same permission. | To confirm | Proportionate today. |
 | G10 | **Nothing said which records were incomplete.** **Closed 2026-08-19.** Every asset page answers it, and an estate-wide figure sits next to each unmet check. | Was medium, now none | `services/asset/completeness.ts`, 21 tests. The per-asset denominator is the whole design; see the pitfalls table in DEVELOPER_GUIDE. |
-| G11 | **No reconcile has been run against the loaded export.** 1038 live assets carry a verdict from a compare made *before* it — 1045 of them reading `missing` from a run against an empty snapshot table. Until **Compare all** is run, "Agrees with ITSM" is unsatisfiable estate-wide and the app cannot say where it disagrees with Alemba. | High, and it is one button | Surfaced by G10 rather than found by looking. The completeness check now reports these verdicts as stale rather than as disagreements. |
+| G11 | ~~No reconcile has been run against the loaded export.~~ **Closed 2026-08-19** — **Compare all** was run, and the app can now say where it disagrees with Alemba for the first time: **829 agree, 220 disagree, 22 carry an HWA the export does not contain.** | Was high, now none | Surfaced by G10 rather than found by looking. The stale-verdict rule stays: it is what will catch the next export loaded without a re-compare. |
+| G13 | **A docking monitor plugs into the wall and an ordinary one does not, and nothing distinguishes them.** `model` is empty on 1334 of 1344 assets, so all 404 monitors are treated as not needing a socket rather than 404 unanswerable questions being raised. | Low until the sockets are surveyed | Needs either a model backfill or a "docking" marker on the asset. |
+| G14 | **A barcode scanner belongs to a person today, and should belong to a machine.** Scanners and phones are recorded against a person, which is correct for phones; the 47 scanners are intended to be tied to machines. | Deferred by decision, 2026-08-19 | Adding `scanner` to the parent-link rule is a one-line change once the links exist to record. |
+| G15 | **A machine whose workplace return has not happened still reads `active`.** It is no longer in use, so ITSM, Nexthink and the survey will each say something different about it, and no status filter can separate it from a machine genuinely in service. | Medium — it quietly widens every count in this document | Deferred by decision, 2026-08-19: the status vocabulary is not the place to fix it. Related to G12. |
 | G12 | **278 assets have no `status`, and two vocabularies share the column** — 946 read `active` and 22 read ITSM's `Deployed`. | Low, but it silently widens every status filter | `isOutOfService` matches case-insensitively so it does not trip over the mixture, but nothing normalises it. |
 
 ---

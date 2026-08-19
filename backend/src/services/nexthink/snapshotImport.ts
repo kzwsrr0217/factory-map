@@ -26,8 +26,12 @@ import { recordImportRun, keyDeltaAgainstLastRun } from '../importRun';
  * nothing else. Without this list, "assets Nexthink has never seen" would include every
  * monitor, phone, dock and switch in the map and read as a catastrophe instead of a fact about
  * how the tool works. Named here rather than inlined into the report so it is arguable.
+ *
+ * `server` was in this list and is not: confirmed 2026-08-19 that no agent is deployed to the
+ * servers in this tenant. It cost the coverage report 47 assets counted as missing from an export
+ * that was never going to contain them — a made-up gap, and the kind this list exists to prevent.
  */
-export const NEXTHINK_VISIBLE_ASSET_TYPES = ['workstation', 'laptop', 'server', 'ipc'] as const;
+export const NEXTHINK_VISIBLE_ASSET_TYPES = ['workstation', 'laptop', 'ipc'] as const;
 
 /**
  * SQL Server allows at most 2100 parameters per statement, and TypeORM does not split a

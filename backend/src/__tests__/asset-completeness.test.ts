@@ -97,6 +97,36 @@ describe('the denominator — what each asset can even be measured on', () => {
     expect(check(asset({ asset_type: 'monitor' }), 'network-socket').applicable).toBe(false);
   });
 
+  it('does not ask a server for a Nexthink agent', () => {
+    // Confirmed 2026-08-19: no agent is deployed to the servers in this tenant. Asking would have
+    // been 47 machines reported as missing from an export that could never contain them.
+    expect(check(asset({ asset_type: 'server' }), 'nexthink-seen').applicable).toBe(false);
+  });
+
+  it('does not ask a switch or a server for its own wall socket', () => {
+    /**
+     * The cable runs the other way. Both sit in a rack, and the wall socket is the FAR END of the run
+     * that reaches that rack through the patch panel — so asking either for its own wall port inverts
+     * the cable. They were on the list and produced 59 questions with no answer.
+     */
+    expect(check(asset({ asset_type: 'switch' }), 'network-socket').applicable).toBe(false);
+    expect(check(asset({ asset_type: 'server' }), 'network-socket').applicable).toBe(false);
+  });
+
+  it('asks a dock for its wall socket, since it is what a laptop plugs through', () => {
+    expect(check(asset({ asset_type: 'dock' }), 'network-socket').applicable).toBe(true);
+    expect(check(asset({ asset_type: 'laptop' }), 'network-socket').applicable).toBe(false);
+  });
+
+  it('asks a scanner and a phone for their person, not for a machine', () => {
+    // They belong to a PERSON, not to a machine, so the person field is what records where the device
+    // went and a missing parent is not a gap. Barcode scanners get tied to machines later (G14).
+    for (const t of ['scanner', 'phone']) {
+      expect(check(asset({ asset_type: t }), 'attached-to-a-machine').applicable).toBe(false);
+      expect(check(asset({ asset_type: t, person_full_name: null }), 'core-fields').satisfied).toBe(false);
+    }
+  });
+
   it('asks only peripherals which machine they belong to', () => {
     expect(check(asset({ asset_type: 'monitor' }), 'attached-to-a-machine').applicable).toBe(true);
     expect(check(asset({ asset_type: 'workstation' }), 'attached-to-a-machine').applicable).toBe(false);
@@ -225,9 +255,16 @@ describe('the checks that read a source', () => {
     expect(c.detail).toMatch(/manufacturer/);
   });
 
-  it('does not demand a person for a printer', () => {
-    // Shared kit has no personal owner, so requiring one would fail every printer forever.
-    expect(check(asset({ asset_type: 'printer', person_full_name: null }), 'core-fields').satisfied).toBe(true);
+  it('demands a person of peripherals too, but not of network kit', () => {
+    /**
+     * This test asserted the opposite first, on my reasoning that shared kit has no personal owner.
+     * Corrected 2026-08-19 by the person who runs the estate: the field is legitimate everywhere and
+     * simply incomplete, in Alemba as well as here, and it will be filled by hand. A switch in a rack
+     * is the one genuine exception — it has no user at all.
+     */
+    expect(check(asset({ asset_type: 'printer', person_full_name: null }), 'core-fields').satisfied).toBe(false);
+    expect(check(asset({ asset_type: 'monitor', person_full_name: null }), 'core-fields').satisfied).toBe(false);
+    expect(check(asset({ asset_type: 'switch', person_full_name: null }), 'core-fields').satisfied).toBe(true);
   });
 });
 
